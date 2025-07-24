@@ -64,6 +64,17 @@ Piccolo OS uses a layered design to keep the system secure and organized.
 -   **Hardened Foundation:** By building on Flatcar Linux, we inherit its proven security and rock-solid update system.
 -   **Future: Federated & Resilient:** We're building a system where your device can work with others to become even more reliable. It will intelligently and securely spread encrypted pieces of your data across the network, making it safe even if some devices go offline.
 
+## Freedom of Choice: The Two Paths of Piccolo
+
+Piccolo OS is, and always will be, free and open-source software (AGPL-3.0). We believe in giving you complete control, and that includes how you use the OS. You have two paths:
+
+* **The Self-Hosted Path (Free):** For the ultimate purist. You can compile the OS from source, run your own instance of the [Nexus Proxy](https://github.com/AtDexters-Lab/nexus-proxy-server) on a VPS, and manage your own storage and backups. This path is completely free and gives you absolute, sovereign control over every single component.
+
+* **The Piccolo Network Path (Subscription):** For convenience and powerful out-of-the-box features. A nominal annual subscription will give you access to our managed network, which includes:
+    * **Automated Global Access:** Your `https://*.piccolospace.com` address works instantly, powered by our globally distributed Nexus Proxy fleet.
+    * **Automated Federated Storage:** (Coming Soon) Your data gains cloud-grade resilience by being intelligently and securely distributed across the network.
+    * **Hassle-free Updates & Services.**
+
 ## Getting Started
 
 Ready to reclaim your digital life?
