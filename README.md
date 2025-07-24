@@ -3,7 +3,7 @@
 <p align="center">
   <strong>Your personal cloud. Without the cloud.</strong>
   <br />
-  An open-source OS that automates storage and secure global access, so you can focus on what matters: running your own containers.
+  A privacy-first OS with cloud-grade storage and secure global access, so you can focus on what matters - running your own containers.
 </p>
 
 > **Please Note:** This is the very beginning of our journey. This repository and the Piccolo OS are currently under heavy development. This README lays out our vision and the foundation we are building. We invite you to watch our progress, join the conversation, and get ready to contribute.
