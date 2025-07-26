@@ -1,0 +1,404 @@
+// =============================================================================
+//
+// Piccolo OS - `piccolod` Complete Architectural Skeleton v1.0
+//
+// This file represents the complete, consolidated architectural blueprint
+// for the `piccolod` daemon. It includes all defined packages, components,
+// and their public APIs as placeholders. This serves as a checkpoint for
+// future development.
+//
+// Project Structure Representation:
+//
+// 📂 piccolod/
+// ├── 📂 cmd/
+// │   └── 📂 piccolod/
+// │       └── 📜 main.go
+// ├── 📂 internal/
+// │   ├── 📂 api/
+// │   │   └── 📜 types.go
+// │   ├── 📂 server/
+// │   │   ├── 📜 handlers.go
+// │   │   └── 📜 server.go
+// │   ├── 📂 container/
+// │   │   └── 📜 manager.go
+// │   ├── 📂 storage/
+// │   │   └── 📜 manager.go
+// │   ├── 📂 trust/
+// │   │   └── 📜 agent.go
+// │   ├── 📂 installer/
+// │   │   └── 📜 installer.go
+// │   ├── 📂 update/
+// │   │   └── 📜 manager.go
+// │   ├── 📂 network/
+// │   │   └── 📜 manager.go
+// │   ├── 📂 backup/
+// │   │   └── 📜 manager.go
+// │   └── 📂 federation/
+// │       └── 📜 manager.go
+// └── 📜 go.mod
+//
+// =============================================================================
+
+// FILE: cmd/piccolod/main.go
+// ==========================
+package main
+
+import (
+	"log"
+	"piccolod/internal/server" // Fictional import path for structure
+)
+
+func main() {
+	// The main function is the entry point. Its only job is to
+	// initialize and start the server.
+	srv, err := server.New()
+	if err != nil {
+		log.Fatalf("FATAL: Failed to initialize server: %v", err)
+	}
+
+	if err := srv.Start(); err != nil {
+		log.Fatalf("FATAL: Server failed to start: %v", err)
+	}
+}
+
+// =============================================================================
+// FILE: internal/api/types.go
+// =============================================================================
+package api
+
+// Container represents the data structure for a container in our public API.
+type Container struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Image string `json:"image"`
+	State string `json:"state"`
+}
+
+// CreateContainerRequest defines the JSON payload for creating a new container.
+type CreateContainerRequest struct {
+	Name      string    `json:"name"`
+	Image     string    `json:"image"`
+	Resources Resources `json:"resources,omitempty"`
+}
+
+// Resources defines CPU, RAM, and other resource quotas for a container.
+type Resources struct {
+	CPU    float64 `json:"cpu_cores,omitempty"` // e.g., 0.5 for half a core
+	Memory int64   `json:"memory_mb,omitempty"` // Memory in Megabytes
+}
+
+// DiskInfo provides detailed, human-readable information about a physical disk.
+type DiskInfo struct {
+	Path      string `json:"path"`      // e.g., /dev/sda
+	Model     string `json:"model"`     // e.g., "Samsung SSD 970 EVO"
+	SizeBytes int64  `json:"size_bytes"`
+	IsSSD     bool   `json:"is_ssd"`
+}
+
+// StoragePoolInfo represents the status of the main storage pool.
+type StoragePoolInfo struct {
+	TotalBytes     int64    `json:"total_bytes"`
+	UsedBytes      int64    `json:"used_bytes"`
+	FreeBytes      int64    `json:"free_bytes"`
+	ComponentDisks []string `json:"component_disks"`
+}
+
+// BackupTarget defines a destination for a backup.
+type BackupTarget struct {
+	Type string `json:"type"`         // e.g., "local_drive", "google_drive", "piccolo_central"
+	Path string `json:"path,omitempty"` // For local_drive, e.g., "/media/my-usb"
+}
+
+// =============================================================================
+// FILE: internal/server/server.go
+// =============================================================================
+package server
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	// Fictional import paths for structure
+	"piccolod/internal/backup"
+	"piccolod/internal/container"
+	"piccolod/internal/federation"
+	"piccolod/internal/installer"
+	"piccolod/internal/network"
+	"piccolod/internal/storage"
+	"piccolod/internal/trust"
+	"piccolod/internal/update"
+)
+
+// Server holds all the core components (dependencies) for our application.
+type Server struct {
+	containerManager  *container.Manager
+	storageManager    *storage.Manager
+	trustAgent        *trust.Agent
+	installer         *installer.Installer
+	updateManager     *update.Manager
+	networkManager    *network.Manager
+	backupManager     *backup.Manager
+	federationManager *federation.Manager
+	router            http.Handler
+}
+
+// New creates the main server application and initializes all its components.
+func New() (*Server, error) {
+	cm, err := container.NewManager()
+	if err != nil {
+		return nil, fmt.Errorf("failed to init container manager: %w", err)
+	}
+
+	s := &Server{
+		containerManager:  cm,
+		storageManager:    storage.NewManager(),
+		trustAgent:        trust.NewAgent(),
+		installer:         installer.NewInstaller(),
+		updateManager:     update.NewManager(),
+		networkManager:    network.NewManager(),
+		backupManager:     backup.NewManager(),
+		federationManager: federation.NewManager(),
+	}
+
+	s.setupRoutes()
+	return s, nil
+}
+
+// Start runs the HTTP server.
+func (s *Server) Start() error {
+	const port = "8080"
+	log.Printf("INFO: Starting piccolod server on http://localhost:%s", port)
+	return http.ListenAndServe(":"+port, s.router)
+}
+
+// setupRoutes defines all API endpoints and assigns them to handlers.
+func (s *Server) setupRoutes() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleRoot())
+
+	// API routes for container management
+	mux.HandleFunc("/api/v1/containers", s.handleContainers())
+	mux.HandleFunc("/api/v1/containers/", s.handleSingleContainer())
+	// ... other routes for start, stop, etc.
+
+	// TODO: Add placeholder API routes for other components
+	// mux.HandleFunc("/api/v1/storage/disks", s.handleListDisks())
+	// mux.HandleFunc("/api/v1/system/attest", s.handleAttestation())
+	// mux.HandleFunc("/api/v1/install", s.handleInstallation())
+	// mux.HandleFunc("/api/v1/backups/system-state", s.handleSystemStateBackup())
+
+	s.router = mux
+}
+
+// =============================================================================
+// FILE: internal/server/handlers.go
+// =============================================================================
+package server
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
+
+// This file would contain all the HTTP handler functions for our API.
+// For brevity in this skeleton, we'll keep them minimal.
+
+func (s *Server) handleRoot() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "<h1>Welcome to Piccolo OS</h1><p>The piccolod API is running.</p>")
+	}
+}
+
+func (s *Server) handleContainers() http.HandlerFunc {
+	// This handler would route to different methods based on r.Method (GET, POST)
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.respondJSON(w, http.StatusNotImplemented, map[string]string{"message": "Not implemented yet"})
+	}
+}
+
+func (s *Server) handleSingleContainer() http.HandlerFunc {
+	// This handler would parse the container ID from the URL and route based on method (GET, DELETE)
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.respondJSON(w, http.StatusNotImplemented, map[string]string{"message": "Not implemented yet"})
+	}
+}
+
+// respondJSON is a helper to write JSON responses.
+func (s *Server) respondJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if data != nil {
+		json.NewEncoder(w).Encode(data)
+	}
+}
+
+// =============================================================================
+// FILE: internal/container/manager.go
+// =============================================================================
+package container
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/docker/docker/client"
+	"piccolod/internal/api" // Fictional import path
+)
+
+type Manager struct{ dockerClient *client.Client }
+
+func NewManager() (*Manager, error) {
+	// In a real implementation, we would use a proper Docker client.
+	log.Println("INFO: Container Manager initialized (placeholder)")
+	return &Manager{}, nil
+}
+
+// --- Lifecycle methods ---
+func (m *Manager) Create(ctx context.Context, req api.CreateContainerRequest) (*api.Container, error) {
+	log.Printf("INFO: Placeholder: Creating container '%s' with resources %+v", req.Name, req.Resources)
+	return &api.Container{ID: "new-dummy-id", Name: req.Name, Image: req.Image, State: "created"}, nil
+}
+func (m *Manager) Start(ctx context.Context, id string) error   { return nil }
+func (m *Manager) Stop(ctx context.Context, id string) error    { return nil }
+func (m *Manager) Restart(ctx context.Context, id string) error { return nil }
+func (m *Manager) Delete(ctx context.Context, id string) error  { return nil }
+func (m *Manager) Update(ctx context.Context, id string, newImage string) error { return nil }
+
+// --- Information methods ---
+func (m *Manager) List(ctx context.Context, filter string) ([]api.Container, error) { return nil, nil }
+func (m *Manager) Get(ctx context.Context, id string) (*api.Container, error)      { return nil, nil }
+
+// =============================================================================
+// FILE: internal/storage/manager.go
+// =============================================================================
+package storage
+
+import (
+	"log"
+	"piccolod/internal/api" // Fictional import path
+)
+
+type Manager struct{}
+
+func NewManager() *Manager {
+	log.Println("INFO: Storage Manager initialized (placeholder)")
+	return &Manager{}
+}
+
+func (m *Manager) ListPhysicalDisks() ([]api.DiskInfo, error) { return nil, nil }
+func (m *Manager) GetStoragePoolInfo() (*api.StoragePoolInfo, error) { return nil, nil }
+func (m *Manager) AddDiskToPool(diskPath string) error { return nil }
+func (m *Manager) CheckDiskHealth(diskPath string) (string, error) { return "OK", nil }
+
+// =============================================================================
+// FILE: internal/trust/agent.go
+// =============================================================================
+package trust
+
+import "log"
+
+type Agent struct{}
+
+func NewAgent() *Agent {
+	log.Println("INFO: Trust Agent initialized (placeholder)")
+	return &Agent{}
+}
+
+func (a *Agent) GetDeviceIdentity() (string, error) { return "tpm-dummy-identity", nil }
+func (a *Agent) RegisterDevice(identity string) (string, error) { return "piccolo-id-123", nil }
+func (a *Agent) PerformAttestation() (string, error) { return "dummy-attestation-report", nil }
+
+// =============================================================================
+// FILE: internal/installer/installer.go
+// =============================================================================
+package installer
+
+import (
+	"log"
+	"piccolod/internal/api" // Fictional import path
+)
+
+type Installer struct{}
+
+func NewInstaller() *Installer {
+	log.Println("INFO: Installer service initialized (placeholder)")
+	return &Installer{}
+}
+
+func (i *Installer) GetAvailableDisks() ([]api.DiskInfo, error) { return nil, nil }
+func (i *Installer) StartInstallation(diskPath string) error { return nil }
+
+// =============================================================================
+// FILE: internal/update/manager.go
+// =============================================================================
+package update
+
+import "log"
+
+type Manager struct{}
+
+func NewManager() *Manager {
+	log.Println("INFO: Update Manager initialized (placeholder)")
+	return &Manager{}
+}
+
+func (m *Manager) CheckForOSUpdate() (string, error) { return "v0.0.0", nil }
+func (m *Manager) ApplyOSUpdate() error { return nil }
+
+// =============================================================================
+// FILE: internal/network/manager.go
+// =============================================================================
+package network
+
+import "log"
+
+type Manager struct{}
+
+func NewManager() *Manager {
+	log.Println("INFO: Network Manager initialized (placeholder)")
+	return &Manager{}
+}
+
+func (m *Manager) GetEgressPolicies() (string, error) { return "default: allow", nil }
+func (m.Manager) SetEgressPolicy(containerID, policy string) error { return nil }
+
+// =============================================================================
+// FILE: internal/backup/manager.go
+// =============================================================================
+package backup
+
+import (
+	"log"
+	"piccolod/internal/api" // Fictional import path
+)
+
+type Manager struct{}
+
+func NewManager() *Manager {
+	log.Println("INFO: Backup Manager initialized (placeholder)")
+	return &Manager{}
+}
+
+func (m *Manager) CreateFullBackup(destination string) error { return nil }
+func (m *Manager) RestoreFromFullBackup(source string) error { return nil }
+func (m *Manager) CreateSystemStateBackup(target api.BackupTarget) error { return nil }
+func (m *Manager) RestoreSystemState(source api.BackupTarget) error { return nil }
+
+// =============================================================================
+// FILE: internal/federation/manager.go
+// =============================================================================
+package federation
+
+import "log"
+
+type Manager struct{}
+
+func NewManager() *Manager {
+	log.Println("INFO: Federation Manager initialized (placeholder)")
+	return &Manager{}
+}
+
+func (m *Manager) GetStatus() (string, error) { return "Inactive", nil }
+func (m *Manager) JoinNetwork() error { return nil }
