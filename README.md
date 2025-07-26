@@ -62,7 +62,7 @@ Piccolo OS uses a layered design to keep the system secure and organized.
 -   **One-Click Docker Apps:** Easily deploy and manage any container. Piccolo handles the persistent storage automatically.
 -   **Global Access Out-of-the-Box:** Every device gets a secure `https://*.piccolospace.com` web address. Access your apps from anywhere through our open-source [Nexus Proxy](https://github.com/AtDexters-Lab/nexus-proxy-server), with end-to-end encryption.
 -   **Hardened Foundation:** By building on Flatcar Linux, we inherit its proven security and rock-solid update system.
--   **Future: Federated & Resilient:** We're building a system where your device can work with others to become even more reliable. It will intelligently and securely spread encrypted pieces of your data across the network, making it safe even if some devices go offline.
+-   **Federated & Resilient:** We're building a system where your device can work with others to become even more reliable. It will intelligently and securely spread encrypted pieces of your data across the network, making it safe even if some devices go offline.
 
 ## Freedom of Choice: The Two Paths of Piccolo
 
@@ -72,7 +72,7 @@ Piccolo OS is, and always will be, free and open-source software (AGPL-3.0). We 
 
 * **The Piccolo Network Path (Subscription):** For convenience and powerful out-of-the-box features. A nominal annual subscription will give you access to our managed network, which includes:
     * **Automated Global Access:** Your `https://*.piccolospace.com` address works instantly, powered by our globally distributed Nexus Proxy fleet.
-    * **Automated Federated Storage:** (Coming Soon) Your data gains cloud-grade resilience by being intelligently and securely distributed across the network.
+    * **Automated Federated Storage:** Your data gains cloud-grade resilience by being intelligently and securely distributed across the network.
     * **Hassle-free Updates & Services.**
 
 ## Getting Started
