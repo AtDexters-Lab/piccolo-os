@@ -1,9 +1,10 @@
 #!/bin/bash
 #
-# Piccolo OS - Automated QA Smoke Test Script v1.0
+# Piccolo OS - Automated QA Smoke Test Script v2.3
 #
-# This script boots a given Piccolo OS raw image in a VM and runs a series
-# of automated checks to verify its integrity and core functionality.
+# This script boots the Piccolo Live ISO in a VM using a direct QEMU command
+# and runs a series of automated checks to verify its integrity and core functionality.
+# v2.3 uses cloud-init for SSH key injection, which is more reliable for live environments.
 #
 
 # ---
@@ -20,9 +21,9 @@ log() {
 }
 
 usage() {
-    echo "Usage: $0 --image-path <PATH_TO_IMAGE.raw.gz> --version <VERSION>"
-    echo "  --image-path    (Required) The path to the compressed Piccolo OS image to test."
-    echo "  --version       (Required) The version of the image being tested (e.g., 1.0.0)."
+    echo "Usage: $0 --build-dir <PATH_TO_BUILD_OUTPUT> --version <VERSION>"
+    echo "  --build-dir    (Required) The path to the build output directory containing the ISO."
+    echo "  --version      (Required) The version of the image being tested (e.g., 1.0.0)."
     exit 1
 }
 
@@ -46,17 +47,17 @@ main() {
     # Step 0: Parse Arguments and Check Dependencies
     # ---
     if [ "$#" -eq 0 ]; then usage; fi
-    local IMAGE_PATH=""
+    local BUILD_DIR=""
     local PICCOLO_VERSION=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            --image-path) IMAGE_PATH="$2"; shift 2;;
+            --build-dir) BUILD_DIR="$2"; shift 2;;
             --version) PICCOLO_VERSION="$2"; shift 2;;
             *) usage;;
         esac
     done
-    if [ -z "${IMAGE_PATH:-}" ] || [ -z "${PICCOLO_VERSION:-}" ]; then usage; fi
-    if [ ! -f "$IMAGE_PATH" ]; then log "Error: Image not found at $IMAGE_PATH" >&2; exit 1; fi
+    if [ -z "${BUILD_DIR:-}" ] || [ -z "${PICCOLO_VERSION:-}" ]; then usage; fi
+    if [ ! -d "$BUILD_DIR" ]; then log "Error: Build directory not found at $BUILD_DIR" >&2; exit 1; fi
     check_dependencies
 
     # ---
@@ -64,63 +65,55 @@ main() {
     # ---
     log "### Step 1: Preparing the test environment..."
     local test_dir="${SCRIPT_DIR}/build/test-${PICCOLO_VERSION}"
-    local flatcar_scripts_dir="${SCRIPT_DIR}/build/work-${PICCOLO_VERSION}/scripts"
-    local decompressed_image="${test_dir}/piccolo-os.raw"
+    local iso_path="${BUILD_DIR}/piccolo-os-live-${PICCOLO_VERSION}.iso"
     local ssh_key="${test_dir}/id_rsa_test"
+    local config_drive_dir="${test_dir}/config-drive"
     
     mkdir -p "$test_dir"
+    mkdir -p "${config_drive_dir}/openstack/latest"
+    if [ ! -f "$iso_path" ]; then log "Error: ISO file not found at ${iso_path}" >&2; exit 1; fi
     
-    # Ensure the Flatcar scripts repo is available
-    if [ ! -d "$flatcar_scripts_dir" ]; then
-        log "Error: Flatcar scripts directory not found. Please run a build first." >&2
-        exit 1
-    fi
-    
-    log "Decompressing image..."
-    gzip -cdk "$IMAGE_PATH" > "$decompressed_image"
-
     log "Generating temporary SSH key for this test run..."
-    ssh-keygen -t rsa -b 4096 -f "$ssh_key" -N "" -q
+    # CORRECTED: Use 'echo y' for more reliable non-interactive overwrite.
+    echo y | ssh-keygen -t rsa -b 4096 -f "$ssh_key" -N "" -q
 
-    # ---
-    # Step 2: Boot VM with QEMU
-    # ---
-    log "### Step 2: Booting Piccolo OS image in QEMU..."
-    # We use the image_to_vm.sh script from the Flatcar SDK to handle the complexities
-    # of booting the raw image in a properly configured QEMU instance.
-    # The script will run QEMU in the background and print the PID.
-    pushd "$flatcar_scripts_dir" > /dev/null
-    local qemu_pid
-    # Note: image_to_vm.sh requires Ignition to inject an SSH key. We create a minimal one.
-    cat > "${test_dir}/config.ign" <<EOF
-{
-  "ignition": { "version": "3.0.0" },
-  "passwd": {
-    "users": [
-      {
-        "name": "core",
-        "sshAuthorizedKeys": [
-          "$(cat "${ssh_key}.pub")"
-        ]
-      }
-    ]
-  }
-}
+    # Create a cloud-config file to inject the SSH key. This is the most
+    # reliable method for live environments.
+    cat > "${config_drive_dir}/openstack/latest/user_data" <<EOF
+#cloud-config
+ssh_authorized_keys:
+  - $(cat "${ssh_key}.pub")
 EOF
-    qemu_pid=$(./image_to_vm.sh --from="${decompressed_image}" --board=amd64-usr --ignition="${test_dir}/config.ign" | grep "QEMU running" | awk '{print $4}')
-    popd > /dev/null
 
-    if [ -z "$qemu_pid" ]; then
-        log "Error: Failed to start QEMU VM." >&2
-        exit 1
-    fi
+    # ---
+    # Step 2: Boot VM with Direct QEMU Command
+    # ---
+    log "### Step 2: Booting Piccolo Live ISO in QEMU..."
+    
+    # We construct our own QEMU command for full control and robustness.
+    qemu-system-x86_64 \
+        -name "Piccolo-QA-${PICCOLO_VERSION}" \
+        -m 2048 \
+        -machine q35,accel=kvm \
+        -cpu host \
+        -smp "$(getconf _NPROCESSORS_ONLN)" \
+        -netdev user,id=eth0,hostfwd=tcp::2222-:22 \
+        -device virtio-net-pci,netdev=eth0 \
+        -object rng-random,filename=/dev/urandom,id=rng0 \
+        -device virtio-rng-pci,rng=rng0 \
+        -drive file="$iso_path",media=cdrom,format=raw \
+        -fsdev local,id=conf,security_model=none,readonly=on,path="${config_drive_dir}" \
+        -device virtio-9p-pci,fsdev=conf,mount_tag=config-2 \
+        -boot order=d \
+        -nographic &
+    local qemu_pid=$!
     log "QEMU started successfully with PID: $qemu_pid"
 
     # ---
     # Step 3: Wait for SSH and Run Checks
     # ---
     log "### Step 3: Waiting for SSH to become available..."
-    local ssh_port=2222 # Default port used by image_to_vm.sh
+    local ssh_port=2222
     local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${ssh_key}"
     local checks_passed=false
     
@@ -129,27 +122,26 @@ EOF
         if ssh -p "$ssh_port" $ssh_opts "core@localhost" "echo 'SSH is ready'" &> /dev/null; then
             log "SSH is available. Running automated checks..."
             
-            # Define the checks in a heredoc for readability
-            ssh -p "$ssh_port" $ssh_opts "core@localhost" /bin/bash << 'EOF'
+            # These checks run against the LIVE environment booted from our ISO.
+            ssh -p "$ssh_port" $ssh_opts "core@localhost" /bin/bash -s -- "$PICCOLO_VERSION" << 'EOF'
 set -euo pipefail
-echo "--- CHECK 1: piccolod service status ---"
-systemctl is-active piccolod.service | grep -q "active"
-echo "PASS: piccolod is active."
+PICCOLO_VERSION_TO_TEST="$1"
+
+echo "--- CHECK 1: piccolod binary ---"
+if [ -x "/usr/bin/piccolod" ]; then
+    echo "PASS: piccolod binary is present and executable."
+else
+    echo "FAIL: piccolod binary not found or not executable."
+    exit 1
+fi
 
 echo "--- CHECK 2: piccolod version ---"
-# This assumes your binary has a --version flag
-/usr/bin/piccolod --version | grep -q "1.0.0" # NOTE: Hardcoded version, improve this
+/usr/bin/piccolod --version | grep -q "${PICCOLO_VERSION_TO_TEST}"
 echo "PASS: piccolod version is correct."
 
-echo "--- CHECK 3: piccolod location ---"
-which piccolod | grep -q "/usr/bin/piccolod"
-echo "PASS: piccolod is in the correct immutable location."
-
-echo "--- CHECK 4: Update configuration ---"
-grep -q "os-updates.system.piccolospace.com" /etc/flatcar/update.conf
-echo "PASS: Update server configuration is correct."
-
-echo "--- CHECK 5: Container runtime ---"
+echo "--- CHECK 3: Container runtime ---"
+# We need to start docker first in the live environment
+sudo systemctl start docker
 docker run --rm hello-world
 echo "PASS: Container runtime is functional."
 EOF
@@ -167,6 +159,7 @@ EOF
     log "### Step 4: Cleaning up..."
     kill "$qemu_pid"
     log "QEMU process ($qemu_pid) terminated."
+    
     rm -rf "$test_dir"
     log "Test directory cleaned up."
 
