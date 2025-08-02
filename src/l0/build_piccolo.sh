@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# Piccolo OS - Production Build Script v2.3
+# Piccolo OS - Production Build Script v3.0 (Definitive)
 #
-# This script aligns with the canonical integration method for Flatcar Linux.
-# It uses a dedicated overlay and the PORTDIR_OVERLAYS variable to correctly
-# inject the piccolod package as a runtime dependency (RDEPEND) of the
-# core OS.
-# v2.3 corrects the build artifact path within the SDK container.
+# This version implements the definitive, canonical integration method for
+# Flatcar Linux. It creates a repository configuration file on the host and
+# bind-mounts it to the specific path (/mnt/host/source/config) that the
+# early-stage 'update_chroot' script is hardcoded to look for. This ensures
+# the custom overlay is available throughout the entire build process.
 #
 
 # ---
@@ -78,8 +78,7 @@ main() {
     local work_dir="${top_build_dir}/work-${PICCOLO_VERSION}"
     local output_dir="${top_build_dir}/output/${PICCOLO_VERSION}"
     local scripts_repo_dir="${work_dir}/scripts"
-    mkdir -p "$work_dir"
-    mkdir -p "$output_dir"
+    mkdir -p "$work_dir" "$output_dir"
     
     if [ ! -d "$scripts_repo_dir" ]; then
         log "Cloning Flatcar scripts repository..."
@@ -98,12 +97,11 @@ main() {
     popd > /dev/null
 
     # ---
-    # Step 2: Create Custom Piccolo OS Overlay
+    # Step 2: Create Custom Piccolo OS Overlay and Repository Config
     # ---
-    log "### Step 2: Creating custom Piccolo overlay..."
+    log "### Step 2: Creating custom overlay and repository config..."
     local overlay_dir="${scripts_repo_dir}/src/third_party/piccolo-overlay"
     local ebuild_dir="${overlay_dir}/app-piccolo/piccolod"
-    local metadata_dir="${overlay_dir}/metadata"
     
     mkdir -p "${ebuild_dir}/files"
     cp "$(realpath "$PICCOLOD_BINARY_PATH")" "${ebuild_dir}/files/piccolod-${PICCOLO_VERSION}"
@@ -122,12 +120,23 @@ src_compile() { :; }
 src_install() { dobin "\${WORKDIR}/\${P}"; }
 EOF
 
-    mkdir -p "${metadata_dir}"
-    echo "masters = portage-stable" > "${metadata_dir}/layout.conf"
+    mkdir -p "${overlay_dir}/metadata"
+    echo "masters = portage-stable" > "${overlay_dir}/metadata/layout.conf"
     mkdir -p "${overlay_dir}/profiles"
     echo "piccolo-overlay" > "${overlay_dir}/profiles/repo_name"
     echo "app-piccolo" > "${overlay_dir}/profiles/categories"
-    log "Custom overlay created successfully at ${overlay_dir}"
+
+    # Create the repository config file on the host in a 'config' directory.
+    local repo_config_dir="${scripts_repo_dir}/sdk_container/config/portage/repos"
+    mkdir -p "$repo_config_dir"
+    cat > "${repo_config_dir}/piccolo.conf" << EOF
+[piccolo-overlay]
+location = /home/sdk/trunk/src/scripts/src/third_party/piccolo-overlay
+priority = 50
+masters = portage-stable
+auto-sync = no
+EOF
+    log "Custom overlay and repo config created successfully."
 
     # ---
     # Step 3: Build All Artifacts Inside the SDK Container
@@ -135,20 +144,26 @@ EOF
     log "### Step 3: Starting the SDK to build all artifacts..."
     pushd "$scripts_repo_dir" > /dev/null
     
-    ./run_sdk_container -- /bin/bash -s -- "${PICCOLO_VERSION}" "src/third_party/piccolo-overlay" << 'EOF'
+    # Mount the host's 'config' directory to the path the SDK expects.
+    ./run_sdk_container -m "${PWD}/config":/mnt/host/source/config:ro -- /bin/bash -s -- "${PICCOLO_VERSION}" << 'EOF'
 set -euxo pipefail
 
 PICCOLO_VERSION="$1"
-PICCOLO_OVERLAY_PATH="$2"
 
-export PORTDIR_OVERLAYS="${PWD}/${PICCOLO_OVERLAY_PATH} ${PORTDIR_OVERLAYS:-}"
-echo "Portage is now searching for packages in: ${PORTDIR_OVERLAYS}"
-
-EBUILD_PATH="${PICCOLO_OVERLAY_PATH}/app-piccolo/piccolod/piccolod-${PICCOLO_VERSION}.ebuild"
+# The build system will now automatically discover our overlay config.
+# We still need to generate the manifest for our ebuild.
+EBUILD_PATH="src/third_party/piccolo-overlay/app-piccolo/piccolod/piccolod-${PICCOLO_VERSION}.ebuild"
 ebuild "${EBUILD_PATH}" manifest
 echo "Manifest generated for piccolod."
 
-COREOS_EBUILD_PATH="src/third_party/coreos-overlay/coreos-base/coreos/coreos-0.0.1.ebuild"
+# Find the coreos ebuild to modify.
+COREOS_EBUILD_PATH=$(find . -path '*/coreos-base/coreos/coreos-0.0.1.ebuild' | head -n 1)
+if [ -z "${COREOS_EBUILD_PATH}" ]; then
+    echo "FATAL: Could not dynamically find the coreos-0.0.1.ebuild file." >&2
+    exit 1
+fi
+echo "Found coreos ebuild at: ${COREOS_EBUILD_PATH}"
+
 if ! grep -q "app-piccolo/piccolod" "${COREOS_EBUILD_PATH}"; then
     echo "Adding piccolod as an RDEPEND to the coreos package..."
     echo "RDEPEND=\"\${RDEPEND} app-piccolo/piccolod\"" >> "${COREOS_EBUILD_PATH}"
@@ -163,11 +178,8 @@ echo "Running ./build_image..."
 ./build_image --board='amd64-usr'
 
 echo "Creating bootable ISO and copying artifacts..."
-# The 'build' directory is located relative to the SDK root, one level up.
 LATEST_BUILD_DIR="../build/images/amd64-usr/latest"
 ./image_to_vm.sh --from="${LATEST_BUILD_DIR}" --format=iso --to="./iso_out"
-
-# This copy is ESSENTIAL. It moves the update artifact to the shared 'iso_out' directory.
 cp "${LATEST_BUILD_DIR}/flatcar_production_update.bin.bz2" "./iso_out/flatcar_production_update.bin.bz2"
 EOF
     popd > /dev/null
@@ -200,9 +212,6 @@ EOF
     local generated_iso_path
     generated_iso_path=$(find "$iso_output_dir" -name "*.iso")
     mv "$generated_iso_path" "${output_dir}/piccolo-os-live-${PICCOLO_VERSION}.iso"
-
-    # The auto-generated runner script is no longer needed, as our QA script
-    # 'test_piccolo_os_image.sh' handles VM execution.
     log "Live ISO created successfully."
 
     # ---
