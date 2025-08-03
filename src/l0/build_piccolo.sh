@@ -1,14 +1,12 @@
 #!/bin/bash
 #
-# Piccolo OS - Production Build Script v5.1 (Definitive)
+# Piccolo OS - Production Build Script v8.0 (Definitive)
 #
-# This version uses the 'misc-files' pattern for robust file injection.
-# This is a simpler and more direct method that bypasses the complexities
-# of Portage overlays and dependency management, which have proven fragile.
-# It places the binary in a specific directory structure that a standard
-# build script then copies into the final image.
-#
-# v5.1 adds the systemd service file for piccolod and enables it by default.
+# This version incorporates the final understanding of the SDK's mounting
+# behavior. It creates the custom overlay and repository configuration inside
+# the 'sdk_container' directory, which is automatically mounted into the
+# container's source tree. This removes all complex, manual mount commands
+# and relies on the SDK's native, robust functionality.
 #
 
 # ---
@@ -71,6 +69,11 @@ main() {
     if [ -z "${PICCOLO_VERSION:-}" ] || [ -z "${PICCOLOD_BINARY_PATH:-}" ]; then usage; fi
     if [ ! -f "$PICCOLOD_BINARY_PATH" ]; then log "Error: piccolod binary not found at $PICCOLOD_BINARY_PATH" >&2; exit 1; fi
     check_dependencies
+    
+    if [ -z "${PICCOLO_UPDATE_SERVER:-}" ] || [ -z "${PICCOLO_UPDATE_GROUP:-}" ]; then
+        log "Error: PICCOLO_UPDATE_SERVER or PICCOLO_UPDATE_GROUP not set in piccolo.env" >&2
+        exit 1
+    fi
 
     # ---
     # Step 1: Prepare the Build Environment
@@ -99,43 +102,74 @@ main() {
     popd > /dev/null
 
     # ---
-    # Step 2: Place piccolod Binary and Systemd Service for 'misc-files' Ebuild
+    # Step 2: Create Custom Ebuild, Overlay, and Repository Config
     # ---
-    log "### Step 2: Placing binary and systemd service for 'misc-files' injection..."
-    local misc_files_dir="${scripts_repo_dir}/src/third_party/coreos-overlay/coreos-base/misc-files/files"
+    log "### Step 2: Creating custom ebuild and overlay..."
+    # FIX: Place the overlay inside the 'sdk_container' directory.
+    # This directory's contents are automatically made available inside the container.
+    local overlay_dir="${scripts_repo_dir}/sdk_container/piccolo-overlay"
+    local ebuild_category="app-piccolo"
+    local ebuild_pkg_name="piccolod-bin"
+    local ebuild_dir="${overlay_dir}/${ebuild_category}/${ebuild_pkg_name}"
     
-    # 2a: Place the piccolod binary in /usr/bin
-    local install_path_in_misc_files="${misc_files_dir}/usr/bin"
-    mkdir -p "${install_path_in_misc_files}"
-    cp "$(realpath "$PICCOLOD_BINARY_PATH")" "${install_path_in_misc_files}/piccolod"
-    chmod +x "${install_path_in_misc_files}/piccolod"
-    log "piccolod binary placed in ${install_path_in_misc_files}"
-
-    # 2b: Place the systemd service file in /etc/systemd/system
-    local systemd_path="${misc_files_dir}/etc/systemd/system"
-    mkdir -p "${systemd_path}"
-    cat > "${systemd_path}/piccolod.service" << EOF
+    mkdir -p "${ebuild_dir}/files"
+    cp "$(realpath "$PICCOLOD_BINARY_PATH")" "${ebuild_dir}/files/piccolod"
+    
+    cat > "${ebuild_dir}/files/piccolod.service" << EOF
 [Unit]
 Description=Piccolo Daemon
 After=network-online.target
 Wants=network-online.target
-
 [Service]
 ExecStart=/usr/bin/piccolod
 Restart=always
 RestartSec=5s
-
 [Install]
 WantedBy=multi-user.target
 EOF
-    log "piccolod.service file created."
 
-    # 2c: Enable the service by creating a symlink
-    local enable_path="${systemd_path}/multi-user.target.wants"
-    mkdir -p "${enable_path}"
-    ln -s ../piccolod.service "${enable_path}/piccolod.service"
-    log "piccolod.service enabled."
+    cat > "${ebuild_dir}/files/update.conf" << EOF
+GROUP=${PICCOLO_UPDATE_GROUP}
+SERVER=${PICCOLO_UPDATE_SERVER}
+EOF
 
+    cat > "${ebuild_dir}/${ebuild_pkg_name}-${PICCOLO_VERSION}.ebuild" << EOF
+EAPI=7
+inherit systemd
+DESCRIPTION="The core service for the Piccolo OS ecosystem (pre-compiled)"
+HOMEPAGE="https://piccolospace.com"
+SRC_URI=""
+LICENSE="Piccolo-EULA"
+SLOT="0"
+KEYWORDS="~amd64"
+QA_PREBUILT=*
+
+src_install() {
+    dobin "\${FILESDIR}/piccolod"
+    systemd_dounit "\${FILESDIR}/piccolod.service"
+    insinto /etc/flatcar
+    doins "\${FILESDIR}/update.conf"
+}
+EOF
+
+    mkdir -p "${overlay_dir}/metadata"
+    echo "masters = portage-stable" > "${overlay_dir}/metadata/layout.conf"
+    mkdir -p "${overlay_dir}/profiles"
+    echo "piccolo-overlay" > "${overlay_dir}/profiles/repo_name"
+
+    # FIX: Place the repository config inside the 'sdk_container' directory.
+    log "Creating repository config..."
+    local repo_config_dir="${scripts_repo_dir}/sdk_container/config/portage/repos"
+    mkdir -p "$repo_config_dir"
+    cat > "${repo_config_dir}/piccolo.conf" << EOF
+[piccolo-overlay]
+# The location is now relative to the container's source root.
+location = /mnt/host/source/piccolo-overlay
+priority = 50
+masters = portage-stable
+auto-sync = no
+EOF
+    log "Custom overlay and repo config created successfully."
 
     # ---
     # Step 3: Build All Artifacts Inside the SDK Container
@@ -143,20 +177,46 @@ EOF
     log "### Step 3: Starting the SDK to build all artifacts..."
     pushd "$scripts_repo_dir" > /dev/null
     
-    # The build process will automatically pick up all files we just placed.
-    ./run_sdk_container -- /bin/bash -s << 'EOF'
+    # FIX: No manual mounts needed. Rely on the default behavior.
+    ./run_sdk_container -- /bin/bash -s -- "${PICCOLO_VERSION}" "${ebuild_category}" "${ebuild_pkg_name}" "${PICCOLO_UPDATE_GROUP}" << 'EOF'
 set -euxo pipefail
 
+PICCOLO_VERSION="$1"
+EBUILD_CATEGORY="$2"
+EBUILD_PKG_NAME="$3"
+PICCOLO_UPDATE_GROUP="$4"
+
+# The path inside the container now correctly points to the auto-mounted overlay.
+EBUILD_PATH="/mnt/host/source/piccolo-overlay/${EBUILD_CATEGORY}/${EBUILD_PKG_NAME}/${EBUILD_PKG_NAME}-${PICCOLO_VERSION}.ebuild"
+ebuild "${EBUILD_PATH}" manifest
+echo "Manifest generated for ${EBUILD_PKG_NAME}."
+
+COREOS_EBUILD_PATH=$(find . -path '*/coreos-base/coreos/coreos-0.0.1.ebuild' | head -n 1)
+if [ -z "${COREOS_EBUILD_PATH}" ]; then
+    echo "FATAL: Could not dynamically find the coreos-0.0.1.ebuild file." >&2
+    exit 1
+fi
+echo "Found coreos ebuild at: ${COREOS_EBUILD_PATH}"
+
+DEP_STRING="${EBUILD_CATEGORY}/${EBUILD_PKG_NAME}"
+if ! grep -q "${DEP_STRING}" "${COREOS_EBUILD_PATH}"; then
+    echo "Adding ${DEP_STRING} as an RDEPEND to the coreos package..."
+    sed -i "/^\"$/i \\    ${DEP_STRING}" "${COREOS_EBUILD_PATH}"
+else
+    echo "${DEP_STRING} dependency already exists in coreos package."
+fi
+
+echo "Running pre-flight dependency check..."
+emerge-amd64-usr -p --quiet coreos-base/coreos
+
 echo "Running ./build_packages..."
-# The 'misc-files' package is part of the default build, so this will
-# automatically package our binary and service file.
 ./build_packages --board='amd64-usr'
 
 echo "Running ./build_image to create prod image and update payload..."
-./build_image --board='amd64-usr' --group=stable prod
+./build_image --board='amd64-usr' --group="${PICCOLO_UPDATE_GROUP}" --image_compression_formats=gz prod
 
 echo "Creating bootable ISO from the production image..."
-LATEST_BUILD_DIR="./__build__/images/amd64-usr/latest"
+LATEST_BUILD_DIR="./__build__/images/images/amd64-usr/latest"
 ./image_to_vm.sh --from="${LATEST_BUILD_DIR}" --format=iso --board='amd64-usr'
 
 EOF
@@ -168,7 +228,7 @@ EOF
     # Step 4 & 5: Package and Sign Final Artifacts
     # ---
     log "### Step 4 & 5: Packaging and signing final artifacts..."
-    local artifact_src_dir="${scripts_repo_dir}/__build__/images/amd64-usr/latest"
+    local artifact_src_dir="${scripts_repo_dir}/__build__/images/images/amd64-usr/latest"
     
     local src_raw_gz="${artifact_src_dir}/flatcar_production_update.raw.gz"
     local src_iso="${artifact_src_dir}/flatcar_production_iso_image.iso"
