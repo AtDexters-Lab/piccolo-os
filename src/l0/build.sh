@@ -6,4 +6,4 @@ PICCOLOD_OUTPUT=${SCRIPT_DIR}/build/${PICCOLO_VERSION}/piccolod
 go build -o $PICCOLOD_OUTPUT cmd/piccolod/main.go
 
 cd "${SCRIPT_DIR}"
-./build_piccolo.sh --version ${PICCOLO_VERSION} --binary-path $PICCOLOD_OUTPUT  > build.out 2> build.error.out
+./build_piccolo.sh --version ${PICCOLO_VERSION} --binary-path $PICCOLOD_OUTPUT  > build.out 2>&1

@@ -1,12 +1,14 @@
 #!/bin/bash
 #
-# Piccolo OS - Production Build Script v3.0 (Definitive)
+# Piccolo OS - Production Build Script v5.1 (Definitive)
 #
-# This version implements the definitive, canonical integration method for
-# Flatcar Linux. It creates a repository configuration file on the host and
-# bind-mounts it to the specific path (/mnt/host/source/config) that the
-# early-stage 'update_chroot' script is hardcoded to look for. This ensures
-# the custom overlay is available throughout the entire build process.
+# This version uses the 'misc-files' pattern for robust file injection.
+# This is a simpler and more direct method that bypasses the complexities
+# of Portage overlays and dependency management, which have proven fragile.
+# It places the binary in a specific directory structure that a standard
+# build script then copies into the final image.
+#
+# v5.1 adds the systemd service file for piccolod and enables it by default.
 #
 
 # ---
@@ -39,7 +41,7 @@ usage() {
 
 check_dependencies() {
     log "Checking for required dependencies..."
-    local deps=("git" "docker" "curl" "sha256sum" "gpg")
+    local deps=("git" "docker" "gpg")
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             log "Error: Required dependency '$dep' is not installed." >&2
@@ -89,7 +91,7 @@ main() {
     log "Resetting scripts repository to a clean state..."
     git reset --hard && git clean -fd
     log "Fetching latest tags from Flatcar repository..."
-    git fetch --prune --prune-tags --tags --force
+    git fetch --prune --prune-tags --tags --force origin
     LATEST_STABLE_TAG=$(git tag -l | grep -E 'stable-[0-9.]+$' | sort -V | tail -n 1)
     if [ -z "$LATEST_STABLE_TAG" ]; then log "Error: Could not find any stable release tags." >&2; exit 1; fi
     log "Checking out latest stable release: $LATEST_STABLE_TAG"
@@ -97,46 +99,43 @@ main() {
     popd > /dev/null
 
     # ---
-    # Step 2: Create Custom Piccolo OS Overlay and Repository Config
+    # Step 2: Place piccolod Binary and Systemd Service for 'misc-files' Ebuild
     # ---
-    log "### Step 2: Creating custom overlay and repository config..."
-    local overlay_dir="${scripts_repo_dir}/src/third_party/piccolo-overlay"
-    local ebuild_dir="${overlay_dir}/app-piccolo/piccolod"
+    log "### Step 2: Placing binary and systemd service for 'misc-files' injection..."
+    local misc_files_dir="${scripts_repo_dir}/src/third_party/coreos-overlay/coreos-base/misc-files/files"
     
-    mkdir -p "${ebuild_dir}/files"
-    cp "$(realpath "$PICCOLOD_BINARY_PATH")" "${ebuild_dir}/files/piccolod-${PICCOLO_VERSION}"
-    
-    cat > "${ebuild_dir}/piccolod-${PICCOLO_VERSION}.ebuild" << EOF
-EAPI=7
-DESCRIPTION="The core service for the Piccolo OS ecosystem"
-HOMEPAGE="https://piccolospace.com"
-SRC_URI=""
-LICENSE="Piccolo-EULA"
-SLOT="0"
-KEYWORDS="~amd64"
-RESTRICT="strip"
-src_unpack() { cp "\${FILESDIR}/\${P}" "\${WORKDIR}/\${P}"; }
-src_compile() { :; }
-src_install() { dobin "\${WORKDIR}/\${P}"; }
-EOF
+    # 2a: Place the piccolod binary in /usr/bin
+    local install_path_in_misc_files="${misc_files_dir}/usr/bin"
+    mkdir -p "${install_path_in_misc_files}"
+    cp "$(realpath "$PICCOLOD_BINARY_PATH")" "${install_path_in_misc_files}/piccolod"
+    chmod +x "${install_path_in_misc_files}/piccolod"
+    log "piccolod binary placed in ${install_path_in_misc_files}"
 
-    mkdir -p "${overlay_dir}/metadata"
-    echo "masters = portage-stable" > "${overlay_dir}/metadata/layout.conf"
-    mkdir -p "${overlay_dir}/profiles"
-    echo "piccolo-overlay" > "${overlay_dir}/profiles/repo_name"
-    echo "app-piccolo" > "${overlay_dir}/profiles/categories"
+    # 2b: Place the systemd service file in /etc/systemd/system
+    local systemd_path="${misc_files_dir}/etc/systemd/system"
+    mkdir -p "${systemd_path}"
+    cat > "${systemd_path}/piccolod.service" << EOF
+[Unit]
+Description=Piccolo Daemon
+After=network-online.target
+Wants=network-online.target
 
-    # Create the repository config file on the host in a 'config' directory.
-    local repo_config_dir="${scripts_repo_dir}/sdk_container/config/portage/repos"
-    mkdir -p "$repo_config_dir"
-    cat > "${repo_config_dir}/piccolo.conf" << EOF
-[piccolo-overlay]
-location = /home/sdk/trunk/src/scripts/src/third_party/piccolo-overlay
-priority = 50
-masters = portage-stable
-auto-sync = no
+[Service]
+ExecStart=/usr/bin/piccolod
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
 EOF
-    log "Custom overlay and repo config created successfully."
+    log "piccolod.service file created."
+
+    # 2c: Enable the service by creating a symlink
+    local enable_path="${systemd_path}/multi-user.target.wants"
+    mkdir -p "${enable_path}"
+    ln -s ../piccolod.service "${enable_path}/piccolod.service"
+    log "piccolod.service enabled."
+
 
     # ---
     # Step 3: Build All Artifacts Inside the SDK Container
@@ -144,75 +143,54 @@ EOF
     log "### Step 3: Starting the SDK to build all artifacts..."
     pushd "$scripts_repo_dir" > /dev/null
     
-    # Mount the host's 'config' directory to the path the SDK expects.
-    ./run_sdk_container -m "${PWD}/config":/mnt/host/source/config:ro -- /bin/bash -s -- "${PICCOLO_VERSION}" << 'EOF'
+    # The build process will automatically pick up all files we just placed.
+    ./run_sdk_container -- /bin/bash -s << 'EOF'
 set -euxo pipefail
 
-PICCOLO_VERSION="$1"
-
-# The build system will now automatically discover our overlay config.
-# We still need to generate the manifest for our ebuild.
-EBUILD_PATH="src/third_party/piccolo-overlay/app-piccolo/piccolod/piccolod-${PICCOLO_VERSION}.ebuild"
-ebuild "${EBUILD_PATH}" manifest
-echo "Manifest generated for piccolod."
-
-# Find the coreos ebuild to modify.
-COREOS_EBUILD_PATH=$(find . -path '*/coreos-base/coreos/coreos-0.0.1.ebuild' | head -n 1)
-if [ -z "${COREOS_EBUILD_PATH}" ]; then
-    echo "FATAL: Could not dynamically find the coreos-0.0.1.ebuild file." >&2
-    exit 1
-fi
-echo "Found coreos ebuild at: ${COREOS_EBUILD_PATH}"
-
-if ! grep -q "app-piccolo/piccolod" "${COREOS_EBUILD_PATH}"; then
-    echo "Adding piccolod as an RDEPEND to the coreos package..."
-    echo "RDEPEND=\"\${RDEPEND} app-piccolo/piccolod\"" >> "${COREOS_EBUILD_PATH}"
-else
-    echo "piccolod dependency already exists in coreos package."
-fi
-
 echo "Running ./build_packages..."
+# The 'misc-files' package is part of the default build, so this will
+# automatically package our binary and service file.
 ./build_packages --board='amd64-usr'
 
-echo "Running ./build_image..."
-./build_image --board='amd64-usr'
+echo "Running ./build_image to create prod image and update payload..."
+./build_image --board='amd64-usr' --group=stable prod
 
-echo "Creating bootable ISO and copying artifacts..."
-LATEST_BUILD_DIR="../build/images/amd64-usr/latest"
-./image_to_vm.sh --from="${LATEST_BUILD_DIR}" --format=iso --to="./iso_out"
-cp "${LATEST_BUILD_DIR}/flatcar_production_update.bin.bz2" "./iso_out/flatcar_production_update.bin.bz2"
+echo "Creating bootable ISO from the production image..."
+LATEST_BUILD_DIR="./__build__/images/amd64-usr/latest"
+./image_to_vm.sh --from="${LATEST_BUILD_DIR}" --format=iso --board='amd64-usr'
+
 EOF
     popd > /dev/null
 
     log "### Finished building all artifacts inside the SDK!"
     
     # ---
-    # Step 4: Package and Sign the Update Image
+    # Step 4 & 5: Package and Sign Final Artifacts
     # ---
-    log "### Step 4: Packaging and signing the update image..."
-    local iso_output_dir="${scripts_repo_dir}/iso_out"
-    local bz2_update_image="${iso_output_dir}/flatcar_production_update.bin.bz2"
+    log "### Step 4 & 5: Packaging and signing final artifacts..."
+    local artifact_src_dir="${scripts_repo_dir}/__build__/images/amd64-usr/latest"
     
-    if [ ! -f "$bz2_update_image" ]; then
-        log "Error: Update artifact not found in exchange directory: ${bz2_update_image}" >&2
+    local src_raw_gz="${artifact_src_dir}/flatcar_production_update.raw.gz"
+    local src_iso="${artifact_src_dir}/flatcar_production_iso_image.iso"
+    
+    if [ ! -f "$src_raw_gz" ] || [ ! -f "$src_iso" ]; then
+        log "Error: A required build artifact (.raw.gz or .iso) was not found in ${artifact_src_dir}" >&2
         exit 1
     fi
 
-    log "Repackaging update image to .gz format for our update server's consistency..."
-    bzip2 -cdk "$bz2_update_image" | gzip -c > "${output_dir}/piccolo-os-update-${PICCOLO_VERSION}.raw.gz"
+    local final_raw_gz="${output_dir}/piccolo-os-update-${PICCOLO_VERSION}.raw.gz"
+    local final_asc="${output_dir}/piccolo-os-update-${PICCOLO_VERSION}.raw.gz.asc"
+    local final_iso="${output_dir}/piccolo-os-live-${PICCOLO_VERSION}.iso"
+
+    log "Moving and renaming final artifacts to ${output_dir}"
+    mv "$src_raw_gz" "$final_raw_gz"
+    mv "$src_iso" "$final_iso"
 
     log "Signing the update artifact with GPG key: ${GPG_SIGNING_KEY_ID}"
-    gpg --detach-sign --armor -u "$GPG_SIGNING_KEY_ID" "${output_dir}/piccolo-os-update-${PICCOLO_VERSION}.raw.gz"
-    log "Update image signed."
-
-    # ---
-    # Step 5: Package the Live ISO
-    # ---
-    log "### Step 5: Packaging the bootable Piccolo Live ISO..."
-    local generated_iso_path
-    generated_iso_path=$(find "$iso_output_dir" -name "*.iso")
-    mv "$generated_iso_path" "${output_dir}/piccolo-os-live-${PICCOLO_VERSION}.iso"
-    log "Live ISO created successfully."
+    gpg --detach-sign --armor --output "${final_asc}" -u "$GPG_SIGNING_KEY_ID" "$final_raw_gz"
+    log "Verifying signature..."
+    gpg --verify "${final_asc}" "${final_raw_gz}"
+    log "Update image signed and verified."
 
     # ---
     # Step 6: Final Output
