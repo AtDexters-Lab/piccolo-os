@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	// Fictional import paths for structure
 	"piccolod/internal/backup"
 	"piccolod/internal/container"
 	"piccolod/internal/federation"
@@ -15,7 +14,7 @@ import (
 	"piccolod/internal/update"
 )
 
-// Server holds all the core components (dependencies) for our application.
+// Server holds all the core components for our application.
 type Server struct {
 	containerManager  *container.Manager
 	storageManager    *storage.Manager
@@ -26,10 +25,21 @@ type Server struct {
 	backupManager     *backup.Manager
 	federationManager *federation.Manager
 	router            http.Handler
+	version           string
+}
+
+// ServerOption is a function that configures a Server.
+type ServerOption func(*Server)
+
+// WithVersion sets the version for the server.
+func WithVersion(version string) ServerOption {
+	return func(s *Server) {
+		s.version = version
+	}
 }
 
 // New creates the main server application and initializes all its components.
-func New() (*Server, error) {
+func New(opts ...ServerOption) (*Server, error) {
 	cm, err := container.NewManager()
 	if err != nil {
 		return nil, fmt.Errorf("failed to init container manager: %w", err)
@@ -44,6 +54,10 @@ func New() (*Server, error) {
 		networkManager:    network.NewManager(),
 		backupManager:     backup.NewManager(),
 		federationManager: federation.NewManager(),
+	}
+
+	for _, opt := range opts {
+		opt(s)
 	}
 
 	s.setupRoutes()
@@ -65,13 +79,9 @@ func (s *Server) setupRoutes() {
 	// API routes for container management
 	mux.HandleFunc("/api/v1/containers", s.handleContainers())
 	mux.HandleFunc("/api/v1/containers/", s.handleSingleContainer())
-	// ... other routes for start, stop, etc.
 
-	// TODO: Add placeholder API routes for other components
-	// mux.HandleFunc("/api/v1/storage/disks", s.handleListDisks())
-	// mux.HandleFunc("/api/v1/system/attest", s.handleAttestation())
-	// mux.HandleFunc("/api/v1/install", s.handleInstallation())
-	// mux.HandleFunc("/api/v1/backups/system-state", s.handleSystemStateBackup())
+	// Admin routes
+	mux.HandleFunc("/version", s.handleVersion())
 
 	s.router = mux
 }

@@ -2,13 +2,15 @@ package main
 
 import (
 	"log"
-	"piccolod/internal/server" // Fictional import path for structure
+	"piccolod/internal/server"
 )
+
+var version = "dev"
 
 func main() {
 	// The main function is the entry point. Its only job is to
 	// initialize and start the server.
-	srv, err := server.New()
+	srv, err := server.New(server.WithVersion(version))
 	if err != nil {
 		log.Fatalf("FATAL: Failed to initialize server: %v", err)
 	}
