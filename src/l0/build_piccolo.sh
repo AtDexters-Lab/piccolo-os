@@ -140,6 +140,11 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # Create systemd preset file to enable the service by default
+    cat > "${ebuild_dir}/files/90-piccolod.preset" << 'EOF'
+enable piccolod.service
+EOF
+
     # Create update configuration
     cat > "${ebuild_dir}/files/update.conf" << EOF
 GROUP=${PICCOLO_UPDATE_GROUP}
@@ -180,6 +185,10 @@ src_install() {
     # Install systemd unit file
     systemd_dounit "${FILESDIR}/piccolod.service"
     
+    # Install systemd preset file to enable the service
+    insinto /usr/lib/systemd/system-preset
+    doins "${FILESDIR}/90-piccolod.preset"
+    
     # Install configuration file
     insinto /etc/flatcar
     doins "${FILESDIR}/update.conf"
@@ -192,7 +201,7 @@ src_install() {
 
 pkg_postinst() {
     # Enable the service by default
-    systemctl enable piccolod.service || true
+    systemctl enable piccolod.service 
     
     elog "Piccolo daemon has been installed and enabled."
     elog "Configuration file: /etc/flatcar/update.conf"
