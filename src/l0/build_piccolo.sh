@@ -588,7 +588,7 @@ main() {
     
     # # Build OS image in SDK container
     # log_step "Step 3: Building OS image in SDK container"
-    # build_in_sdk_container "$scripts_repo_dir" "$version" "$PICCOLO_UPDATE_GROUP"
+    build_in_sdk_container "$scripts_repo_dir" "$version" "$PICCOLO_UPDATE_GROUP"
     
     # Package and sign final artifacts
     log_step "Step 4: Packaging and signing artifacts"
