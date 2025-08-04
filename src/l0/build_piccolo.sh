@@ -1,14 +1,13 @@
 #!/bin/bash
 #
-# Piccolo OS - Production Build Script v16.0 (Fixed & Improved)
+# Piccolo OS - Production Build Script v17.0 (Refactored for Maintainability)
 #
-# FIXES APPLIED:
-# 1. Fixed ebuild installation paths and file permissions
-# 2. Added proper systemd service enablement in pkg_postinst
-# 3. Fixed emerge command sequence and dependency handling
-# 4. Added proper license handling for custom packages
-# 5. Improved error handling and verification steps
-# 6. Added build verification to ensure service is actually included
+# This script builds a custom Flatcar Linux OS image with the piccolod daemon
+# integrated as a system service. The build process follows these steps:
+# 1. Prepare build environment and clone Flatcar scripts
+# 2. Create custom ebuild package for piccolod
+# 3. Build OS image inside Flatcar SDK container
+# 4. Package and sign final artifacts
 #
 
 # ---
@@ -18,108 +17,109 @@ set -euo pipefail # Exit on error, unset var, or pipe failure
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # ---
-# Load Build Configuration from piccolo.env
+# Build Configuration Constants
 # ---
-if [ ! -f "${SCRIPT_DIR}/piccolo.env" ]; then
-    echo "Error: Build environment file 'piccolo.env' not found." >&2
-    exit 1
-fi
-# shellcheck source=piccolo.env
-source "${SCRIPT_DIR}/piccolo.env"
+readonly FLATCAR_REPO_URL="https://github.com/flatcar/scripts.git"
+readonly BOARD_NAME="amd64-usr"
+readonly EBUILD_CATEGORY="app-misc"
+readonly EBUILD_PKG_NAME="piccolod-bin"
+readonly HTTP_PORT="8080"
 
 # ---
-# Helper Functions
+# Load and Validate Build Configuration
+# ---
+load_build_config() {
+    local config_file="${SCRIPT_DIR}/piccolo.env"
+    if [ ! -f "$config_file" ]; then
+        log "ERROR: Build environment file 'piccolo.env' not found" >&2
+        exit 1
+    fi
+    # shellcheck source=piccolo.env
+    source "$config_file"
+
+    # Validate required environment variables
+    local required_vars=("GPG_SIGNING_KEY_ID" "PICCOLO_UPDATE_SERVER" "PICCOLO_UPDATE_GROUP")
+    for var in "${required_vars[@]}"; do
+        if [ -z "${!var:-}" ]; then
+            log "ERROR: Required environment variable $var not set in piccolo.env" >&2
+            exit 1
+        fi
+    done
+    log "Build configuration loaded and validated"
+}
+
+# ---
+# Utility Functions
 # ---
 log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
 }
 
+log_step() {
+    log "### $*"
+}
+
 usage() {
-    echo "Usage: $0 --version <VERSION> --binary-path <PATH_TO_PICCOLOD>"
+    cat << EOF
+Usage: $0 --version <VERSION> --binary-path <PATH_TO_PICCOLOD>
+
+Arguments:
+  --version       Version string for this build (e.g., '1.0.0')
+  --binary-path   Absolute path to the compiled piccolod binary
+
+Example:
+  $0 --version 1.0.0 --binary-path /path/to/piccolod
+EOF
     exit 1
 }
 
 check_dependencies() {
     log "Checking for required dependencies..."
-    local deps=("git" "docker" "gpg")
+    local deps=("git" "docker" "gpg" "numfmt" "stat")
+    local missing_deps=()
+    
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
-            log "Error: Required dependency '$dep' is not installed." >&2
-            exit 1
+            missing_deps+=("$dep")
         fi
     done
-    log "All dependencies are installed."
+    
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        log "ERROR: Missing required dependencies: ${missing_deps[*]}" >&2
+        log "Please install them and try again" >&2
+        exit 1
+    fi
+    
+    log "All dependencies are installed"
+}
+
+validate_arguments() {
+    local version="$1"
+    local binary_path="$2"
+    
+    if [ -z "$version" ] || [ -z "$binary_path" ]; then
+        log "ERROR: Both --version and --binary-path are required" >&2
+        usage
+    fi
+    
+    if [ ! -f "$binary_path" ]; then
+        log "ERROR: piccolod binary not found at $binary_path" >&2
+        exit 1
+    fi
+    
+    if [ ! -x "$binary_path" ]; then
+        log "ERROR: piccolod binary at $binary_path is not executable" >&2
+        exit 1
+    fi
+    
+    log "Arguments validated successfully" >&2
 }
 
 # ---
-# Main Script Logic
+# Template Generation Functions
 # ---
-main() {
-    # ---
-    # Step 0: Parse Arguments and Check Dependencies
-    # ---
-    if [ "$#" -eq 0 ]; then usage; fi
-    local PICCOLO_VERSION=""
-    local PICCOLOD_BINARY_PATH=""
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            --version) PICCOLO_VERSION="$2"; shift 2;;
-            --binary-path) PICCOLOD_BINARY_PATH="$2"; shift 2;;
-            *) usage;;
-        esac
-    done
-    if [ -z "${PICCOLO_VERSION:-}" ] || [ -z "${PICCOLOD_BINARY_PATH:-}" ]; then usage; fi
-    if [ ! -f "$PICCOLOD_BINARY_PATH" ]; then log "Error: piccolod binary not found at $PICCOLOD_BINARY_PATH" >&2; exit 1; fi
-    check_dependencies
-    
-    if [ -z "${PICCOLO_UPDATE_SERVER:-}" ] || [ -z "${PICCOLO_UPDATE_GROUP:-}" ]; then
-        log "Error: PICCOLO_UPDATE_SERVER or PICCOLO_UPDATE_GROUP not set in piccolo.env" >&2
-        exit 1
-    fi
-
-    # ---
-    # Step 1: Prepare the Build Environment
-    # ---
-    log "### Step 1: Preparing the build environment..."
-    local top_build_dir="${SCRIPT_DIR}/build"
-    local work_dir="${top_build_dir}/work-${PICCOLO_VERSION}"
-    local output_dir="${top_build_dir}/output/${PICCOLO_VERSION}"
-    local scripts_repo_dir="${work_dir}/scripts"
-    mkdir -p "$work_dir" "$output_dir"
-    
-    if [ ! -d "$scripts_repo_dir" ]; then
-        log "Cloning Flatcar scripts repository..."
-        git clone https://github.com/flatcar/scripts.git "$scripts_repo_dir"
-    fi
-    
-    pushd "$scripts_repo_dir" > /dev/null
-    log "Resetting scripts repository to a clean state..."
-    git reset --hard && git clean -fd
-    log "Fetching latest tags from Flatcar repository..."
-    git fetch --prune --prune-tags --tags --force origin
-    LATEST_STABLE_TAG=$(git tag -l | grep -E 'stable-[0-9.]+$' | sort -V | tail -n 1)
-    if [ -z "$LATEST_STABLE_TAG" ]; then log "Error: Could not find any stable release tags." >&2; exit 1; fi
-    log "Checking out latest stable release: $LATEST_STABLE_TAG"
-    git checkout "$LATEST_STABLE_TAG"
-    popd > /dev/null
-
-    # ---
-    # Step 2: Create Custom Ebuild in the Standard coreos-overlay
-    # ---
-    log "### Step 2: Creating custom ebuild in coreos-overlay..."
-    local overlay_dir="${scripts_repo_dir}/sdk_container/src/third_party/coreos-overlay"
-    local ebuild_category="app-misc"
-    local ebuild_pkg_name="piccolod-bin"
-    local ebuild_dir="${overlay_dir}/${ebuild_category}/${ebuild_pkg_name}"
-    
-    mkdir -p "${ebuild_dir}/files"
-    
-    # Copy binary and make it executable
-    cp "$(realpath "$PICCOLOD_BINARY_PATH")" "${ebuild_dir}/files/piccolod"
-    chmod +x "${ebuild_dir}/files/piccolod"
-    
-    # Create systemd service file
-    cat > "${ebuild_dir}/files/piccolod.service" << 'EOF'
+generate_systemd_service() {
+    cat << 'EOF'
 [Unit]
 Description=Piccolo Daemon
 After=network-online.target
@@ -139,20 +139,22 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+}
 
-    # Create systemd preset file to enable the service by default
-    cat > "${ebuild_dir}/files/90-piccolod.preset" << 'EOF'
-enable piccolod.service
-EOF
+generate_systemd_preset() {
+    echo "enable piccolod.service"
+}
 
-    # Create update configuration
-    cat > "${ebuild_dir}/files/update.conf" << EOF
+generate_update_config() {
+    cat << EOF
 GROUP=${PICCOLO_UPDATE_GROUP}
 SERVER=${PICCOLO_UPDATE_SERVER}
 EOF
+}
 
-    # Create the ebuild file with proper EAPI and functions
-    cat > "${ebuild_dir}/${ebuild_pkg_name}-${PICCOLO_VERSION}.ebuild" << 'EOF'
+generate_ebuild_file() {
+    local version="$1"
+    cat << EOF
 # Copyright 2024 Piccolo Space Inc.
 # Distributed under the terms of the Piccolo EULA
 
@@ -176,22 +178,22 @@ RDEPEND="
     sys-apps/systemd
 "
 
-S="${WORKDIR}"
+S="\${WORKDIR}"
 
 src_install() {
     # Install the binary
-    dobin "${FILESDIR}/piccolod"
+    dobin "\${FILESDIR}/piccolod"
     
     # Install systemd unit file
-    systemd_dounit "${FILESDIR}/piccolod.service"
+    systemd_dounit "\${FILESDIR}/piccolod.service"
     
     # Install systemd preset file to enable the service
     insinto /usr/lib/systemd/system-preset
-    doins "${FILESDIR}/90-piccolod.preset"
+    doins "\${FILESDIR}/90-piccolod.preset"
     
     # Install configuration file
     insinto /etc/flatcar
-    doins "${FILESDIR}/update.conf"
+    doins "\${FILESDIR}/update.conf"
     
     # Create log directory
     keepdir /var/log/piccolod
@@ -215,202 +217,389 @@ pkg_prerm() {
     systemctl disable piccolod.service || true
 }
 EOF
+}
 
-    # Add custom license to the overlay
-    mkdir -p "${overlay_dir}/licenses"
-    cat > "${overlay_dir}/licenses/Piccolo-EULA" << 'EOF'
+generate_license_file() {
+    cat << 'EOF'
 Piccolo Space Inc. End User License Agreement
 Copyright (c) 2024 Piccolo Space Inc. All rights reserved.
 This software is proprietary and confidential.
 EOF
+}
 
-    log "Custom ebuild created successfully in ${ebuild_dir}"
-
-    # ---
-    # Step 3: Build All Artifacts Inside the SDK Container
-    # ---
-    log "### Step 3: Starting the SDK to build all artifacts..."
-    pushd "$scripts_repo_dir" > /dev/null
+# ---
+# Build Environment Functions
+# ---
+parse_arguments() {
+    local version=""
+    local binary_path=""
     
-    ./run_sdk_container -- /bin/bash -s -- "${PICCOLO_VERSION}" "${ebuild_category}" "${ebuild_pkg_name}" "${PICCOLO_UPDATE_GROUP}" << 'EOF'
+    if [ "$#" -eq 0 ]; then usage; fi
+    
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --version) version="$2"; shift 2;;
+            --binary-path) binary_path="$2"; shift 2;;
+            --help|-h) usage;;
+            *) log "ERROR: Unknown argument: $1" >&2; usage;;
+        esac
+    done
+    
+    validate_arguments "$version" "$binary_path"
+    echo "$version|$binary_path"
+}
+
+setup_build_directories() {
+    local version="$1"
+    local top_build_dir="${SCRIPT_DIR}/build"
+    local work_dir="${top_build_dir}/work-${version}"
+    local output_dir="${top_build_dir}/output/${version}"
+    
+    mkdir -p "$work_dir" "$output_dir"
+    echo "$work_dir|$output_dir"
+}
+
+clone_flatcar_scripts() {
+    local scripts_repo_dir="$1"
+    
+    if [ ! -d "$scripts_repo_dir" ]; then
+        log "Cloning Flatcar scripts repository..."
+        git clone "$FLATCAR_REPO_URL" "$scripts_repo_dir"
+    fi
+    
+    pushd "$scripts_repo_dir" > /dev/null
+    log "Resetting scripts repository to a clean state..."
+    git reset --hard && git clean -fd
+    log "Fetching latest tags from Flatcar repository..."
+    git fetch --prune --prune-tags --tags --force origin
+    
+    local latest_stable_tag
+    latest_stable_tag=$(git tag -l | grep -E 'stable-[0-9.]+$' | sort -V | tail -n 1)
+    if [ -z "$latest_stable_tag" ]; then 
+        log "ERROR: Could not find any stable release tags" >&2
+        exit 1
+    fi
+    
+    log "Checking out latest stable release: $latest_stable_tag"
+    git checkout "$latest_stable_tag"
+    popd > /dev/null
+}
+
+create_ebuild_package() {
+    local scripts_repo_dir="$1"
+    local version="$2"
+    local binary_path="$3"
+    
+    local overlay_dir="${scripts_repo_dir}/sdk_container/src/third_party/coreos-overlay"
+    local ebuild_dir="${overlay_dir}/${EBUILD_CATEGORY}/${EBUILD_PKG_NAME}"
+    
+    log "Creating ebuild directory structure..."
+    mkdir -p "${ebuild_dir}/files"
+    
+    # Copy binary and make it executable
+    log "Installing piccolod binary..."
+    cp "$(realpath "$binary_path")" "${ebuild_dir}/files/piccolod"
+    chmod +x "${ebuild_dir}/files/piccolod"
+    
+    # Generate configuration files
+    log "Generating systemd service file..."
+    generate_systemd_service > "${ebuild_dir}/files/piccolod.service"
+    
+    log "Generating systemd preset file..."
+    generate_systemd_preset > "${ebuild_dir}/files/90-piccolod.preset"
+    
+    log "Generating update configuration..."
+    generate_update_config > "${ebuild_dir}/files/update.conf"
+    
+    # Create the ebuild file
+    log "Generating ebuild file..."
+    generate_ebuild_file "$version" > "${ebuild_dir}/${EBUILD_PKG_NAME}-${version}.ebuild"
+    
+    # Add custom license to the overlay
+    log "Installing custom license..."
+    mkdir -p "${overlay_dir}/licenses"
+    generate_license_file > "${overlay_dir}/licenses/Piccolo-EULA"
+    
+    log "Custom ebuild created successfully in ${ebuild_dir}"
+}
+
+generate_sdk_build_script() {
+    local version="$1"
+    local update_group="$2"
+    
+    cat << EOF
 set -euxo pipefail
 
-PICCOLO_VERSION="$1"
-EBUILD_CATEGORY="$2"
-EBUILD_PKG_NAME="$3"
-PICCOLO_UPDATE_GROUP="$4"
+PICCOLO_VERSION="$version"
+EBUILD_CATEGORY="$EBUILD_CATEGORY"
+EBUILD_PKG_NAME="$EBUILD_PKG_NAME"
+PICCOLO_UPDATE_GROUP="$update_group"
+BOARD_NAME="$BOARD_NAME"
 
-echo "=== Building Piccolo OS v${PICCOLO_VERSION} ==="
+echo "=== Building Piccolo OS v\${PICCOLO_VERSION} ==="
 
-# Set up portage license configuration first
+# Set up portage license configuration
 echo "Setting up custom license configuration..."
-if [ -d "/etc/portage/package.license" ]; then
-    echo "=app-misc/piccolod-bin-1.0.0 Piccolo-EULA" | sudo tee /etc/portage/package.license/01-piccolo > /dev/null
-    echo "License configuration created in directory format."
-else
-    echo "=app-misc/piccolod-bin-1.0.0 Piccolo-EULA" | sudo tee -a /etc/portage/package.license > /dev/null
-    echo "License configuration added to file format."
-fi
+setup_license_config() {
+    local license_entry="=\${EBUILD_CATEGORY}/\${EBUILD_PKG_NAME}-\${PICCOLO_VERSION} Piccolo-EULA"
+    
+    # Host license configuration
+    if [ -d "/etc/portage/package.license" ]; then
+        echo "\$license_entry" | sudo tee /etc/portage/package.license/01-piccolo > /dev/null
+    else
+        echo "\$license_entry" | sudo tee -a /etc/portage/package.license > /dev/null
+    fi
+    
+    # Board-specific license configuration
+    local board_license_dir="/build/\${BOARD_NAME}/etc/portage/package.license"
+    sudo mkdir -p "/build/\${BOARD_NAME}/etc/portage"
+    if [ -d "\${board_license_dir}" ]; then
+        echo "\$license_entry" | sudo tee "\${board_license_dir}/01-piccolo" > /dev/null
+    elif [ -f "/build/\${BOARD_NAME}/etc/portage/package.license" ]; then
+        echo "\$license_entry" | sudo tee -a "/build/\${BOARD_NAME}/etc/portage/package.license" > /dev/null
+    else
+        echo "\$license_entry" | sudo tee "/build/\${BOARD_NAME}/etc/portage/package.license" > /dev/null
+    fi
+}
 
-# Also add to the board-specific configuration
-BOARD_LICENSE_DIR="/build/amd64-usr/etc/portage/package.license"
-sudo mkdir -p "/build/amd64-usr/etc/portage"
-if [ -d "${BOARD_LICENSE_DIR}" ]; then
-    echo "=app-misc/piccolod-bin-1.0.0 Piccolo-EULA" | sudo tee "${BOARD_LICENSE_DIR}/01-piccolo" > /dev/null
-elif [ -f "/build/amd64-usr/etc/portage/package.license" ]; then
-    echo "=app-misc/piccolod-bin-1.0.0 Piccolo-EULA" | sudo tee -a /build/amd64-usr/etc/portage/package.license > /dev/null
-else
-    echo "=app-misc/piccolod-bin-1.0.0 Piccolo-EULA" | sudo tee /build/amd64-usr/etc/portage/package.license > /dev/null
-fi
+setup_license_config
 
 # Generate manifest for the ebuild
-EBUILD_PATH="sdk_container/src/third_party/coreos-overlay/${EBUILD_CATEGORY}/${EBUILD_PKG_NAME}/${EBUILD_PKG_NAME}-${PICCOLO_VERSION}.ebuild"
-echo "Generating manifest for ${EBUILD_PATH}..."
-ebuild "${EBUILD_PATH}" manifest
+echo "Generating manifest for ebuild..."
+ebuild_path="sdk_container/src/third_party/coreos-overlay/\${EBUILD_CATEGORY}/\${EBUILD_PKG_NAME}/\${EBUILD_PKG_NAME}-\${PICCOLO_VERSION}.ebuild"
+ebuild "\${ebuild_path}" manifest
 
-# Find the coreos base ebuild
-COREOS_EBUILD_PATH=$(find . -path '*/coreos-base/coreos/coreos-0.0.1.ebuild' | head -n 1)
-if [ -z "${COREOS_EBUILD_PATH}" ]; then
-    echo "FATAL: Could not find the coreos-0.0.1.ebuild file." >&2
+# Find and modify the coreos base ebuild
+echo "Locating coreos base ebuild..."
+coreos_ebuild_path=\$(find . -path '*/coreos-base/coreos/coreos-0.0.1.ebuild' | head -n 1)
+if [ -z "\${coreos_ebuild_path}" ]; then
+    echo "FATAL: Could not find the coreos-0.0.1.ebuild file" >&2
     exit 1
 fi
-echo "Found coreos ebuild at: ${COREOS_EBUILD_PATH}"
+echo "Found coreos ebuild at: \${coreos_ebuild_path}"
 
 # Add our package as a dependency to the base system
-DEP_STRING="${EBUILD_CATEGORY}/${EBUILD_PKG_NAME}"
-if ! grep -q "${DEP_STRING}" "${COREOS_EBUILD_PATH}"; then
-    echo "Adding ${DEP_STRING} as an RDEPEND to the coreos package..."
-    # Insert before the closing quote of RDEPENDS
-    sed -i "/^\"$/i \\	${DEP_STRING}" "${COREOS_EBUILD_PATH}"
-    echo "Dependency added successfully."
+dep_string="\${EBUILD_CATEGORY}/\${EBUILD_PKG_NAME}"
+if ! grep -q "\${dep_string}" "\${coreos_ebuild_path}"; then
+    echo "Adding \${dep_string} as an RDEPEND to the coreos package..."
+    sed -i "/^\"/i \\\\\t\${dep_string}" "\${coreos_ebuild_path}"
+    echo "Dependency added successfully"
 else
-    echo "${DEP_STRING} dependency already exists in coreos package."
+    echo "Dependency already exists in coreos package"
 fi
 
-# Use autounmask to handle any keyword/use flag issues
+# Handle autounmask requirements
 echo "Running emerge with --autounmask-write..."
-emerge-amd64-usr --autounmask --autounmask-write "=${EBUILD_CATEGORY}/${EBUILD_PKG_NAME}-${PICCOLO_VERSION}" || {
+emerge-\${BOARD_NAME} --autounmask --autounmask-write "=\${EBUILD_CATEGORY}/\${EBUILD_PKG_NAME}-\${PICCOLO_VERSION}" || {
     echo "Running dispatch-conf to apply autounmask changes..."
-    # Automatically accept all changes
     yes | dispatch-conf || true
 }
 
-# Test build our package first
-echo "Testing build of ${EBUILD_PKG_NAME}..."
-emerge-amd64-usr --ask=n "=${EBUILD_CATEGORY}/${EBUILD_PKG_NAME}-${PICCOLO_VERSION}"
+# Build and verify our package
+echo "Building \${EBUILD_PKG_NAME} package..."
+emerge-\${BOARD_NAME} --ask=n "=\${EBUILD_CATEGORY}/\${EBUILD_PKG_NAME}-\${PICCOLO_VERSION}"
 
-# Verify the package was installed correctly
+# Verify package installation
 echo "Verifying package installation..."
-if [ ! -f "/build/amd64-usr/usr/bin/piccolod" ]; then
-    echo "ERROR: piccolod binary not found in build root!" >&2
-    exit 1
-fi
+verify_installation() {
+    local build_root="/build/\${BOARD_NAME}"
+    if [ ! -f "\${build_root}/usr/bin/piccolod" ]; then
+        echo "ERROR: piccolod binary not found in build root" >&2
+        return 1
+    fi
+    if [ ! -f "\${build_root}/usr/lib/systemd/system/piccolod.service" ]; then
+        echo "ERROR: piccolod.service not found in build root" >&2
+        return 1
+    fi
+    echo "Package verification successful"
+}
 
-if [ ! -f "/build/amd64-usr/usr/lib/systemd/system/piccolod.service" ]; then
-    echo "ERROR: piccolod.service not found in build root!" >&2
-    exit 1
-fi
+verify_installation
 
-echo "Package verification successful!"
-
-# Update the coreos base package to include our changes
+# Update the coreos base package
 echo "Updating coreos base package..."
-emerge-amd64-usr --ask=n coreos-base/coreos
+emerge-\${BOARD_NAME} --ask=n coreos-base/coreos
 
-# Run dependency check
-echo "Running pre-flight dependency check..."
-emerge-amd64-usr -p --quiet coreos-base/coreos
+# Pre-flight dependency check
+echo "Running dependency check..."
+emerge-\${BOARD_NAME} -p --quiet coreos-base/coreos
 
 # Build all packages
 echo "Building all packages..."
-./build_packages --board='amd64-usr'
+./build_packages --board="\${BOARD_NAME}"
 
-# Build the production image with update payload
+# Build the production image
 echo "Building production image..."
-./build_image --board='amd64-usr' --group="${PICCOLO_UPDATE_GROUP}" --image_compression_formats=gz prod
+./build_image --board="\${BOARD_NAME}" --group="\${PICCOLO_UPDATE_GROUP}" --image_compression_formats=gz prod
 
-# Verify our service is in the final image
-echo "Verifying service inclusion in final image..."
-LATEST_BUILD_DIR="./__build__/images/images/amd64-usr/latest"
-if [ -d "${LATEST_BUILD_DIR}" ]; then
-    # Mount and check the image (this is a simplified check)
+# Verify build artifacts
+echo "Verifying build artifacts..."
+latest_build_dir="./__build__/images/images/\${BOARD_NAME}/latest"
+if [ -d "\${latest_build_dir}" ]; then
     echo "Build directory contents:"
-    ls -la "${LATEST_BUILD_DIR}/"
+    ls -la "\${latest_build_dir}/"
     
-    # Look for our files in the build artifacts
-    echo "Checking for piccolod in build artifacts..."
-    if ls "${LATEST_BUILD_DIR}"/*.bin* &>/dev/null; then
-        echo "Update binary found."
+    if ls "\${latest_build_dir}"/*.bin* &>/dev/null; then
+        echo "Update binary found"
     fi
 fi
 
 # Create bootable ISO
 echo "Creating bootable ISO..."
-./image_to_vm.sh --from="${LATEST_BUILD_DIR}" --format=iso --board='amd64-usr'
+./image_to_vm.sh --from="\${latest_build_dir}" --format=iso --board="\${BOARD_NAME}"
 
-echo "=== Build completed successfully! ==="
+echo "=== Build completed successfully ==="
 EOF
-    popd > /dev/null
+}
 
-    log "### Finished building all artifacts inside the SDK!"
+build_in_sdk_container() {
+    local scripts_repo_dir="$1"
+    local version="$2"
+    local update_group="$3"
     
-    # ---
-    # Step 4 & 5: Package and Sign Final Artifacts
-    # ---
-    log "### Step 4 & 5: Packaging and signing final artifacts..."
-    local artifact_src_dir="${scripts_repo_dir}/__build__/images/images/amd64-usr/latest"
+    log "Starting SDK container build process..."
+    pushd "$scripts_repo_dir" > /dev/null
     
-    # Identify the build artifacts
-    local src_bin_gz="${artifact_src_dir}/flatcar_production_update.bin.gz" 
+    # Generate and execute the build script inside the SDK
+    generate_sdk_build_script "$version" "$update_group" | \
+        ./run_sdk_container -- /bin/bash -s
+    
+    popd > /dev/null
+    log "SDK container build completed"
+}
+
+package_and_sign_artifacts() {
+    local scripts_repo_dir="$1"
+    local output_dir="$2"
+    local version="$3"
+    
+    log_step "Packaging and signing final artifacts" >&2
+    
+    local artifact_src_dir="${scripts_repo_dir}/__build__/images/images/${BOARD_NAME}/latest"
+    local src_bin_gz="${artifact_src_dir}/flatcar_production_update.bin.gz"
     local src_iso="${artifact_src_dir}/flatcar_production_iso_image.iso"
     
+    # Verify source artifacts exist
     if [ ! -f "$src_bin_gz" ] || [ ! -f "$src_iso" ]; then
-        log "Error: Required build artifacts not found in ${artifact_src_dir}" >&2
-        log "Available files:"
-        ls -la "${artifact_src_dir}/" || true
+        log "ERROR: Required build artifacts not found in ${artifact_src_dir}" >&2
+        log "Available files:" >&2
+        ls -la "${artifact_src_dir}/" >&2 || true
         exit 1
     fi
-
-    # Final artifact names
-    local final_raw_gz="${output_dir}/piccolo-os-update-${PICCOLO_VERSION}.raw.gz"
-    local final_asc="${output_dir}/piccolo-os-update-${PICCOLO_VERSION}.raw.gz.asc"
-    local final_iso="${output_dir}/piccolo-os-live-${PICCOLO_VERSION}.iso"
-
-    log "Moving final artifacts to ${output_dir}"
+    
+    # Define final artifact paths
+    local final_raw_gz="${output_dir}/piccolo-os-update-${version}.raw.gz"
+    local final_asc="${output_dir}/piccolo-os-update-${version}.raw.gz.asc"
+    local final_iso="${output_dir}/piccolo-os-live-${version}.iso"
+    
+    # Copy artifacts to output directory
+    log "Copying artifacts to output directory..." >&2
     cp "$src_bin_gz" "$final_raw_gz"
     cp "$src_iso" "$final_iso"
-
+    
     # Sign the update artifact
-    log "Signing the update artifact with GPG key: ${GPG_SIGNING_KEY_ID}"
+    log "Signing update artifact with GPG key: ${GPG_SIGNING_KEY_ID}" >&2
     gpg --detach-sign --armor --output "${final_asc}" -u "$GPG_SIGNING_KEY_ID" "$final_raw_gz"
     
-    log "Verifying signature..."
+    # Verify signature
+    log "Verifying GPG signature..." >&2
     gpg --verify "${final_asc}" "${final_raw_gz}"
-    log "Update image signed and verified."
-
-    # ---
-    # Step 6: Final Verification and Output
-    # ---
-    log "### Step 6: Final verification..."
+    log "Signature verification successful" >&2
     
-    # Additional verification: Check if we can extract and examine the image
-    local temp_dir=$(mktemp -d)
-    trap "rm -rf $temp_dir" EXIT
-    
-    log "Performing final verification of artifacts..."
-    echo "✅ Update image: $(stat -c%s "$final_raw_gz" | numfmt --to=iec-i --suffix=B)"
-    echo "✅ Live ISO: $(stat -c%s "$final_iso" | numfmt --to=iec-i --suffix=B)"
-    echo "✅ Signature: Valid"
+    # Return artifact paths for verification
+    echo "$final_raw_gz|$final_asc|$final_iso"
+}
 
-    log "✅ Build complete!"
-    log "Your final, signed artifacts are located in: ${output_dir}"
+verify_and_report_build() {
+    local output_dir="$1"
+    local artifacts="$2"
+    
+    log_step "Final verification and summary"
+    
+    # Parse artifact paths
+    local final_raw_gz
+    local final_asc
+    local final_iso
+    IFS='|' read -r final_raw_gz final_asc final_iso <<< "$artifacts"
+    
+    # Verify artifacts and display sizes
+    log "Build artifact verification:"
+    if [ -f "$final_raw_gz" ]; then
+        echo "✅ Update image: $(stat -c%s "$final_raw_gz" | numfmt --to=iec-i --suffix=B)"
+    else
+        echo "❌ Update image: Not found"
+        exit 1
+    fi
+    
+    if [ -f "$final_iso" ]; then
+        echo "✅ Live ISO: $(stat -c%s "$final_iso" | numfmt --to=iec-i --suffix=B)"
+    else
+        echo "❌ Live ISO: Not found"
+        exit 1
+    fi
+    
+    if [ -f "$final_asc" ]; then
+        echo "✅ GPG Signature: Valid"
+    else
+        echo "❌ GPG Signature: Not found"
+        exit 1
+    fi
+    
+    log "✅ Build completed successfully!"
+    log "Final artifacts located in: ${output_dir}"
     ls -lh "${output_dir}"
     
     log ""
     log "🚀 Next steps:"
     log "  1. Test the live ISO: ${final_iso}"
     log "  2. Deploy the update image: ${final_raw_gz}"
-    log "  3. Verify signature with: gpg --verify ${final_asc} ${final_raw_gz}"
+    log "  3. Verify signature: gpg --verify ${final_asc} ${final_raw_gz}"
 }
 
-main "$@"
+# ---
+# Main Script Logic
+# ---
+main() {
+    # Parse and validate arguments
+    local args
+    args=$(parse_arguments "$@")
+    local version
+    local binary_path
+    IFS='|' read -r version binary_path <<< "$args"
+    
+    # Load configuration and check dependencies
+    load_build_config
+    check_dependencies
+    
+    # Set up build environment
+    log_step "Step 1: Preparing build environment"
+    local dirs
+    dirs=$(setup_build_directories "$version")
+    local work_dir
+    local output_dir
+    IFS='|' read -r work_dir output_dir <<< "$dirs"
+    
+    local scripts_repo_dir="${work_dir}/scripts"
+    clone_flatcar_scripts "$scripts_repo_dir"
+    
+    # Create custom ebuild package
+    log_step "Step 2: Creating custom ebuild package"
+    create_ebuild_package "$scripts_repo_dir" "$version" "$binary_path"
+    
+    # # Build OS image in SDK container
+    # log_step "Step 3: Building OS image in SDK container"
+    # build_in_sdk_container "$scripts_repo_dir" "$version" "$PICCOLO_UPDATE_GROUP"
+    
+    # Package and sign final artifacts
+    log_step "Step 4: Packaging and signing artifacts"
+    local artifacts
+    artifacts=$(package_and_sign_artifacts "$scripts_repo_dir" "$output_dir" "$version")
+    
+    # Final verification and reporting
+    verify_and_report_build "$output_dir" "$artifacts"
+}
+
+# Execute main function if script is run directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
