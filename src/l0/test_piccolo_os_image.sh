@@ -1,10 +1,13 @@
 #!/bin/bash
 #
-# Piccolo OS - Automated QA Smoke Test Script v2.3
+# Piccolo OS - Automated QA Smoke Test Script v2.6
 #
 # This script boots the Piccolo Live ISO in a VM using a direct QEMU command
 # and runs a series of automated checks to verify its integrity and core functionality.
-# v2.3 uses cloud-init for SSH key injection, which is more reliable for live environments.
+#
+# v2.6 Improvements:
+# - Fixes a variable scope bug in the cleanup trap by making key variables global.
+#   This ensures cleanup runs correctly even when tests fail and the script exits early.
 #
 
 # ---
@@ -12,6 +15,16 @@
 # ---
 set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SSH_PORT=2222 # The host port to forward to the VM's SSH port (22)
+
+# ---
+# Global variables for the trap handler
+# ---
+# These are defined globally so the cleanup function can access them
+# even if the script exits unexpectedly from within a function.
+qemu_pid=""
+test_dir=""
+
 
 # ---
 # Helper Functions
@@ -29,20 +42,56 @@ usage() {
 
 check_dependencies() {
     log "Checking for required dependencies..."
-    local deps=("qemu-system-x86_64" "ssh" "ssh-keygen")
+    # Add 'ss' for network socket checking
+    local deps=("qemu-system-x86_64" "ssh" "ssh-keygen" "ss")
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             log "Error: Required dependency '$dep' is not installed." >&2
+            log "On Debian/Ubuntu, try: sudo apt-get install -y qemu-system-x86 openssh-client iproute2"
             exit 1
         fi
     done
     log "All dependencies are installed."
 }
 
+# This function contains the robust cleanup logic.
+cleanup() {
+    log "### Cleaning up..."
+    # Check if the QEMU PID was set and if the process still exists
+    if [ -n "${qemu_pid:-}" ] && ps -p "$qemu_pid" > /dev/null; then
+        log "Attempting graceful shutdown of QEMU PID: $qemu_pid..."
+        kill "$qemu_pid" 2>/dev/null
+        # Wait up to 3 seconds for it to terminate
+        for _ in {1..3}; do
+            if ! ps -p "$qemu_pid" > /dev/null; then
+                break
+            fi
+            sleep 1
+        done
+
+        # If it's still alive, it's stuck. Force kill it.
+        if ps -p "$qemu_pid" > /dev/null; then
+            log "QEMU did not shut down gracefully. Forcing termination (kill -9)..."
+            kill -9 "$qemu_pid" 2>/dev/null
+        fi
+        log "QEMU process terminated."
+    fi
+    
+    # Now that test_dir is global, this will work reliably.
+    if [ -d "${test_dir:-}" ]; then
+        rm -rf "$test_dir"
+        log "Test directory cleaned up."
+    fi
+    log "Cleanup complete."
+}
+
 # ---
 # Main Script Logic
 # ---
 main() {
+    # Set up the trap to call the cleanup function on exit, interrupt, or termination.
+    trap cleanup EXIT INT TERM
+
     # ---
     # Step 0: Parse Arguments and Check Dependencies
     # ---
@@ -64,21 +113,22 @@ main() {
     # Step 1: Prepare Test Environment
     # ---
     log "### Step 1: Preparing the test environment..."
-    local test_dir="${SCRIPT_DIR}/build/test-${PICCOLO_VERSION}"
+    # Assign a value to the global test_dir variable
+    test_dir="${SCRIPT_DIR}/build/test-${PICCOLO_VERSION}"
     local iso_path="${BUILD_DIR}/piccolo-os-live-${PICCOLO_VERSION}.iso"
     local ssh_key="${test_dir}/id_rsa_test"
     local config_drive_dir="${test_dir}/config-drive"
-    
+
+    # Clean up previous run just in case
+    rm -rf "$test_dir"
     mkdir -p "$test_dir"
     mkdir -p "${config_drive_dir}/openstack/latest"
     if [ ! -f "$iso_path" ]; then log "Error: ISO file not found at ${iso_path}" >&2; exit 1; fi
     
     log "Generating temporary SSH key for this test run..."
-    # CORRECTED: Use 'echo y' for more reliable non-interactive overwrite.
-    echo y | ssh-keygen -t rsa -b 4096 -f "$ssh_key" -N "" -q
+    ssh-keygen -t rsa -b 4096 -f "$ssh_key" -N "" -q
 
-    # Create a cloud-config file to inject the SSH key. This is the most
-    # reliable method for live environments.
+    log "Creating cloud-config for SSH key injection..."
     cat > "${config_drive_dir}/openstack/latest/user_data" <<EOF
 #cloud-config
 ssh_authorized_keys:
@@ -90,14 +140,19 @@ EOF
     # ---
     log "### Step 2: Booting Piccolo Live ISO in QEMU..."
     
-    # We construct our own QEMU command for full control and robustness.
+    # Check if the port is already in use
+    if ss -Hltn "sport = :${SSH_PORT}" | grep -q "LISTEN"; then
+        log "Error: Port ${SSH_PORT} is already in use. Please kill the process using it or change SSH_PORT in the script." >&2
+        exit 1
+    fi
+    
     qemu-system-x86_64 \
         -name "Piccolo-QA-${PICCOLO_VERSION}" \
         -m 2048 \
         -machine q35,accel=kvm \
         -cpu host \
         -smp "$(getconf _NPROCESSORS_ONLN)" \
-        -netdev user,id=eth0,hostfwd=tcp::2222-:22 \
+        -netdev user,id=eth0,hostfwd=tcp::${SSH_PORT}-:22 \
         -device virtio-net-pci,netdev=eth0 \
         -object rng-random,filename=/dev/urandom,id=rng0 \
         -device virtio-rng-pci,rng=rng0 \
@@ -106,24 +161,25 @@ EOF
         -device virtio-9p-pci,fsdev=conf,mount_tag=config-2 \
         -boot order=d \
         -nographic &
-    local qemu_pid=$!
+    # Assign a value to the global qemu_pid variable
+    qemu_pid=$!
     log "QEMU started successfully with PID: $qemu_pid"
 
     # ---
     # Step 3: Wait for SSH and Run Checks
     # ---
-    log "### Step 3: Waiting for SSH to become available..."
-    local ssh_port=2222
-    local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${ssh_key}"
+    log "### Step 3: Waiting for SSH to become available on port ${SSH_PORT}..."
+    local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
     local checks_passed=false
     
     # Wait for up to 2 minutes for SSH to be ready
     for i in {1..120}; do
-        if ssh -p "$ssh_port" $ssh_opts "core@localhost" "echo 'SSH is ready'" &> /dev/null; then
+        # Use -q to suppress banner, but allow errors to be seen
+        if ssh -q -p "$SSH_PORT" -i "${ssh_key}" $ssh_opts "core@localhost" "echo 'SSH is ready'" 2>/dev/null; then
             log "SSH is available. Running automated checks..."
             
             # These checks run against the LIVE environment booted from our ISO.
-            ssh -p "$ssh_port" $ssh_opts "core@localhost" /bin/bash -s -- "$PICCOLO_VERSION" << 'EOF'
+            ssh -p "$SSH_PORT" -i "${ssh_key}" $ssh_opts "core@localhost" /bin/bash -s -- "$PICCOLO_VERSION" << 'EOF'
 set -euo pipefail
 PICCOLO_VERSION_TO_TEST="$1"
 
@@ -136,14 +192,23 @@ else
 fi
 
 echo "--- CHECK 2: piccolod version ---"
-/usr/bin/piccolod --version | grep -q "${PICCOLO_VERSION_TO_TEST}"
-echo "PASS: piccolod version is correct."
+if /usr/bin/piccolod --version | grep -q "${PICCOLO_VERSION_TO_TEST}"; then
+    echo "PASS: piccolod version is correct."
+else
+    echo "FAIL: piccolod version does not match."
+    /usr/bin/piccolod --version
+    exit 1
+fi
 
 echo "--- CHECK 3: Container runtime ---"
 # We need to start docker first in the live environment
 sudo systemctl start docker
-docker run --rm hello-world
-echo "PASS: Container runtime is functional."
+if docker run --rm hello-world; then
+    echo "PASS: Container runtime is functional."
+else
+    echo "FAIL: Could not run hello-world container."
+    exit 1
+fi
 EOF
             checks_passed=true
             break
@@ -153,21 +218,17 @@ EOF
     done
 
     # ---
-    # Step 4: Report Results and Cleanup
+    # Step 4: Report Results
     # ---
     log "" # Newline for cleaner output
-    log "### Step 4: Cleaning up..."
-    kill "$qemu_pid"
-    log "QEMU process ($qemu_pid) terminated."
-    
-    rm -rf "$test_dir"
-    log "Test directory cleaned up."
-
     if [ "$checks_passed" = true ]; then
         log "✅ ✅ ✅ ALL CHECKS PASSED ✅ ✅ ✅"
         exit 0
     else
         log "❌ ❌ ❌ TEST FAILED: SSH connection timed out or a check failed. ❌ ❌ ❌"
+        log "Last SSH attempt details:"
+        # Run with verbose output to diagnose the failure
+        ssh -v -p "$SSH_PORT" -i "${ssh_key}" $ssh_opts "core@localhost" "echo 'Final connection attempt'"
         exit 1
     fi
 }
