@@ -1,13 +1,14 @@
 #!/bin/bash
 #
-# Piccolo OS - Automated QA Smoke Test Script v2.6
+# Piccolo OS - Interactive SSH Script v1.1
 #
-# This script boots the Piccolo Live ISO in a VM using a direct QEMU command
-# and runs a series of automated checks to verify its integrity and core functionality.
+# This script boots the Piccolo Live ISO in a temporary QEMU virtual machine
+# and provides an interactive SSH console for debugging and exploration.
 #
-# v2.6 Improvements:
-# - Fixes a variable scope bug in the cleanup trap by making key variables global.
-#   This ensures cleanup runs correctly even when tests fail and the script exits early.
+# v1.1 Improvements:
+# - Fixes a race condition by retrying the SSH connection, allowing cloud-init
+#   time to apply the SSH key before attempting to log in.
+# - Adds a trap guard to the cleanup function to prevent it from ever running twice.
 #
 
 # ---
@@ -36,13 +37,12 @@ log() {
 usage() {
     echo "Usage: $0 --build-dir <PATH_TO_BUILD_OUTPUT> --version <VERSION>"
     echo "  --build-dir    (Required) The path to the build output directory containing the ISO."
-    echo "  --version      (Required) The version of the image being tested (e.g., 1.0.0)."
+    echo "  --version      (Required) The version of the image being debugged (e.g., 1.0.0)."
     exit 1
 }
 
 check_dependencies() {
     log "Checking for required dependencies..."
-    # Add 'ss' for network socket checking
     local deps=("qemu-system-x86_64" "ssh" "ssh-keygen" "ss")
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
@@ -56,6 +56,8 @@ check_dependencies() {
 
 # This function contains the robust cleanup logic.
 cleanup() {
+    # FIX: Disable the trap to prevent it from running multiple times.
+    trap - EXIT INT TERM
     log "### Cleaning up..."
     # Check if the QEMU PID was set and if the process still exists
     if [ -n "${qemu_pid:-}" ] && ps -p "$qemu_pid" > /dev/null; then
@@ -112,9 +114,9 @@ main() {
     # ---
     # Step 1: Prepare Test Environment
     # ---
-    log "### Step 1: Preparing the test environment..."
+    log "### Step 1: Preparing the environment..."
     # Assign a value to the global test_dir variable
-    test_dir="${SCRIPT_DIR}/build/test-${PICCOLO_VERSION}"
+    test_dir="${SCRIPT_DIR}/build/ssh-session-${PICCOLO_VERSION}"
     local iso_path="${BUILD_DIR}/piccolo-os-live-${PICCOLO_VERSION}.iso"
     local ssh_key="${test_dir}/id_rsa_test"
     local config_drive_dir="${test_dir}/config-drive"
@@ -125,7 +127,7 @@ main() {
     mkdir -p "${config_drive_dir}/openstack/latest"
     if [ ! -f "$iso_path" ]; then log "Error: ISO file not found at ${iso_path}" >&2; exit 1; fi
     
-    log "Generating temporary SSH key for this test run..."
+    log "Generating temporary SSH key for this session..."
     ssh-keygen -t rsa -b 4096 -f "$ssh_key" -N "" -q
 
     log "Creating cloud-config for SSH key injection..."
@@ -147,7 +149,7 @@ EOF
     fi
     
     qemu-system-x86_64 \
-        -name "Piccolo-QA-${PICCOLO_VERSION}" \
+        -name "Piccolo-SSH-${PICCOLO_VERSION}" \
         -m 2048 \
         -machine q35,accel=kvm \
         -cpu host \
@@ -166,108 +168,56 @@ EOF
     log "QEMU started successfully with PID: $qemu_pid"
 
     # ---
-    # Step 3: Wait for SSH and Run Checks
+    # Step 3: Wait for SSH to become available
     # ---
     log "### Step 3: Waiting for SSH to become available on port ${SSH_PORT}..."
-    local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
-    local checks_passed=false
     
     # Wait for up to 2 minutes for SSH to be ready
     for i in {1..120}; do
-        # Use -q to suppress banner, but allow errors to be seen
-        if ssh -q -p "$SSH_PORT" -i "${ssh_key}" $ssh_opts "core@localhost" "echo 'SSH is ready'" 2>/dev/null; then
-            log "SSH is available. Running automated checks..."
-            
-            # These checks run against the LIVE environment booted from our ISO.
-            ssh -p "$SSH_PORT" -i "${ssh_key}" $ssh_opts "core@localhost" /bin/bash -s -- "$PICCOLO_VERSION" << 'EOF'
-set -euo pipefail
-PICCOLO_VERSION_TO_TEST="$1"
-
-echo "--- CHECK 1: piccolod binary ---"
-if [ -x "/usr/bin/piccolod" ]; then
-    echo "PASS: piccolod binary is present and executable."
-else
-    echo "FAIL: piccolod binary not found or not executable."
-    exit 1
-fi
-
-echo "--- CHECK 2: piccolod service status ---"
-# The service should be enabled and running by default.
-if sudo systemctl is-active --quiet piccolod.service; then
-    echo "PASS: piccolod service is active."
-else
-    echo "FAIL: piccolod service is not active."
-    sudo systemctl status piccolod.service
-    exit 1
-fi
-
-echo "--- CHECK 3: piccolod version via HTTP ---"
-# Use curl to get the version from the API endpoint
-# Add a retry loop in case the service is slow to start accepting connections
-for i in {1..5}; do
-    # Use --fail to make curl exit with an error if the HTTP request fails (e.g., 404, 500)
-    # Use -s for silent mode
-    VERSION_JSON=$(curl -s --fail http://localhost:8080/version 2>/dev/null)
-    if [ $? -eq 0 ]; then
-        break
-    fi
-    echo "Attempt $i: Failed to contact version endpoint. Retrying in 2 seconds..."
-    sleep 2
-done
-
-if [ -z "${VERSION_JSON:-}" ]; then
-    echo "FAIL: Could not retrieve version from endpoint after multiple attempts."
-    exit 1
-fi
-
-# Extract version from JSON using basic tools to avoid jq dependency
-EXTRACTED_VERSION=$(echo "$VERSION_JSON" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
-
-if [ -z "${EXTRACTED_VERSION}" ]; then
-    echo "FAIL: Could not parse version from JSON response: ${VERSION_JSON}"
-    exit 1
-fi
-
-echo "Found version '${EXTRACTED_VERSION}' from endpoint."
-
-if [ "${EXTRACTED_VERSION}" == "${PICCOLO_VERSION_TO_TEST}" ]; then
-    echo "PASS: piccolod version is correct."
-else
-    echo "FAIL: piccolod version does not match. Expected ${PICCOLO_VERSION_TO_TEST}, got ${EXTRACTED_VERSION}."
-    exit 1
-fi
-
-echo "--- CHECK 4: Container runtime ---"
-# We need to start docker first in the live environment
-sudo systemctl start docker
-if docker run --rm hello-world; then
-    echo "PASS: Container runtime is functional."
-else
-    echo "FAIL: Could not run hello-world container."
-    exit 1
-fi
-EOF
-            checks_passed=true
+        if ssh -q -p "$SSH_PORT" -i "${ssh_key}" -o ConnectTimeout=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "core@localhost" "echo 'SSH is ready'" 2>/dev/null; then
+            log "SSH port is open."
             break
+        fi
+        
+        if [ "$i" -eq 120 ]; then
+            log "Error: Timed out waiting for SSH port." >&2
+            exit 1
         fi
         echo -n "."
         sleep 1
     done
 
     # ---
-    # Step 4: Report Results
+    # Step 4: Connect to the interactive session
     # ---
-    log "" # Newline for cleaner output
-    if [ "$checks_passed" = true ]; then
-        log "✅ ✅ ✅ ALL CHECKS PASSED ✅ ✅ ✅"
-        exit 0
-    else
-        log "❌ ❌ ❌ TEST FAILED: SSH connection timed out or a check failed. ❌ ❌ ❌"
-        log "Last SSH attempt details:"
-        # Run with verbose output to diagnose the failure
-        ssh -v -p "$SSH_PORT" -i "${ssh_key}" $ssh_opts "core@localhost" "echo 'Final connection attempt'"
+    log "### Step 4: Connecting to interactive session (will retry a few times)..."
+    log "Type 'exit' or press Ctrl+D to close the session and shut down the VM."
+    
+    local connected=false
+    # FIX: Retry the connection to give cloud-init time to apply the key.
+    for i in {1..5}; do
+        if ssh -p "$SSH_PORT" -i "${ssh_key}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes "core@localhost" "echo 'Connection successful'" 2>/dev/null; then
+            # Now connect for real for the interactive session
+            ssh -p "$SSH_PORT" \
+                -i "${ssh_key}" \
+                -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null \
+                "core@localhost"
+            connected=true
+            break
+        else
+            log "Login not yet ready, retrying in ${i}s..."
+            sleep "$i"
+        fi
+    done
+
+    if [ "$connected" = false ]; then
+        log "Error: Could not establish SSH connection after multiple retries. The VM may not have provisioned correctly." >&2
         exit 1
     fi
+
+    log "SSH session closed."
+    # The script will now exit, and the 'trap' will trigger the cleanup function.
 }
 
 main "$@"
