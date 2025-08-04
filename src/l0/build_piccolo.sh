@@ -1,12 +1,13 @@
 #!/bin/bash
 #
-# Piccolo OS - Production Build Script v8.0 (Definitive)
+# Piccolo OS - Production Build Script v15.4 (Definitive)
 #
-# This version incorporates the final understanding of the SDK's mounting
-# behavior. It creates the custom overlay and repository configuration inside
-# the 'sdk_container' directory, which is automatically mounted into the
-# container's source tree. This removes all complex, manual mount commands
-# and relies on the SDK's native, robust functionality.
+# This version uses the 'emerge --autounmask-write' command to allow the
+# build system to automatically generate its own unmasking configuration.
+# This is the most robust and canonical method for resolving keyword and
+# license mask errors, removing all manual configuration steps.
+#
+# v15.4 corrects the expected name of the update artifact.
 #
 
 # ---
@@ -102,13 +103,11 @@ main() {
     popd > /dev/null
 
     # ---
-    # Step 2: Create Custom Ebuild, Overlay, and Repository Config
+    # Step 2: Create Custom Ebuild in the Standard coreos-overlay
     # ---
-    log "### Step 2: Creating custom ebuild and overlay..."
-    # FIX: Place the overlay inside the 'sdk_container' directory.
-    # This directory's contents are automatically made available inside the container.
-    local overlay_dir="${scripts_repo_dir}/sdk_container/piccolo-overlay"
-    local ebuild_category="app-piccolo"
+    log "### Step 2: Creating custom ebuild in coreos-overlay..."
+    local overlay_dir="${scripts_repo_dir}/sdk_container/src/third_party/coreos-overlay"
+    local ebuild_category="app-misc"
     local ebuild_pkg_name="piccolod-bin"
     local ebuild_dir="${overlay_dir}/${ebuild_category}/${ebuild_pkg_name}"
     
@@ -144,6 +143,8 @@ SLOT="0"
 KEYWORDS="~amd64"
 QA_PREBUILT=*
 
+S="\${WORKDIR}"
+
 src_install() {
     dobin "\${FILESDIR}/piccolod"
     systemd_dounit "\${FILESDIR}/piccolod.service"
@@ -151,25 +152,7 @@ src_install() {
     doins "\${FILESDIR}/update.conf"
 }
 EOF
-
-    mkdir -p "${overlay_dir}/metadata"
-    echo "masters = portage-stable" > "${overlay_dir}/metadata/layout.conf"
-    mkdir -p "${overlay_dir}/profiles"
-    echo "piccolo-overlay" > "${overlay_dir}/profiles/repo_name"
-
-    # FIX: Place the repository config inside the 'sdk_container' directory.
-    log "Creating repository config..."
-    local repo_config_dir="${scripts_repo_dir}/sdk_container/config/portage/repos"
-    mkdir -p "$repo_config_dir"
-    cat > "${repo_config_dir}/piccolo.conf" << EOF
-[piccolo-overlay]
-# The location is now relative to the container's source root.
-location = /mnt/host/source/piccolo-overlay
-priority = 50
-masters = portage-stable
-auto-sync = no
-EOF
-    log "Custom overlay and repo config created successfully."
+    log "Custom ebuild created successfully in ${ebuild_dir}"
 
     # ---
     # Step 3: Build All Artifacts Inside the SDK Container
@@ -177,34 +160,38 @@ EOF
     log "### Step 3: Starting the SDK to build all artifacts..."
     pushd "$scripts_repo_dir" > /dev/null
     
-    # FIX: No manual mounts needed. Rely on the default behavior.
-    ./run_sdk_container -- /bin/bash -s -- "${PICCOLO_VERSION}" "${ebuild_category}" "${ebuild_pkg_name}" "${PICCOLO_UPDATE_GROUP}" << 'EOF'
+    ./run_sdk_container -- /bin/bash -s -- "${PICCOLO_VERSION}" "${ebuild_category}" "${ebuild_pkg_name}" "${PICCOLO_UPDATE_GROUP}" << EOF
 set -euxo pipefail
 
-PICCOLO_VERSION="$1"
-EBUILD_CATEGORY="$2"
-EBUILD_PKG_NAME="$3"
-PICCOLO_UPDATE_GROUP="$4"
+PICCOLO_VERSION="\$1"
+EBUILD_CATEGORY="\$2"
+EBUILD_PKG_NAME="\$3"
+PICCOLO_UPDATE_GROUP="\$4"
 
-# The path inside the container now correctly points to the auto-mounted overlay.
-EBUILD_PATH="/mnt/host/source/piccolo-overlay/${EBUILD_CATEGORY}/${EBUILD_PKG_NAME}/${EBUILD_PKG_NAME}-${PICCOLO_VERSION}.ebuild"
-ebuild "${EBUILD_PATH}" manifest
-echo "Manifest generated for ${EBUILD_PKG_NAME}."
+EBUILD_PATH="sdk_container/src/third_party/coreos-overlay/\${EBUILD_CATEGORY}/\${EBUILD_PKG_NAME}/\${EBUILD_PKG_NAME}-\${PICCOLO_VERSION}.ebuild"
+ebuild "\${EBUILD_PATH}" manifest
+echo "Manifest generated for \${EBUILD_PKG_NAME}."
 
-COREOS_EBUILD_PATH=$(find . -path '*/coreos-base/coreos/coreos-0.0.1.ebuild' | head -n 1)
-if [ -z "${COREOS_EBUILD_PATH}" ]; then
+COREOS_EBUILD_PATH=\$(find . -path '*/coreos-base/coreos/coreos-0.0.1.ebuild' | head -n 1)
+if [ -z "\${COREOS_EBUILD_PATH}" ]; then
     echo "FATAL: Could not dynamically find the coreos-0.0.1.ebuild file." >&2
     exit 1
 fi
-echo "Found coreos ebuild at: ${COREOS_EBUILD_PATH}"
+echo "Found coreos ebuild at: \${COREOS_EBUILD_PATH}"
 
-DEP_STRING="${EBUILD_CATEGORY}/${EBUILD_PKG_NAME}"
-if ! grep -q "${DEP_STRING}" "${COREOS_EBUILD_PATH}"; then
-    echo "Adding ${DEP_STRING} as an RDEPEND to the coreos package..."
-    sed -i "/^\"$/i \\    ${DEP_STRING}" "${COREOS_EBUILD_PATH}"
+DEP_STRING="\${EBUILD_CATEGORY}/\${EBUILD_PKG_NAME}"
+if ! grep -q "\${DEP_STRING}" "\${COREOS_EBUILD_PATH}"; then
+    echo "Adding \${DEP_STRING} as an RDEPEND to the coreos package..."
+    sed -i "/^\"$/i \\    \${DEP_STRING}" "\${COREOS_EBUILD_PATH}"
 else
-    echo "${DEP_STRING} dependency already exists in coreos package."
+    echo "\${DEP_STRING} dependency already exists in coreos package."
 fi
+
+# Use autounmask to automatically generate the required configuration
+echo "Running emerge with --autounmask-write to generate permissions..."
+sudo emerge-amd64-usr --autounmask --autounmask-write "=\${EBUILD_CATEGORY}/\${EBUILD_PKG_NAME}-\${PICCOLO_VERSION}" || true
+# Apply the newly generated configuration.
+sudo dispatch-conf
 
 echo "Running pre-flight dependency check..."
 emerge-amd64-usr -p --quiet coreos-base/coreos
@@ -213,11 +200,11 @@ echo "Running ./build_packages..."
 ./build_packages --board='amd64-usr'
 
 echo "Running ./build_image to create prod image and update payload..."
-./build_image --board='amd64-usr' --group="${PICCOLO_UPDATE_GROUP}" --image_compression_formats=gz prod
+./build_image --board='amd64-usr' --group="\${PICCOLO_UPDATE_GROUP}" --image_compression_formats=gz prod
 
 echo "Creating bootable ISO from the production image..."
 LATEST_BUILD_DIR="./__build__/images/images/amd64-usr/latest"
-./image_to_vm.sh --from="${LATEST_BUILD_DIR}" --format=iso --board='amd64-usr'
+./image_to_vm.sh --from="\${LATEST_BUILD_DIR}" --format=iso --board='amd64-usr'
 
 EOF
     popd > /dev/null
@@ -230,20 +217,23 @@ EOF
     log "### Step 4 & 5: Packaging and signing final artifacts..."
     local artifact_src_dir="${scripts_repo_dir}/__build__/images/images/amd64-usr/latest"
     
-    local src_raw_gz="${artifact_src_dir}/flatcar_production_update.raw.gz"
+    # FIX: Correctly identify the gzipped update binary.
+    local src_bin_gz="${artifact_src_dir}/flatcar_production_update.bin.gz"
     local src_iso="${artifact_src_dir}/flatcar_production_iso_image.iso"
     
-    if [ ! -f "$src_raw_gz" ] || [ ! -f "$src_iso" ]; then
-        log "Error: A required build artifact (.raw.gz or .iso) was not found in ${artifact_src_dir}" >&2
+    if [ ! -f "$src_bin_gz" ] || [ ! -f "$src_iso" ]; then
+        log "Error: A required build artifact (.bin.gz or .iso) was not found in ${artifact_src_dir}" >&2
         exit 1
     fi
 
+    # The PRD requires the final name to be .raw.gz, so we will rename the .bin.gz file.
+    # The content is a gzipped raw image, so this is functionally correct.
     local final_raw_gz="${output_dir}/piccolo-os-update-${PICCOLO_VERSION}.raw.gz"
     local final_asc="${output_dir}/piccolo-os-update-${PICCOLO_VERSION}.raw.gz.asc"
     local final_iso="${output_dir}/piccolo-os-live-${PICCOLO_VERSION}.iso"
 
     log "Moving and renaming final artifacts to ${output_dir}"
-    mv "$src_raw_gz" "$final_raw_gz"
+    mv "$src_bin_gz" "$final_raw_gz"
     mv "$src_iso" "$final_iso"
 
     log "Signing the update artifact with GPG key: ${GPG_SIGNING_KEY_ID}"
