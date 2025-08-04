@@ -191,16 +191,53 @@ else
     exit 1
 fi
 
-echo "--- CHECK 2: piccolod version ---"
-if /usr/bin/piccolod --version | grep -q "${PICCOLO_VERSION_TO_TEST}"; then
-    echo "PASS: piccolod version is correct."
+echo "--- CHECK 2: piccolod service status ---"
+# The service should be enabled and running by default.
+if sudo systemctl is-active --quiet piccolod.service; then
+    echo "PASS: piccolod service is active."
 else
-    echo "FAIL: piccolod version does not match."
-    /usr/bin/piccolod --version
+    echo "FAIL: piccolod service is not active."
+    sudo systemctl status piccolod.service
     exit 1
 fi
 
-echo "--- CHECK 3: Container runtime ---"
+echo "--- CHECK 3: piccolod version via HTTP ---"
+# Use curl to get the version from the API endpoint
+# Add a retry loop in case the service is slow to start accepting connections
+for i in {1..5}; do
+    # Use --fail to make curl exit with an error if the HTTP request fails (e.g., 404, 500)
+    # Use -s for silent mode
+    VERSION_JSON=$(curl -s --fail http://localhost:8080/version 2>/dev/null)
+    if [ $? -eq 0 ]; then
+        break
+    fi
+    echo "Attempt $i: Failed to contact version endpoint. Retrying in 2 seconds..."
+    sleep 2
+done
+
+if [ -z "${VERSION_JSON:-}" ]; then
+    echo "FAIL: Could not retrieve version from endpoint after multiple attempts."
+    exit 1
+fi
+
+# Extract version from JSON using basic tools to avoid jq dependency
+EXTRACTED_VERSION=$(echo "$VERSION_JSON" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+
+if [ -z "${EXTRACTED_VERSION}" ]; then
+    echo "FAIL: Could not parse version from JSON response: ${VERSION_JSON}"
+    exit 1
+fi
+
+echo "Found version '${EXTRACTED_VERSION}' from endpoint."
+
+if [ "${EXTRACTED_VERSION}" == "${PICCOLO_VERSION_TO_TEST}" ]; then
+    echo "PASS: piccolod version is correct."
+else
+    echo "FAIL: piccolod version does not match. Expected ${PICCOLO_VERSION_TO_TEST}, got ${EXTRACTED_VERSION}."
+    exit 1
+fi
+
+echo "--- CHECK 4: Container runtime ---"
 # We need to start docker first in the live environment
 sudo systemctl start docker
 if docker run --rm hello-world; then
