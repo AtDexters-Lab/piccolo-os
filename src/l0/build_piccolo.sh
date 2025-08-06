@@ -527,7 +527,7 @@ package_and_sign_artifacts() {
     
     # Sign the update artifact
     log "Signing update artifact with GPG key: ${GPG_SIGNING_KEY_ID}" >&2
-    echo "y" | gpg --detach-sign --armor --output "${final_asc}" -u "$GPG_SIGNING_KEY_ID" "$final_raw_gz"
+    gpg --batch --yes --detach-sign --armor --output "${final_asc}" -u "$GPG_SIGNING_KEY_ID" "$final_raw_gz"
     
     # Verify signature
     log "Verifying GPG signature..." >&2
