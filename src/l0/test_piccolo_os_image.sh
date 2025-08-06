@@ -1,9 +1,16 @@
 #!/bin/bash
 #
-# Piccolo OS - Automated QA Smoke Test Script v2.6
+# Piccolo OS - Automated QA Smoke Test Script v2.8
 #
 # This script boots the Piccolo Live ISO in a VM using a direct QEMU command
 # and runs a series of automated checks to verify its integrity and core functionality.
+#
+# v2.8 Improvements:
+# - Replaced external permission tests with piccolod's built-in ecosystem test (CHECK 6)
+# - Uses /api/v1/ecosystem endpoint for comprehensive self-validation
+# - Tests actual runtime permissions from piccolod's security context
+# - Validates systemd hardening, device access, and manager components
+# - Provides detailed pass/warn/fail analysis with actionable feedback
 #
 # v2.6 Improvements:
 # - Fixes a variable scope bug in the cleanup trap by making key variables global.
@@ -193,15 +200,38 @@ fi
 
 echo "--- CHECK 2: piccolod service status ---"
 # The service should be enabled and running by default.
-if sudo systemctl is-active --quiet piccolod.service; then
+# Add retry logic since services may take time to start during boot
+SERVICE_ACTIVE=false
+for i in {1..10}; do
+    if sudo systemctl is-active --quiet piccolod.service; then
+        SERVICE_ACTIVE=true
+        break
+    fi
+    echo "Attempt $i: Service not yet active. Retrying in 2 seconds..."
+    sleep 2
+done
+
+if [ "$SERVICE_ACTIVE" = true ]; then
     echo "PASS: piccolod service is active."
 else
-    echo "FAIL: piccolod service is not active."
+    echo "FAIL: piccolod service is not active after multiple attempts."
     sudo systemctl status piccolod.service
     exit 1
 fi
 
-echo "--- CHECK 3: piccolod version via HTTP ---"
+echo "--- CHECK 3: piccolod process runs as root ---"
+# Verify that the piccolod process is running as root user
+PICCOLOD_USER=$(ps -eo user,comm | grep "^[[:space:]]*root[[:space:]]*piccolod$" | awk '{print $1}')
+if [ "$PICCOLOD_USER" = "root" ]; then
+    echo "PASS: piccolod process is running as root user."
+else
+    echo "FAIL: piccolod process is not running as root user."
+    echo "Current process info:"
+    ps -eo user,pid,comm | grep piccolod
+    exit 1
+fi
+
+echo "--- CHECK 4: piccolod version via HTTP ---"
 # Use curl to get the version from the API endpoint
 # Add a retry loop in case the service is slow to start accepting connections
 for i in {1..5}; do
@@ -237,7 +267,7 @@ else
     exit 1
 fi
 
-echo "--- CHECK 4: Container runtime ---"
+echo "--- CHECK 5: Container runtime ---"
 # We need to start docker first in the live environment
 sudo systemctl start docker
 if docker run --rm hello-world; then
@@ -246,6 +276,67 @@ else
     echo "FAIL: Could not run hello-world container."
     exit 1
 fi
+
+echo "--- CHECK 6: Ecosystem and environment validation ---"
+# Use piccolod's built-in ecosystem test to validate its own environment
+# This tests what piccolod can actually access from within its systemd security context
+ECOSYSTEM_JSON=""
+for i in {1..3}; do
+    ECOSYSTEM_JSON=$(curl -s --fail http://localhost:8080/api/v1/ecosystem 2>/dev/null)
+    if [ $? -eq 0 ] && [ -n "$ECOSYSTEM_JSON" ]; then
+        break
+    fi
+    echo "Attempt $i: Failed to contact ecosystem endpoint. Retrying in 2 seconds..."
+    sleep 2
+done
+
+if [ -z "$ECOSYSTEM_JSON" ]; then
+    echo "FAIL: Could not retrieve ecosystem test results after multiple attempts."
+    exit 1
+fi
+
+# Parse the overall status using basic shell tools
+OVERALL_STATUS=$(echo "$ECOSYSTEM_JSON" | sed -n 's/.*"overall":"\([^"]*\)".*/\1/p')
+SUMMARY=$(echo "$ECOSYSTEM_JSON" | sed -n 's/.*"summary":"\([^"]*\)".*/\1/p')
+
+echo "Ecosystem Status: $OVERALL_STATUS"
+echo "Summary: $SUMMARY"
+
+# Display individual check results
+echo "Individual Check Results:"
+echo "$ECOSYSTEM_JSON" | grep -o '"name":"[^"]*","status":"[^"]*","description":"[^"]*"' | while read -r line; do
+    CHECK_NAME=$(echo "$line" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')
+    CHECK_STATUS=$(echo "$line" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p') 
+    CHECK_DESC=$(echo "$line" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')
+    
+    case "$CHECK_STATUS" in
+        "pass") echo "  ✅ $CHECK_NAME: $CHECK_DESC" ;;
+        "warn") echo "  ⚠️  $CHECK_NAME: $CHECK_DESC" ;;
+        "fail") echo "  ❌ $CHECK_NAME: $CHECK_DESC" ;;
+        "info") echo "  ℹ️  $CHECK_NAME: $CHECK_DESC" ;;
+        *) echo "  ❓ $CHECK_NAME: $CHECK_DESC (status: $CHECK_STATUS)" ;;
+    esac
+done
+
+# Evaluate overall result
+case "$OVERALL_STATUS" in
+    "healthy")
+        echo "PASS: Ecosystem is healthy - all checks passed."
+        ;;
+    "degraded") 
+        echo "PASS: Ecosystem is functional but degraded - some features may be limited."
+        echo "WARN: $SUMMARY"
+        ;;
+    "unhealthy")
+        echo "FAIL: Ecosystem is unhealthy - critical issues detected."
+        echo "ERROR: $SUMMARY"
+        exit 1
+        ;;
+    *)
+        echo "FAIL: Unknown ecosystem status: $OVERALL_STATUS"
+        exit 1
+        ;;
+esac
 EOF
             checks_passed=true
             break

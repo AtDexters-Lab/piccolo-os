@@ -82,6 +82,10 @@ func (s *Server) setupRoutes() {
 
 	// Admin routes
 	mux.HandleFunc("/version", s.handleVersion())
+	
+	// Health and ecosystem testing
+	mux.HandleFunc("/api/v1/health", s.handleEcosystemTest())
+	mux.HandleFunc("/api/v1/ecosystem", s.handleEcosystemTest())
 
 	s.router = mux
 }
