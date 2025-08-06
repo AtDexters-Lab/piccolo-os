@@ -136,6 +136,34 @@ Group=root
 StandardOutput=journal
 StandardError=journal
 
+# Security hardening directives  
+# Note: Some restrictions are relaxed due to piccolod's extensive system responsibilities
+NoNewPrivileges=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+# Essential capabilities for piccolod operations:
+# - CAP_SYS_ADMIN: TPM access, disk operations, container management, updates
+# - CAP_NET_ADMIN: Network configuration and management  
+# - CAP_NET_BIND_SERVICE: HTTP server on port 8080
+# - CAP_DAC_OVERRIDE: System file access during installation/updates
+# - CAP_NET_RAW: Network diagnostics
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_DAC_OVERRIDE CAP_NET_RAW
+
+# System access needed for piccolod responsibilities:
+# - /var/run: Docker socket and runtime state
+# - /var/lib: Persistent state storage  
+# - /var/log: Audit logging
+# - /etc: System configuration access
+ReadWritePaths=/var/run /var/log /tmp /var/tmp /etc/flatcar
+ReadWritePaths=-/var/lib/piccolod
+
+# Optional paths that may not exist in all environments  
+ReadWritePaths=-/sys/firmware/efi/efivars
+ReadWritePaths=-/var/lib/docker
+
 [Install]
 WantedBy=multi-user.target
 EOF
