@@ -28,14 +28,14 @@
         *   UEFI variable modification (`/sys/firmware/efi/efivars`)
         *   Bootloader installation and partition management
     *   **Security:** Implement principle of least privilege within code, comprehensive audit logging
-    *   **Reference:** See `UPDATE_ARCHITECTURE.md` for complete technical justification
+    *   **Reference:** See `../../docs/architecture/update-system.md` for complete technical justification
 
 5.  **Implement Health Check Integration:**
     *   **Action:** Create systemd service dependency for `update-engine` to wait for `piccolod` success
     *   **Implementation:** Add `/etc/systemd/system/update-engine.service.d/10-piccolod-dependency.conf`
     *   **Content:** `[Unit]\nAfter=piccolod.service\nRequires=piccolod.service`
     *   **Testing:** Verify automatic rollback works when `piccolod` fails to start
-    *   **Reference:** See `HEALTH_CHECK_INTEGRATION.md` for complete implementation
+    *   **Reference:** See `../../docs/operations/health-checks.md` for complete implementation
 
 6.  **Disable Flatcar Auto-Updates (Compile-time):**
     *   **Action:** Modify build system to generate `/etc/flatcar/update.conf` with `GROUP=disabled`
@@ -47,13 +47,13 @@
     *   **Action:** Develop TPM attestation and JWT token generation for Piccolo server communication
     *   **Libraries:** `google/go-tpm-tools`, `golang-jwt/jwt/v5`
     *   **Features:** Device registration, subscription validation, hardware binding
-    *   **Reference:** See `API_DESIGN.md` for complete API specification
+    *   **Reference:** See `../../docs/development/api-design.md` for complete API specification
 
 8.  **Add TPM Disk Encryption Support:**
     *   **Action:** Implement optional TPM-sealed disk encryption during installation
     *   **Tools:** `systemd-cryptenroll`, LUKS2, automated re-sealing for updates
     *   **Integration:** Enhance installer and trust agent components
-    *   **Reference:** See `TPM_DISK_ENCRYPTION.md` for implementation details
+    *   **Reference:** See `../../docs/security/tpm-encryption.md` for implementation details
 
 9.  **Enhanced Testing Framework:**
     *   **Action:** Extend `test_piccolo_os_image.sh` with new test scenarios:

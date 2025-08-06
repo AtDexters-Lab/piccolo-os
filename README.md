@@ -122,17 +122,35 @@ You choose your level of control—we support both.
 
 ---
 
+## 📖 Documentation
+
+Comprehensive documentation is available in the `/docs` directory:
+
+- **[Architecture](docs/architecture/)** - System design and layer architecture  
+- **[Development](docs/development/)** - Building, testing, and contributing
+- **[Security](docs/security/)** - TPM encryption and trust model
+- **[Operations](docs/operations/)** - Installation and system management
+
+For a complete overview, see [docs/README.md](docs/README.md).
+
+---
+
 ## 🤝 Contribute
 
-We’re early, scrappy, and community-powered. Want to shape the future of personal computing?
+We're early, scrappy, and community-powered. Want to shape the future of personal computing?
 
 ```bash
 git clone https://github.com/AtDexters-Lab/piccolo-os
 cd piccolo-os
-# open issues, send PRs, hack on stuff
+# See docs/development/ for build instructions
 ````
 
-Or just join the conversation.
+Development resources:
+- **[Building Guide](docs/development/building.md)** - Build from source
+- **[Testing Guide](docs/development/testing.md)** - Run tests and validation
+- **[API Design](docs/development/api-design.md)** - API architecture and patterns
+
+Or just join the conversation:
 
 * 💬 [GitHub Discussions](https://github.com/AtDexters-Lab/piccolo-os/discussions)
 * 🔗 [Follow on LinkedIn](https://www.linkedin.com/company/piccolo25/)
