@@ -10,6 +10,7 @@ require github.com/docker/docker v0.0.0-00010101000000-000000000000
 
 require (
 	github.com/Microsoft/go-winio v0.4.14 // indirect
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.5.0 // indirect
@@ -18,6 +19,9 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/grandcat/zeroconf v1.0.0 // indirect
+	github.com/hashicorp/mdns v1.0.6 // indirect
+	github.com/miekg/dns v1.1.68 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/term v0.5.2 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
@@ -30,7 +34,11 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.37.0 // indirect
 	go.opentelemetry.io/otel/metric v1.37.0 // indirect
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
-	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/mod v0.24.0 // indirect
+	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/sync v0.14.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
+	golang.org/x/tools v0.33.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )

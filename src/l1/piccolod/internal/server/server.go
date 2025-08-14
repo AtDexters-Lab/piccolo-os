@@ -8,6 +8,7 @@ import (
 	"piccolod/internal/container"
 	"piccolod/internal/federation"
 	"piccolod/internal/installer"
+	"piccolod/internal/mdns"
 	"piccolod/internal/network"
 	"piccolod/internal/storage"
 	"piccolod/internal/trust"
@@ -24,6 +25,7 @@ type Server struct {
 	networkManager    *network.Manager
 	backupManager     *backup.Manager
 	federationManager *federation.Manager
+	mdnsManager       *mdns.Manager
 	router            http.Handler
 	version           string
 }
@@ -54,6 +56,7 @@ func New(opts ...ServerOption) (*Server, error) {
 		networkManager:    network.NewManager(),
 		backupManager:     backup.NewManager(),
 		federationManager: federation.NewManager(),
+		mdnsManager:       mdns.NewManager(),
 	}
 
 	for _, opt := range opts {
@@ -64,11 +67,25 @@ func New(opts ...ServerOption) (*Server, error) {
 	return s, nil
 }
 
-// Start runs the HTTP server.
+// Start runs the HTTP server and starts mDNS advertising.
 func (s *Server) Start() error {
 	const port = "8080"
+	
+	// Start mDNS advertising - this must succeed
+	if err := s.mdnsManager.Start(); err != nil {
+		return fmt.Errorf("FATAL: mDNS server failed to start: %w", err)
+	}
+	
 	log.Printf("INFO: Starting piccolod server on http://localhost:%s", port)
 	return http.ListenAndServe(":"+port, s.router)
+}
+
+// Stop gracefully shuts down the server and all its components.
+func (s *Server) Stop() error {
+	if err := s.mdnsManager.Stop(); err != nil {
+		log.Printf("WARN: Failed to stop mDNS server: %v", err)
+	}
+	return nil
 }
 
 // setupRoutes defines all API endpoints and assigns them to handlers.
