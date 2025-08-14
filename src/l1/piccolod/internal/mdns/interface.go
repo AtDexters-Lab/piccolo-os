@@ -19,10 +19,10 @@ func (m *Manager) discoverInterfaces() error {
 	if err != nil {
 		return err
 	}
-	
+
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
+
 	activeCount := 0
 	for _, iface := range interfaces {
 		if err := m.setupInterface(&iface); err != nil {
@@ -35,11 +35,11 @@ func (m *Manager) discoverInterfaces() error {
 		}
 		activeCount++
 	}
-	
+
 	if activeCount == 0 {
 		return fmt.Errorf("no suitable network interfaces found")
 	}
-	
+
 	log.Printf("INFO: Successfully configured %d network interfaces for mDNS", activeCount)
 	return nil
 }
@@ -50,15 +50,15 @@ func (m *Manager) setupInterface(iface *net.Interface) error {
 	if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
 		return fmt.Errorf("interface %s not suitable (loopback or down)", iface.Name)
 	}
-	
+
 	// Get all addresses for this interface
 	addrs, err := iface.Addrs()
 	if err != nil {
 		return err
 	}
-	
+
 	var ipv4Addr, ipv6Addr net.IP
-	
+
 	// Find IPv4 and IPv6 addresses
 	for _, addr := range addrs {
 		if ipnet, ok := addr.(*net.IPNet); ok {
@@ -68,19 +68,20 @@ func (m *Manager) setupInterface(iface *net.Interface) error {
 					ipv4Addr = ipv4
 				}
 			} else if ipv6 := ipnet.IP.To16(); ipv6 != nil {
-				// IPv6 address - skip link-local and loopback
-				if !ipnet.IP.IsLinkLocalUnicast() && !ipnet.IP.IsLoopback() {
+				// IPv6 address - accept link-local (required by RFC 6762), skip only loopback
+				// RFC 6762 Section 15: "Multicast DNS operates over link-local scope"
+				if !ipnet.IP.IsLoopback() {
 					ipv6Addr = ipv6
 				}
 			}
 		}
 	}
-	
+
 	// Need at least one IP stack
 	if ipv4Addr == nil && ipv6Addr == nil {
 		return fmt.Errorf("no suitable IP addresses on interface %s", iface.Name)
 	}
-	
+
 	// Create interface state
 	state := &InterfaceState{
 		Interface:   iface,
@@ -92,7 +93,7 @@ func (m *Manager) setupInterface(iface *net.Interface) error {
 		LastSeen:    time.Now(),
 		HealthScore: 1.0, // Start with perfect health
 	}
-	
+
 	// Setup IPv4 socket if available
 	if state.HasIPv4 {
 		ipv4Conn, err := m.createIPv4Socket(iface)
@@ -102,7 +103,7 @@ func (m *Manager) setupInterface(iface *net.Interface) error {
 			state.IPv4Conn = ipv4Conn
 		}
 	}
-	
+
 	// Setup IPv6 socket if available
 	if state.HasIPv6 {
 		ipv6Conn, err := m.createIPv6Socket(iface)
@@ -112,19 +113,19 @@ func (m *Manager) setupInterface(iface *net.Interface) error {
 			state.IPv6Conn = ipv6Conn
 		}
 	}
-	
+
 	// Need at least one working socket
 	if state.IPv4Conn == nil && state.IPv6Conn == nil {
 		return fmt.Errorf("failed to create any sockets for interface %s", iface.Name)
 	}
-	
+
 	// Store in manager
 	m.interfaces[iface.Name] = state
-	
+
 	// Start responder for this interface
 	m.wg.Add(1)
 	go m.interfaceResponder(state)
-	
+
 	var addrInfo []string
 	if state.HasIPv4 {
 		addrInfo = append(addrInfo, fmt.Sprintf("IPv4:%s", ipv4Addr.String()))
@@ -132,7 +133,7 @@ func (m *Manager) setupInterface(iface *net.Interface) error {
 	if state.HasIPv6 {
 		addrInfo = append(addrInfo, fmt.Sprintf("IPv6:%s", ipv6Addr.String()))
 	}
-	
+
 	log.Printf("INFO: Interface %s ready - %s", iface.Name, strings.Join(addrInfo, ", "))
 	return nil
 }
@@ -144,33 +145,30 @@ func (m *Manager) createIPv4Socket(iface *net.Interface) (*net.UDPConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create IPv4 socket: %w", err)
 	}
-	
+
 	// Set socket options
 	if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to set SO_REUSEADDR: %w", err)
 	}
-	
-	// SO_REUSEPORT for port sharing
-	const SO_REUSEPORT = 15
-	if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, SO_REUSEPORT, 1); err != nil {
-		log.Printf("WARN: Failed to set SO_REUSEPORT on IPv4 %s: %v", iface.Name, err)
-	}
-	
+
+	// SO_REUSEADDR is sufficient for single-daemon mDNS (no need for SO_REUSEPORT)
+	// SO_REUSEADDR already set above - no additional port sharing needed
+
 	// Bind to specific interface using SO_BINDTODEVICE
 	if err := syscall.SetsockoptString(fd, syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, iface.Name); err != nil {
 		log.Printf("WARN: Failed to bind IPv4 to device %s: %v", iface.Name, err)
 	}
-	
+
 	// Bind to mDNS port
 	addr := &syscall.SockaddrInet4{Port: 5353}
 	copy(addr.Addr[:], net.IPv4zero.To4())
-	
+
 	if err := syscall.Bind(fd, addr); err != nil {
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to bind IPv4 to :5353: %w", err)
 	}
-	
+
 	// Convert to net.UDPConn
 	file := os.NewFile(uintptr(fd), fmt.Sprintf("mdns4-%s", iface.Name))
 	if file == nil {
@@ -178,18 +176,18 @@ func (m *Manager) createIPv4Socket(iface *net.Interface) (*net.UDPConn, error) {
 		return nil, fmt.Errorf("failed to create file from IPv4 socket")
 	}
 	defer file.Close()
-	
+
 	fileConn, err := net.FileConn(file)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create IPv4 connection: %w", err)
 	}
-	
+
 	conn, ok := fileConn.(*net.UDPConn)
 	if !ok {
 		fileConn.Close()
 		return nil, fmt.Errorf("failed to convert to IPv4 UDPConn")
 	}
-	
+
 	// Join IPv4 multicast group on this interface
 	pc := ipv4.NewPacketConn(conn)
 	group := &net.UDPAddr{IP: net.IPv4(224, 0, 0, 251)}
@@ -197,12 +195,12 @@ func (m *Manager) createIPv4Socket(iface *net.Interface) (*net.UDPConn, error) {
 		conn.Close()
 		return nil, fmt.Errorf("failed to join IPv4 multicast group on %s: %w", iface.Name, err)
 	}
-	
+
 	// Set multicast interface
 	if err := pc.SetMulticastInterface(iface); err != nil {
 		log.Printf("WARN: Failed to set IPv4 multicast interface %s: %v", iface.Name, err)
 	}
-	
+
 	return conn, nil
 }
 
@@ -213,38 +211,35 @@ func (m *Manager) createIPv6Socket(iface *net.Interface) (*net.UDPConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create IPv6 socket: %w", err)
 	}
-	
+
 	// Set socket options
 	if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to set SO_REUSEADDR on IPv6: %w", err)
 	}
-	
-	// SO_REUSEPORT for port sharing
-	const SO_REUSEPORT = 15
-	if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, SO_REUSEPORT, 1); err != nil {
-		log.Printf("WARN: Failed to set SO_REUSEPORT on IPv6 %s: %v", iface.Name, err)
-	}
-	
+
+	// SO_REUSEADDR is sufficient for single-daemon mDNS (no need for SO_REUSEPORT)
+	// SO_REUSEADDR already set above - no additional port sharing needed
+
 	// Disable IPv6 only to allow dual-stack
 	if err := syscall.SetsockoptInt(fd, syscall.IPPROTO_IPV6, syscall.IPV6_V6ONLY, 0); err != nil {
 		log.Printf("WARN: Failed to disable IPv6-only mode on %s: %v", iface.Name, err)
 	}
-	
+
 	// Bind to specific interface using SO_BINDTODEVICE
 	if err := syscall.SetsockoptString(fd, syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, iface.Name); err != nil {
 		log.Printf("WARN: Failed to bind IPv6 to device %s: %v", iface.Name, err)
 	}
-	
+
 	// Bind to mDNS port on IPv6
 	addr := &syscall.SockaddrInet6{Port: 5353}
 	copy(addr.Addr[:], net.IPv6zero.To16())
-	
+
 	if err := syscall.Bind(fd, addr); err != nil {
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to bind IPv6 to :5353: %w", err)
 	}
-	
+
 	// Convert to net.UDPConn
 	file := os.NewFile(uintptr(fd), fmt.Sprintf("mdns6-%s", iface.Name))
 	if file == nil {
@@ -252,18 +247,18 @@ func (m *Manager) createIPv6Socket(iface *net.Interface) (*net.UDPConn, error) {
 		return nil, fmt.Errorf("failed to create file from IPv6 socket")
 	}
 	defer file.Close()
-	
+
 	fileConn, err := net.FileConn(file)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create IPv6 connection: %w", err)
 	}
-	
+
 	conn, ok := fileConn.(*net.UDPConn)
 	if !ok {
 		fileConn.Close()
 		return nil, fmt.Errorf("failed to convert to IPv6 UDPConn")
 	}
-	
+
 	// Join IPv6 multicast group on this interface
 	pc := ipv6.NewPacketConn(conn)
 	group := &net.UDPAddr{IP: net.ParseIP("ff02::fb")}
@@ -271,22 +266,22 @@ func (m *Manager) createIPv6Socket(iface *net.Interface) (*net.UDPConn, error) {
 		conn.Close()
 		return nil, fmt.Errorf("failed to join IPv6 multicast group on %s: %w", iface.Name, err)
 	}
-	
+
 	// Set multicast interface
 	if err := pc.SetMulticastInterface(iface); err != nil {
 		log.Printf("WARN: Failed to set IPv6 multicast interface %s: %v", iface.Name, err)
 	}
-	
+
 	return conn, nil
 }
 
 // networkMonitor continuously monitors network interface changes
 func (m *Manager) networkMonitor() {
 	defer m.wg.Done()
-	
+
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-m.stopCh:
@@ -304,17 +299,15 @@ func (m *Manager) checkInterfaceChanges() {
 		log.Printf("WARN: Failed to check interfaces: %v", err)
 		return
 	}
-	
+
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
-	// Mark all current interfaces as not seen
-	for _, state := range m.interfaces {
-		state.Active = false
-	}
-	
+
+	seenInterfaces := make(map[string]bool)
+
 	// Check each interface
 	for _, iface := range interfaces {
+		seenInterfaces[iface.Name] = true
 		if existing, exists := m.interfaces[iface.Name]; exists {
 			// Interface still exists - check if IP changed
 			if m.hasIPChanged(&iface, existing) {
@@ -325,7 +318,6 @@ func (m *Manager) checkInterfaceChanges() {
 				if existing.IPv6Conn != nil {
 					existing.IPv6Conn.Close()
 				}
-				delete(m.interfaces, iface.Name)
 				m.setupInterface(&iface)
 			} else {
 				existing.Active = true
@@ -337,10 +329,10 @@ func (m *Manager) checkInterfaceChanges() {
 			m.setupInterface(&iface)
 		}
 	}
-	
+
 	// Remove interfaces that no longer exist
 	for name, state := range m.interfaces {
-		if !state.Active {
+		if !seenInterfaces[name] {
 			log.Printf("INFO: Interface %s no longer available, removing", name)
 			if state.IPv4Conn != nil {
 				state.IPv4Conn.Close()
@@ -359,41 +351,25 @@ func (m *Manager) hasIPChanged(iface *net.Interface, state *InterfaceState) bool
 	if err != nil {
 		return true // Assume changed if we can't check
 	}
-	
-	var foundIPv4, foundIPv6 bool
-	
+
+	var newIPv4, newIPv6 net.IP
+
 	for _, addr := range addrs {
 		if ipnet, ok := addr.(*net.IPNet); ok {
 			if ipv4 := ipnet.IP.To4(); ipv4 != nil {
-				// IPv4 address found
-				if !ipnet.IP.IsLinkLocalUnicast() && state.IPv4 != nil && ipnet.IP.Equal(state.IPv4) {
-					foundIPv4 = true
+				if !ipnet.IP.IsLinkLocalUnicast() {
+					newIPv4 = ipv4
 				}
 			} else if ipv6 := ipnet.IP.To16(); ipv6 != nil {
-				// IPv6 address found
-				if !ipnet.IP.IsLinkLocalUnicast() && !ipnet.IP.IsLoopback() && 
-				   state.IPv6 != nil && ipnet.IP.Equal(state.IPv6) {
-					foundIPv6 = true
+				if !ipnet.IP.IsLoopback() {
+					newIPv6 = ipv6
 				}
 			}
 		}
 	}
-	
-	// Check if expected IPs are still present
-	ipv4Changed := state.HasIPv4 && !foundIPv4
-	ipv6Changed := state.HasIPv6 && !foundIPv6
-	
+
+	ipv4Changed := !state.IPv4.Equal(newIPv4)
+	ipv6Changed := !state.IPv6.Equal(newIPv6)
+
 	return ipv4Changed || ipv6Changed
-}
-
-// getPrimaryLocalIP returns the primary non-loopback local IP of the host
-func getPrimaryLocalIP() (net.IP, error) {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-	return localAddr.IP, nil
 }

@@ -25,12 +25,14 @@ func (m *Manager) isRateLimited(clientIP string) bool {
 			IP:        clientIP,
 			LastQuery: now,
 		}
+		atomic.AddUint64(&m.securityMetrics.TotalQueries, 1)
 		return false
 	}
 	
 	// Check if client is currently blocked
 	if client.Blocked && now.Before(client.BlockedUntil) {
 		atomic.AddUint64(&m.securityMetrics.BlockedQueries, 1)
+		atomic.AddUint64(&m.securityMetrics.TotalQueries, 1)
 		return true
 	}
 	
@@ -48,9 +50,10 @@ func (m *Manager) isRateLimited(clientIP string) bool {
 		client.QueryCount = 0
 	}
 	
-	// Increment query count
+	// Increment query count and update security metrics
 	client.QueryCount++
 	client.LastQuery = now
+	atomic.AddUint64(&m.securityMetrics.TotalQueries, 1)
 	
 	// Check per-second rate limit
 	if timeSinceLastQuery < time.Second && client.QueryCount > uint64(m.securityConfig.MaxQueriesPerSecond) {
@@ -105,8 +108,17 @@ func (m *Manager) validateDNSMessage(msg *dns.Msg) error {
 		return fmt.Errorf("too many questions: %d", len(msg.Question))
 	}
 	
-	if len(msg.Answer) > 0 {
-		return fmt.Errorf("queries should not have answers")
+	// RFC 6762 Section 8.1: Probing queries legitimately contain answer sections
+	// Only reject queries with answers if they look like obvious self-loops or malformed packets
+	// Allow probing queries (which have both questions and answers) as they are valid mDNS
+	if len(msg.Answer) > 0 && len(msg.Question) == 0 {
+		// Responses should not be processed as queries
+		return fmt.Errorf("message has answers but no questions (not a valid query)")
+	}
+	
+	// Allow reasonable number of answers in probing queries
+	if len(msg.Answer) > 10 {
+		return fmt.Errorf("too many answer records in query: %d", len(msg.Answer))
 	}
 	
 	if len(msg.Extra) > 100 {
@@ -156,6 +168,7 @@ func (m *Manager) releaseQuerySlot() {
 
 // cleanupSecurityState periodically cleans up old client states
 func (m *Manager) cleanupSecurityState() {
+	defer m.wg.Done()
 	ticker := time.NewTicker(m.securityConfig.CleanupInterval)
 	defer ticker.Stop()
 	
@@ -175,7 +188,7 @@ func (m *Manager) performSecurityCleanup() {
 	defer m.rateLimiter.mutex.Unlock()
 	
 	now := time.Now()
-	cleanupThreshold := now.Add(-time.Hour) // Remove clients inactive for 1 hour
+	cleanupThreshold := now.Add(-time.Minute * 15) // Remove clients inactive for 15 minutes
 	
 	for ip, client := range m.rateLimiter.clients {
 		if client.LastQuery.Before(cleanupThreshold) && !client.Blocked {

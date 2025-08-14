@@ -4,6 +4,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,18 +16,30 @@ func (m *Manager) interfaceResponder(state *InterfaceState) {
 	defer m.wg.Done()
 	
 	interfaceName := state.Interface.Name
+	var localWg sync.WaitGroup
 	
 	// Start IPv4 responder if available
 	if state.IPv4Conn != nil {
 		m.wg.Add(1)
-		go m.ipv4Responder(state, interfaceName)
+		localWg.Add(1)
+		go func() {
+			defer localWg.Done()
+			m.ipv4Responder(state, interfaceName)
+		}()
 	}
 	
 	// Start IPv6 responder if available
 	if state.IPv6Conn != nil {
 		m.wg.Add(1)
-		go m.ipv6Responder(state, interfaceName)
+		localWg.Add(1)
+		go func() {
+			defer localWg.Done()
+			m.ipv6Responder(state, interfaceName)
+		}()
 	}
+	
+	// Wait for child responders to finish
+	localWg.Wait()
 }
 
 // ipv4Responder handles IPv4 mDNS queries
@@ -48,17 +61,31 @@ func (m *Manager) ipv4Responder(state *InterfaceState, interfaceName string) {
 			
 			n, clientAddr, err := state.IPv4Conn.ReadFromUDP(buffer)
 			if err != nil {
+				// Check if we should stop before continuing
+				select {
+				case <-m.stopCh:
+					return
+				default:
+				}
+				
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
 				}
-				if !strings.Contains(err.Error(), "use of closed network connection") {
-					log.Printf("WARN: IPv4 mDNS read error on %s: %v", interfaceName, err)
-					m.markInterfaceFailure(state, err)
+				if strings.Contains(err.Error(), "use of closed network connection") {
+					// Connection closed - likely during shutdown
+					return
 				}
+				log.Printf("WARN: IPv4 mDNS read error on %s: %v", interfaceName, err)
+				m.markInterfaceFailure(state, err)
 				continue
 			}
 			
-			go m.handleDualStackQuery(buffer[:n], clientAddr, state, "IPv4")
+			// Handle query in separate goroutine to avoid blocking UDP reader
+			m.wg.Add(1)
+			go func(data []byte, addr *net.UDPAddr) {
+				defer m.wg.Done()
+				m.handleDualStackQuery(data, addr, state, "IPv4")
+			}(append([]byte(nil), buffer[:n]...), clientAddr)
 		}
 	}
 }
@@ -82,17 +109,31 @@ func (m *Manager) ipv6Responder(state *InterfaceState, interfaceName string) {
 			
 			n, clientAddr, err := state.IPv6Conn.ReadFromUDP(buffer)
 			if err != nil {
+				// Check if we should stop before continuing
+				select {
+				case <-m.stopCh:
+					return
+				default:
+				}
+				
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
 				}
-				if !strings.Contains(err.Error(), "use of closed network connection") {
-					log.Printf("WARN: IPv6 mDNS read error on %s: %v", interfaceName, err)
-					m.markInterfaceFailure(state, err)
+				if strings.Contains(err.Error(), "use of closed network connection") {
+					// Connection closed - likely during shutdown
+					return
 				}
+				log.Printf("WARN: IPv6 mDNS read error on %s: %v", interfaceName, err)
+				m.markInterfaceFailure(state, err)
 				continue
 			}
 			
-			go m.handleDualStackQuery(buffer[:n], clientAddr, state, "IPv6")
+			// Handle query in separate goroutine to avoid blocking UDP reader
+			m.wg.Add(1)
+			go func(data []byte, addr *net.UDPAddr) {
+				defer m.wg.Done()
+				m.handleDualStackQuery(data, addr, state, "IPv6")
+			}(append([]byte(nil), buffer[:n]...), clientAddr)
 		}
 	}
 }
