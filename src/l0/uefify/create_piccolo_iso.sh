@@ -665,6 +665,10 @@ set default="piccolo"
 set timeout=1
 
 menuentry "$PICCOLO_BRAND Live (UEFI + TPM Measured Boot)" --id=piccolo {
+    # First, find the ISO filesystem by its volume label and set it as the root
+    search --set=root --label "$PICCOLO_BRAND"
+
+    # Now, load the kernel and initrd from the correct (newly set) root
     # TPM measurement happens automatically when tpm module loaded
     linux /flatcar/vmlinuz flatcar.autologin root=live:CDLABEL=$PICCOLO_BRAND
     initrd /flatcar/cpio.gz
