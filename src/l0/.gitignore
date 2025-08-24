@@ -1,1 +1,11 @@
 build
+
+# Build artifacts
+/dist/
+/.work/
+build.out
+test.out
+/kiwi/root_overlay/usr/local/piccolo/v1/bin/piccolod
+
+# Local config
+/.claude/

@@ -1,0 +1,139 @@
+<!--
+  Piccolo OS – MicroOS-based live/self-install ISO
+  Schema: KIWI NG (v9). This profile targets:
+    - UEFI boot
+    - Secure Boot (shim + signed kernel from repos)
+    - Live rootfs with ability to install to disk (SelfInstall workflow)
+
+  TIPS:
+  - To keep images broadly bootable, we include generic firmware & drivers.
+  - Later, split firmware per-HW for your own devices to shrink size.
+-->
+<image schemaversion="9.2" name="piccolo-os">
+  <description type="system">
+    <author>Piccolo</author>
+    <contact>oss@piccolospace.com</contact>
+    <specification>MicroOS-based headless appliance with piccolod</specification>
+  </description>
+
+  <preferences>
+    <!-- 'iso' builds a live ISO; we also add install tooling so users can install to disk -->
+    <type image="iso" filesystem="btrfs" firmware="uefi" hybrid="true"/>
+    <version>0.1.0</version>
+    <!-- Exclude docs to keep size down -->
+    <rpm-excludedocs>true</rpm-excludedocs>
+    <rpm-check-signatures>true</rpm-check-signatures>
+    <locale>en_US</locale>
+    <keytable>us</keytable>
+    <timezone>UTC</timezone>
+    <packagemanager>zypper</packagemanager>
+  </preferences>
+
+  <!-- Base repositories: Tumbleweed / MicroOS (adjust if you want stable channels) -->
+  <repository type="rpm-md">
+    <source path="https://download.opensuse.org/tumbleweed/repo/oss/"/>
+  </repository>
+  <repository type="rpm-md">
+    <source path="https://download.opensuse.org/tumbleweed/repo/non-oss/"/>
+  </repository>
+  <repository type="rpm-md">
+    <source path="https://download.opensuse.org/update/tumbleweed/"/>
+  </repository>
+
+  <!-- Overlay puts files directly into rootfs -->
+  <overlaydir>root_overlay</overlaydir>
+
+  <!-- Config snippets dropped directly -->
+  <config-files>
+    <file name="/etc/rpm/macros.piccolo" perms="0644" owner="root" group="root">
+%_excludedocs 1
+%_install_langs en_US
+    </file>
+
+    <file name="/etc/systemd/journald.conf.d/10-piccolo.conf" perms="0644" owner="root" group="root">
+SystemMaxUse=100M
+RuntimeMaxUse=50M
+    </file>
+
+    <!-- Dracut: smaller initrd; add TPM2 if you’ll do UKI/measured boot later -->
+    <file name="/etc/dracut.conf.d/30-piccolo.conf" perms="0644" owner="root" group="root">
+hostonly="yes"
+compress="zstd"
+omit="drm plymouth iscsi nfs fcoe"
+    </file>
+
+    <!-- Disable SSH for headless-only access -->
+    <file name="/etc/systemd/system/sshd.service.d/disable.conf" perms="0644" owner="root" group="root">
+[Unit]
+ConditionPathExists=!/etc/piccolo/allow-ssh
+    </file>
+  </config-files>
+
+  <packages type="bootstrap">
+    <!-- Minimal bootstrap to resolve package manager stack -->
+    <package>openSUSE-release</package>
+    <package>patterns-base-minimal_base</package>
+  </packages>
+
+  <packages type="delete">
+    <!-- Remove interactive tools for headless appliance -->
+    <package>vim</package>
+    <package>nano</package>
+    <package>man</package>
+    <package>info</package>
+  </packages>
+
+  <packages type="image">
+    <!-- MicroOS fundamentals -->
+    <package>openSUSE-release-microos</package>
+    <package>microos-release</package>
+    <package>filesystem</package>
+    <package>bash</package>
+    <package>coreutils</package>
+    <package>shadow</package>
+    <package>ca-certificates</package>
+
+    <!-- Atomic update stack -->
+    <package>transactional-update</package>
+    <package>rebootmgr</package>
+
+    <!-- SELinux enforcing -->
+    <package>selinux-policy-targeted</package>
+    <package>policycoreutils</package>
+
+    <!-- Headless networking -->
+    <package>NetworkManager</package>
+    <package>NetworkManager-nmcli</package>
+    <package>nftables</package>
+    <package>chrony</package>
+
+    <!-- Container runtime -->
+    <package>podman</package>
+    <package>conmon</package>
+    <package>crun</package>
+    <package>skopeo</package>
+
+    <!-- Secure Boot / UEFI boot chain -->
+    <package>shim</package>
+    <package>grub2</package>
+    <package>grub2-x86_64-efi</package>
+    <package>mokutil</package>
+
+    <!-- Kernel + firmware (broad support; trim later for your HW) -->
+    <package>kernel-default</package>
+    <package>kernel-firmware</package>
+    <package>ucode-amd</package>
+    <package>ucode-intel</package>
+
+    <!-- TPM / IMA building blocks (you'll add policy later) -->
+    <package>tpm2-tools</package>
+    <package>tpm2-tss</package>
+    <package>ima-evm-utils</package>
+
+    <!-- Live/system installer helpers -->
+    <package>kiwi-live</package>
+    <package>yast2-installation</package>
+    <package>yast2-firstboot</package>
+  </packages>
+
+</image>
