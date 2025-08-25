@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Layer 0 (l0) contains the Flatcar Linux-based OS build system for Piccolo OS. This layer is responsible for creating bootable ISO images and update packages that include the piccolod daemon integrated as a systemd service.
+Layer 0 (l0) contains the openSUSE MicroOS-based OS build system for Piccolo OS. This layer uses KIWI NG to create bootable ISO images that include the piccolod daemon integrated as a systemd service. The system has evolved from Flatcar Linux to MicroOS for better UEFI support and container-native architecture.
 
 ## Development Commands
 
@@ -16,9 +16,9 @@ Build the entire Piccolo OS including ISO and update packages:
 
 This script:
 1. Builds the piccolod binary from `../l1/piccolod`
-2. Creates a custom Flatcar Linux image with piccolod integrated
-3. Generates bootable ISO and update artifacts
-4. Signs artifacts with GPG
+2. Creates a custom MicroOS image with piccolod integrated using KIWI NG
+3. Generates bootable ISO with UEFI support
+4. Copies the piccolod binary into the overlay filesystem
 
 ### Direct Build Script
 For more control over the build process:
@@ -29,72 +29,140 @@ For more control over the build process:
 ### Testing the Built Image
 Test the complete OS in a VM:
 ```bash
-./test_piccolo_os_image.sh --build-dir ./build/output/1.0.0 --version 1.0.0
+./test_piccolo_os_image.sh --build-dir ./dist --version 1.0.0
 ```
 
-This automated test script:
-- Boots the ISO in QEMU
-- Verifies piccolod binary and service are running
-- Tests HTTP API endpoints
-- Validates container runtime functionality
-- Runs ecosystem health checks
+This automated test script (v2.8):
+- Boots the ISO in QEMU with SSH port forwarding (2222)
+- Verifies piccolod binary installation and service status
+- Tests HTTP API endpoints on port 8080
+- Validates container runtime (Podman) functionality
+- Runs comprehensive ecosystem health checks via `/api/v1/ecosystem`
+- Provides detailed pass/warn/fail analysis with actionable feedback
 
 ### Interactive Debugging
 For manual testing and debugging:
 ```bash
-./ssh_into_piccolo.sh --build-dir ./build/output/1.0.0 --version 1.0.0
+./ssh_into_piccolo.sh --build-dir ./dist --version 1.0.0
+```
+
+### Managing Releases
+List all preserved releases:
+```bash
+ls -la ./releases/
+ls -lh ./releases/1.0.0/  # View specific version artifacts
+```
+
+Test a specific preserved release:
+```bash
+./test_piccolo_os_image.sh --build-dir ./releases/1.0.0 --version 1.0.0
+qemu-system-x86_64 -enable-kvm -m 2048 -cpu host -machine q35,accel=kvm \
+  -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom ./releases/1.0.0/piccolo-os-x86_64-1.0.0.iso
+```
+
+### Using Preserved Artifacts for Updates
+The preserved artifacts enable comprehensive update management:
+
+**Package Analysis:**
+```bash
+# Compare package versions between releases
+diff ./releases/1.0.0/piccolo-os-x86_64-1.0.0.packages ./releases/1.1.0/piccolo-os-x86_64-1.1.0.packages
+
+# Extract package list for vulnerability scanning
+cut -d'|' -f1,4 ./releases/1.0.0/piccolo-os-x86_64-1.0.0.packages
+
+# Show all versions of a specific package across releases
+for version in ./releases/*/; do
+  v=$(basename "$version")
+  echo "=== Version $v ==="
+  grep "^kernel-default|" "$version"/*.packages || echo "Package not found"
+done
+```
+
+**Security and Integrity:**
+```bash
+# Review file verification status
+cat ./releases/1.0.0/piccolo-os-x86_64-1.0.0.verified
+
+# Check build metadata
+jq . ./releases/1.0.0/piccolo-os-x86_64-1.0.0.json
+
+# Compare integrity status between versions
+diff ./releases/1.0.0/piccolo-os-x86_64-1.0.0.verified ./releases/1.1.0/piccolo-os-x86_64-1.1.0.verified
 ```
 
 ## Architecture Details
 
 ### Build System Integration
 
-The build process integrates piccolod into Flatcar Linux through:
+The build process integrates piccolod into openSUSE MicroOS through KIWI NG:
 
-1. **Custom Ebuild Package**: Creates `app-misc/piccolod-bin` in the Flatcar overlay
-2. **Systemd Integration**: Installs piccolod.service with security hardening
-3. **System Configuration**: Sets up update configuration pointing to Piccolo's update server
-4. **Package Dependencies**: Adds piccolod as a dependency to the base coreos package
+1. **KIWI Configuration**: Uses `kiwi/config.xml` to define MicroOS base system with Tumbleweed repositories
+2. **Container-Based Building**: Leverages openSUSE Tumbleweed container with KIWI NG for reproducible builds
+3. **Overlay Filesystem**: Copies piccolod binary to `/usr/local/piccolo/v1/bin/` with symlink at `/usr/local/piccolo/current`
+4. **Package Selection**: Includes MicroOS base patterns, Podman container runtime, and live ISO support
 
 ### Key Build Components
 
-- **`build_piccolo.sh`**: Main build orchestration script with modular functions
-- **`build.sh`**: Simple wrapper that builds piccolod then calls build_piccolo.sh
-- **`test_piccolo_os_image.sh`**: Comprehensive automated testing framework
+- **`build_piccolo.sh`**: Main KIWI NG build orchestration with container runtime detection
+- **`build.sh`**: Simple wrapper that builds piccolod then calls build_piccolo.sh  
+- **`build.Dockerfile`**: Container image definition with KIWI NG and MicroOS dependencies
+- **`test_piccolo_os_image.sh`**: Comprehensive automated testing framework (v2.8)
 - **`ssh_into_piccolo.sh`**: Interactive debugging tool for manual testing
+- **`kiwi/config.xml`**: KIWI NG system configuration with MicroOS packages
+- **`kiwi/root/`**: Overlay filesystem for custom files and systemd services
 - **`piccolo.env`**: Build configuration (GPG keys, update server URLs)
 
 ### Generated Artifacts
 
-Build outputs are stored in `./build/output/{version}/`:
-- `piccolo-os-live-{version}.iso` - Bootable live ISO
-- `piccolo-os-update-{version}.raw.gz` - Compressed update image
-- `piccolo-os-update-{version}.raw.gz.asc` - GPG signature
+**Current Build Outputs** (in `./dist/`):
+- `piccolo-os-{arch}-{version}.iso` - Bootable live ISO with UEFI support (overwritten each build)
+- `kiwi.log` - Current build log for troubleshooting
+- KIWI NG temporary files during build process
+
+**Preserved Releases** (in `./releases/{version}/`):
+Each version is stored in its own subdirectory for better organization:
+```
+./releases/
+├── 1.0.0/
+│   ├── piccolo-os-x86_64-1.0.0.iso     - Bootable ISO
+│   ├── piccolo-os-x86_64-1.0.0.log     - Build log
+│   ├── piccolo-os-x86_64-1.0.0.packages - Package manifest (critical for updates)
+│   ├── piccolo-os-x86_64-1.0.0.changes  - Package changelog and history
+│   ├── piccolo-os-x86_64-1.0.0.verified - File integrity verification
+│   └── piccolo-os-x86_64-1.0.0.json     - Build metadata
+├── 1.1.0/
+│   └── ...
+└── 1.2.0/
+    └── ...
+```
+All previous builds are automatically preserved and listed after each build
 
 ### Systemd Service Configuration
 
-The generated piccolod.service includes security hardening:
-- Runs as root (required for system operations)
-- Capability restrictions (CAP_SYS_ADMIN, CAP_NET_ADMIN, etc.)
-- Filesystem access controls via ReadWritePaths
-- Automatic restart on failure
+The piccolod.service is defined in `kiwi/root/etc/systemd/system/` and configured for:
+- Installation to `/usr/local/piccolo/v1/bin/piccolod` 
+- Automatic startup via symlink in `multi-user.target.wants/`
+- Integration with MicroOS's systemd-based architecture
+- Container runtime integration with Podman
 
-### Update System Configuration
+### MicroOS Integration
 
-Flatcar's update_engine is configured to:
-- Point to Piccolo's update server (defined in piccolo.env)
-- Use the "piccolo-stable" update group
-- Allow piccolod to control the update process
+The system leverages MicroOS features:
+- **Immutable Base**: Read-only root filesystem with transactional updates
+- **Container-Native**: Built-in Podman support for application containers
+- **BTRFS Snapshots**: Automatic system snapshots for rollback capability
+- **Atomic Updates**: System updates as complete filesystem replacements
 
 ## Dependencies
 
 Required system dependencies:
 - `git` - Repository operations
-- `docker` - SDK container execution
-- `gpg` - Artifact signing
-- `qemu-system-x86_64` - VM testing
-- `ssh`, `ssh-keygen` - Remote testing
-- `ss` - Network port checking
+- `docker` or `podman` - Container runtime for KIWI NG builds
+- `qemu-system-x86_64` - VM testing with UEFI support
+- `ssh`, `ssh-keygen` - Remote testing and debugging
+- `ss` - Network port checking for services
+- Optional: `kiwi-ng` - For local builds without containers
 
 ## Configuration
 
@@ -104,18 +172,28 @@ Required system dependencies:
 - `PICCOLO_UPDATE_GROUP`: Update channel (e.g., "piccolo-stable")
 
 ### Build Constants
-- Board: `amd64-usr`
-- Ebuild category: `app-misc`
-- Package name: `piccolod-bin`
+- Architecture: `x86_64` (default, `aarch64` supported)
+- Base OS: openSUSE Tumbleweed/MicroOS
+- Container runtime: Podman
 - HTTP port: `8080`
+- Binary path: `/usr/local/piccolo/v1/bin/piccolod`
 
 ## Testing Framework
 
 The test suite validates:
-1. **Binary Installation**: piccolod present and executable
-2. **Service Status**: systemd service active and running as root
-3. **API Functionality**: HTTP endpoints responding correctly
-4. **Container Runtime**: Docker functionality
+1. **Binary Installation**: piccolod present and executable at correct path
+2. **Service Status**: systemd service active and running 
+3. **API Functionality**: HTTP endpoints responding on port 8080
+4. **Container Runtime**: Podman functionality and container management
 5. **Ecosystem Health**: Comprehensive self-validation via `/api/v1/ecosystem`
+6. **System Integration**: MicroOS base system functionality
 
-Tests run in an isolated QEMU VM with cloud-init for SSH key injection.
+Tests run in an isolated QEMU VM with SSH key injection and port forwarding (host:2222 → guest:22).
+
+## Migration Notes
+
+This system has migrated from Flatcar Linux to openSUSE MicroOS. Key differences:
+- Build system changed from Gentoo/Portage to KIWI NG
+- Container runtime changed from Docker to Podman
+- Update mechanism uses MicroOS transactional updates instead of CoreOS update_engine
+- Research and migration documentation available in `foundation.md` and `coreos-migration-research.md`

@@ -69,10 +69,12 @@ WORK_DIR="${ROOT_DIR}/.work"
 KIWI_DIR="${ROOT_DIR}/kiwi"
 OVERLAY_DIR="${ROOT_DIR}/kiwi/root"
 DIST_DIR="${ROOT_DIR}/dist"
+RELEASES_DIR="${ROOT_DIR}/releases"
+VERSION_RELEASES_DIR="${RELEASES_DIR}/${VERSION}"
 IMAGE_NAME="piccolo-os"
 IMAGE_LABEL="${IMAGE_NAME}-${ARCH}-${VERSION}"
 
-mkdir -p "${WORK_DIR}" "${DIST_DIR}" "${OVERLAY_DIR}"
+mkdir -p "${WORK_DIR}" "${DIST_DIR}" "${OVERLAY_DIR}" "${RELEASES_DIR}" "${VERSION_RELEASES_DIR}"
 
 # -------- detect container runtime ----------
 RUNTIME=""
@@ -191,12 +193,69 @@ if [[ -z "${ISO_SRC}" ]]; then
 fi
 
 FINAL_ISO="${DIST_DIR}/${IMAGE_LABEL}.iso"
+RELEASE_ISO="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.iso"
+RELEASE_LOG="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.log"
+
+# Move the generated ISO to final location in dist (for immediate use)
 mv -f "${ISO_SRC}" "${FINAL_ISO}"
+
+# Copy artifacts to releases directory for preservation
+echo "==> Preserving build artifacts in releases directory"
+cp -f "${FINAL_ISO}" "${RELEASE_ISO}"
+if [[ -f "${DIST_DIR}/kiwi.log" ]]; then
+  cp -f "${DIST_DIR}/kiwi.log" "${RELEASE_LOG}"
+fi
+
+# Preserve additional artifacts critical for updates and system management
+RELEASE_PACKAGES="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.packages"
+RELEASE_CHANGES="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.changes"
+RELEASE_VERIFIED="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.verified"
+RELEASE_METADATA="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.json"
+
+if [[ -f "${DIST_DIR}/${IMAGE_LABEL}.packages" ]]; then
+  cp -f "${DIST_DIR}/${IMAGE_LABEL}.packages" "${RELEASE_PACKAGES}"
+fi
+if [[ -f "${DIST_DIR}/${IMAGE_LABEL}.changes" ]]; then
+  cp -f "${DIST_DIR}/${IMAGE_LABEL}.changes" "${RELEASE_CHANGES}"
+fi
+if [[ -f "${DIST_DIR}/${IMAGE_LABEL}.verified" ]]; then
+  cp -f "${DIST_DIR}/${IMAGE_LABEL}.verified" "${RELEASE_VERIFIED}"
+fi
+if [[ -f "${DIST_DIR}/kiwi.result.json" ]]; then
+  cp -f "${DIST_DIR}/kiwi.result.json" "${RELEASE_METADATA}"
+fi
 
 echo
 echo "✔ Build complete"
 echo "ISO: ${FINAL_ISO}"
+echo "Release ISO: ${RELEASE_ISO}"
 echo "Log: ${DIST_DIR}/kiwi.log"
+echo "Release Log: ${RELEASE_LOG}"
+echo
+echo "📋 Additional preserved artifacts:"
+echo "  Packages: ${RELEASE_PACKAGES}"
+echo "  Changes: ${RELEASE_CHANGES}"
+echo "  Verified: ${RELEASE_VERIFIED}"
+echo "  Metadata: ${RELEASE_METADATA}"
+# Show summary of all preserved releases
+echo
+echo "📦 All preserved releases:"
+if [[ -d "${RELEASES_DIR}" ]] && find "${RELEASES_DIR}" -name "*.iso" -type f | head -1 >/dev/null 2>&1; then
+  for version_dir in "${RELEASES_DIR}"/*/; do
+    if [[ -d "$version_dir" ]]; then
+      version=$(basename "$version_dir")
+      iso_path="${version_dir}/${IMAGE_NAME}-${ARCH}-${version}.iso"
+      if [[ -f "$iso_path" ]]; then
+        size=$(du -h "$iso_path" | cut -f1)
+        artifact_count=$(find "$version_dir" -type f | wc -l)
+        echo "  - v${version} (${size}, ${artifact_count} artifacts)"
+      fi
+    fi
+  done
+else
+  echo "  - v${VERSION} (current build)"
+fi
+
 echo
 echo "Next steps:"
 echo "  - Test in UEFI/QEMU: qemu-system-x86_64 -enable-kvm -m 2048 -cpu host -machine q35,accel=kvm -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom ${FINAL_ISO}"
