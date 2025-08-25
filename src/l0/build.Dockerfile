@@ -16,28 +16,40 @@ RUN zypper -n --gpg-auto-import-keys ar -f https://download.opensuse.org/tumblew
     zypper -n --gpg-auto-import-keys ar -f https://download.opensuse.org/update/tumbleweed/ update && \
     zypper -n ref
 
-# 2. Install all build dependencies
-# The ARCH argument is used here to install the correct EFI packages.
+# 2. Install KIWI with complete dependency system (automatically handles all requirements)
 RUN zypper -n in --no-recommends \
     python3-kiwi \
-    dracut \
-    grub2 \
-    grub2-${ARCH}-efi \
-    shim \
-    mokutil \
-    btrfsprogs \
-    dosfstools \
-    e2fsprogs \
+    kiwi-systemdeps \
     parted \
-    kpartx \
-    xz \
-    gzip \
-    cpio \
-    xorriso \
-    squashfs \
-    selinux-policy-targeted \
-    policycoreutils \
-    tpm2.0-tools
+    dolly
 
-# 3. Set a default command (optional, but good practice)
+# 3. Pre-populate repository cache to speed up builds
+RUN zypper -n ref --force && \
+    zypper clean --all
+
+# 4. Pre-install common packages to speed up builds (skip problematic MicroOS patterns)
+RUN zypper -n in --no-recommends \
+    coreutils \
+    gawk \
+    gzip \
+    hostname \
+    openssl \
+    filesystem \
+    glibc-locale-base \
+    ca-certificates-mozilla \
+    kernel-default \
+    NetworkManager \
+    chrony \
+    podman \
+    conmon \
+    crun \
+    dracut-kiwi-live \
+    shim \
+    grub2 \
+    grub2-x86_64-efi \
+    ucode-amd \
+    ucode-intel \
+    || true
+
+# 5. Set a default command (optional, but good practice)
 CMD ["kiwi-ng", "--version"]

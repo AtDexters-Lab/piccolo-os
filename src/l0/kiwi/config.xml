@@ -1,15 +1,4 @@
-<!--
-  Piccolo OS – MicroOS-based live/self-install ISO
-  Schema: KIWI NG (v9). This profile targets:
-    - UEFI boot
-    - Secure Boot (shim + signed kernel from repos)
-    - Live rootfs with ability to install to disk (SelfInstall workflow)
-
-  TIPS:
-  - To keep images broadly bootable, we include generic firmware & drivers.
-  - Later, split firmware per-HW for your own devices to shrink size.
--->
-<image schemaversion="9.2" name="piccolo-os">
+<image schemaversion="7.5" name="piccolo-os">
   <description type="system">
     <author>Piccolo</author>
     <contact>oss@piccolospace.com</contact>
@@ -17,10 +6,8 @@
   </description>
 
   <preferences>
-    <!-- 'iso' builds a live ISO; we also add install tooling so users can install to disk -->
-    <type image="iso" filesystem="btrfs" firmware="uefi" hybrid="true"/>
-    <version>0.1.0</version>
-    <!-- Exclude docs to keep size down -->
+    <type image="iso" filesystem="btrfs" firmware="uefi"/>
+    <version>1.0.0</version>
     <rpm-excludedocs>true</rpm-excludedocs>
     <rpm-check-signatures>true</rpm-check-signatures>
     <locale>en_US</locale>
@@ -29,7 +16,7 @@
     <packagemanager>zypper</packagemanager>
   </preferences>
 
-  <!-- Base repositories: Tumbleweed / MicroOS (adjust if you want stable channels) -->
+  <!-- Use faster mirror closer to your location -->
   <repository type="rpm-md">
     <source path="https://download.opensuse.org/tumbleweed/repo/oss/"/>
   </repository>
@@ -40,100 +27,51 @@
     <source path="https://download.opensuse.org/update/tumbleweed/"/>
   </repository>
 
-  <!-- Overlay puts files directly into rootfs -->
-  <overlaydir>root_overlay</overlaydir>
-
-  <!-- Config snippets dropped directly -->
-  <config-files>
-    <file name="/etc/rpm/macros.piccolo" perms="0644" owner="root" group="root">
-%_excludedocs 1
-%_install_langs en_US
-    </file>
-
-    <file name="/etc/systemd/journald.conf.d/10-piccolo.conf" perms="0644" owner="root" group="root">
-SystemMaxUse=100M
-RuntimeMaxUse=50M
-    </file>
-
-    <!-- Dracut: smaller initrd; add TPM2 if you’ll do UKI/measured boot later -->
-    <file name="/etc/dracut.conf.d/30-piccolo.conf" perms="0644" owner="root" group="root">
-hostonly="yes"
-compress="zstd"
-omit="drm plymouth iscsi nfs fcoe"
-    </file>
-
-    <!-- Disable SSH for headless-only access -->
-    <file name="/etc/systemd/system/sshd.service.d/disable.conf" perms="0644" owner="root" group="root">
-[Unit]
-ConditionPathExists=!/etc/piccolo/allow-ssh
-    </file>
-  </config-files>
-
   <packages type="bootstrap">
-    <!-- Minimal bootstrap to resolve package manager stack -->
-    <package>openSUSE-release</package>
-    <package>patterns-base-minimal_base</package>
-  </packages>
-
-  <packages type="delete">
-    <!-- Remove interactive tools for headless appliance -->
-    <package>vim</package>
-    <package>nano</package>
-    <package>man</package>
-    <package>info</package>
+    <package name="coreutils"/>
+    <package name="gawk"/>
+    <package name="gzip"/>
+    <package name="hostname"/>
+    <package name="openssl"/>
+    <package name="libz1"/>
+    <package name="filesystem"/>
+    <package name="glibc-locale-base"/>
+    <package name="ca-certificates-mozilla"/>
   </packages>
 
   <packages type="image">
-    <!-- MicroOS fundamentals -->
-    <package>openSUSE-release-microos</package>
-    <package>microos-release</package>
-    <package>filesystem</package>
-    <package>bash</package>
-    <package>coreutils</package>
-    <package>shadow</package>
-    <package>ca-certificates</package>
+    <!-- MicroOS Base Patterns -->
+    <package name="patterns-microos-basesystem"/>
+    <package name="patterns-microos-base-zypper"/>
+    <package name="patterns-microos-defaults"/>
 
-    <!-- Atomic update stack -->
-    <package>transactional-update</package>
-    <package>rebootmgr</package>
+    <!-- Required for live ISO -->
+    <package name="dracut-kiwi-live"/>
+    <package name="kernel-default"/>
 
-    <!-- SELinux enforcing -->
-    <package>selinux-policy-targeted</package>
-    <package>policycoreutils</package>
-
-    <!-- Headless networking -->
-    <package>NetworkManager</package>
-    <package>NetworkManager-nmcli</package>
-    <package>nftables</package>
-    <package>chrony</package>
+    <!-- Networking -->
+    <package name="NetworkManager"/>
+    <package name="chrony"/>
 
     <!-- Container runtime -->
-    <package>podman</package>
-    <package>conmon</package>
-    <package>crun</package>
-    <package>skopeo</package>
+    <package name="podman"/>
+    <package name="conmon"/>
+    <package name="crun"/>
 
-    <!-- Secure Boot / UEFI boot chain -->
-    <package>shim</package>
-    <package>grub2</package>
-    <package>grub2-x86_64-efi</package>
-    <package>mokutil</package>
+    <!-- Boot chain -->
+    <package name="shim"/>
+    <package name="grub2"/>
+    <package name="grub2-x86_64-efi"/>
 
-    <!-- Kernel + firmware (broad support; trim later for your HW) -->
-    <package>kernel-default</package>
-    <package>kernel-firmware</package>
-    <package>ucode-amd</package>
-    <package>ucode-intel</package>
+    <!-- Microcode -->
+    <package name="ucode-amd"/>
+    <package name="ucode-intel"/>
 
-    <!-- TPM / IMA building blocks (you'll add policy later) -->
-    <package>tpm2-tools</package>
-    <package>tpm2-tss</package>
-    <package>ima-evm-utils</package>
-
-    <!-- Live/system installer helpers -->
-    <package>kiwi-live</package>
-    <package>yast2-installation</package>
-    <package>yast2-firstboot</package>
+    <!-- Essential for atomic updates -->
+    <package name="transactional-update"/>
+    <package name="rebootmgr"/>
   </packages>
+
+
 
 </image>

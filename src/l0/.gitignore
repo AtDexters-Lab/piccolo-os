@@ -5,7 +5,7 @@ build
 /.work/
 build.out
 test.out
-/kiwi/root_overlay/usr/local/piccolo/v1/bin/piccolod
+/kiwi/root/usr/local/piccolo/v1/bin/piccolod
 
 # Local config
 /.claude/

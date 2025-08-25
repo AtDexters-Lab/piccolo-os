@@ -22,13 +22,44 @@ set -euo pipefail
 # ------------------------------------------------------------------------------
 
 # -------- parameters ----------
-PICCOLOD_BIN="${1:-}"
-VERSION="${2:-0.1.0}"
-ARCH="${3:-x86_64}"
+# Defaults
+VERSION="0.1.0"
+ARCH="x86_64"
+PICCOLOD_BIN=""
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+  key="$1"
+  case $key in
+    --binary-path)
+      PICCOLOD_BIN="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --version)
+      VERSION="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --arch)
+      ARCH="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    -h|--help)
+      echo "Usage: ./build_piccolo.sh --binary-path <path> [--version <ver>] [--arch <arch>]"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
 
 if [[ -z "${PICCOLOD_BIN}" ]] || [[ ! -f "${PICCOLOD_BIN}" ]]; then
-  echo "ERROR: Provide path to built 'piccolod' binary as the first arg."
-  echo "Example: ./build_piccolo.sh /home/me/build/piccolod 0.1.0 x86_64"
+  echo "ERROR: --binary-path is required and must be a valid file."
+  echo "Example: ./build_piccolo.sh --binary-path /path/to/piccolod"
   exit 1
 fi
 
@@ -36,7 +67,7 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="${ROOT_DIR}/.work"
 KIWI_DIR="${ROOT_DIR}/kiwi"
-OVERLAY_DIR="${KIWI_DIR}/root_overlay"
+OVERLAY_DIR="${ROOT_DIR}/kiwi/root"
 DIST_DIR="${ROOT_DIR}/dist"
 IMAGE_NAME="piccolo-os"
 IMAGE_LABEL="${IMAGE_NAME}-${ARCH}-${VERSION}"
@@ -45,10 +76,10 @@ mkdir -p "${WORK_DIR}" "${DIST_DIR}" "${OVERLAY_DIR}"
 
 # -------- detect container runtime ----------
 RUNTIME=""
-if command -v podman >/dev/null 2>&1; then
-  RUNTIME="podman"
-elif command -v docker >/dev/null 2>&1; then
+if command -v docker >/dev/null 2>&1; then
   RUNTIME="docker"
+elif command -v podman >/dev/null 2>&1; then
+  RUNTIME="podman"
 fi
 
 # -------- check kiwi locally if no container ----------
@@ -56,96 +87,15 @@ function have_kiwi_local() {
   command -v kiwi-ng >/dev/null 2>&1
 }
 
-# -------- scaffold KIWI config on first run ----------
+# -------- config.xml is checked into git, no need to generate ----------
 CONFIG_XML="${KIWI_DIR}/config.xml"
 
-if [[ ! -f "${CONFIG_XML}" ]]; then
-  cat > "${CONFIG_XML}" <<'XML'
-<!--
-  Piccolo OS – MicroOS-based live/self-install ISO
-  Schema: KIWI NG (v9). This profile targets:
-    - UEFI boot
-    - Secure Boot (shim + signed kernel from repos)
-    - Live rootfs with ability to install to disk (SelfInstall workflow)
--->
-<image schemaversion="7.4" name="piccolo-os">
-  <description type="system">
-    <author>Piccolo</author>
-    <contact>oss@piccolospace.com</contact>
-    <specification>MicroOS-based headless appliance with piccolod</specification>
-  </description>
+# -------- ensure overlay directory structure exists ----------
+mkdir -p "${OVERLAY_DIR}/etc/systemd/system" \
+         "${OVERLAY_DIR}/usr/local/piccolo/v1/bin" \
+         "${OVERLAY_DIR}/etc/piccolo"
 
-  <preferences>
-    <type image="iso" filesystem="btrfs" firmware="uefi" bootloader="grub2" hybrid="true"/>
-    <version>0.1.0</version>
-    <rpm-excludedocs>true</rpm-excludedocs>
-    <rpm-check-signatures>true</rpm-check-signatures>
-    <locale>en_US</locale>
-    <keytable>us</keytable>
-    <timezone>UTC</timezone>
-    <packagemanager>zypper</packagemanager>
-  </preferences>
-
-  <repository type="rpm-md">
-    <source path="https://download.opensuse.org/tumbleweed/repo/oss/"/>
-  </repository>
-  <repository type="rpm-md">
-    <source path="https://download.opensuse.org/tumbleweed/repo/non-oss/"/>
-  </repository>
-  <repository type="rpm-md">
-    <source path="https://download.opensuse.org/update/tumbleweed/"/>
-  </repository>
-
-  <packages type="bootstrap">
-    <package>openSUSE-release</package>
-    <package>patterns-base-minimal_base</package>
-  </packages>
-
-  <packages type="image">
-    <package>openSUSE-release-microos</package>
-    <package>microos-release</package>
-    <package>filesystem</package>
-    <package>bash</package>
-    <package>coreutils</package>
-    <package>shadow</package>
-    <package>ca-certificates</package>
-    <package>transactional-update</package>
-    <package>rebootmgr</package>
-    <package>selinux-policy-targeted</package>
-    <package>policycoreutils</package>
-    <package>NetworkManager</package>
-    <package>NetworkManager-nmcli</package>
-    <package>nftables</package>
-    <package>chrony</package>
-    <package>podman</package>
-    <package>conmon</package>
-    <package>crun</package>
-    <package>skopeo</package>
-    <package>shim</package>
-    <package>grub2</package>
-    <package>grub2-x86_64-efi</package>
-    <package>mokutil</package>
-    <package>kernel-default</package>
-    <package>kernel-firmware</package>
-    <package>ucode-amd</package>
-    <package>ucode-intel</package>
-    <package>tpm2-tools</package>
-    <package>tpm2-tss</package>
-    <package>ima-evm-utils</package>
-    <package>kiwi-live</package>
-    <package>yast2-installation</package>
-    <package>yast2-firstboot</package>
-  </packages>
-
-  <overlaydir>root_overlay</overlaydir>
-</image>
-XML
-
-  mkdir -p "${OVERLAY_DIR}/etc/systemd/system" \
-           "${OVERLAY_DIR}/usr/local/piccolo/v1/bin" \
-           "${OVERLAY_DIR}/etc/piccolo"
-
-  cat > "${OVERLAY_DIR}/etc/systemd/system/piccolod.service" <<'UNIT'
+cat > "${OVERLAY_DIR}/etc/systemd/system/piccolod.service" <<'UNIT'
 [Unit]
 Description=Piccolo Orchestrator (piccolod)
 After=network-online.target
@@ -166,12 +116,11 @@ LockPersonality=yes
 WantedBy=multi-user.target
 UNIT
 
-  cat > "${OVERLAY_DIR}/etc/piccolo/config.yaml" <<'YAML'
+cat > "${OVERLAY_DIR}/etc/piccolo/config.yaml" <<'YAML'
 # Piccolo default config (edit in your repo)
 listen: "0.0.0.0:443"
 data_dir: "/var/lib/piccolo"
 YAML
-fi
 
 # -------- copy piccolod into overlay ----------
 install -m 0755 "${PICCOLOD_BIN}" "${OVERLAY_DIR}/usr/local/piccolo/v1/bin/piccolod"
@@ -213,12 +162,39 @@ if [[ -n "${RUNTIME}" ]]; then
     echo "--> Builder image created successfully."
   fi
 
-  echo "==> Running KIWI build using pre-built image"
+  echo "==> Cleaning previous build artifacts"
+  # Clean up any previous build directories that might cause conflicts
+  if [[ -d "${DIST_DIR}/build" ]]; then
+    echo "--> Removing existing build directory"
+    sudo rm -rf "${DIST_DIR}/build" || {
+      echo "Failed to clean build directory. You may need to run: sudo rm -rf ${DIST_DIR}/build"
+      exit 1
+    }
+  fi
+
+  echo "==> Running KIWI build using pre-built image with persistent cache"
+  # Create named volumes for caching to persist between builds
+  ${RUNTIME} volume create piccolo-zypper-cache >/dev/null 2>&1 || true
+  ${RUNTIME} volume create piccolo-kiwi-bundle-cache >/dev/null 2>&1 || true
+  
+  # Ensure loop devices are available on host
+  sudo modprobe loop || true
+  
   ${RUNTIME} run --rm \
-    -v "${KIWI_DIR}:/build/kiwi:Z" \
-    -v "${DIST_DIR}:/build/result:Z" \
+    --user root \
+    -v "${KIWI_DIR}:/build/kiwi" \
+    -v "${DIST_DIR}:/build/result" \
+    -v piccolo-zypper-cache:/var/cache/zypp \
+    -v piccolo-kiwi-bundle-cache:/var/cache/kiwi \
     --env KIWI_DEBUG=1 \
     --privileged \
+    --cap-add=SYS_ADMIN \
+    --cap-add=MKNOD \
+    --cap-add=SYS_CHROOT \
+    --cap-add=SETFCAP \
+    --cap-add=SYS_RESOURCE \
+    --device-cgroup-rule="b 7:* rmw" \
+    -v /dev:/dev \
     "${BUILDER_IMG_TAG}" \
     kiwi-ng --color-output --debug --logfile /build/result/kiwi.log --target-arch "${ARCH}" \
       system build \
@@ -226,6 +202,16 @@ if [[ -n "${RUNTIME}" ]]; then
       --target-dir /build/result
 
 elif have_kiwi_local; then
+  echo "==> Cleaning previous build artifacts"
+  # Clean up any previous build directories that might cause conflicts
+  if [[ -d "${DIST_DIR}/build" ]]; then
+    echo "--> Removing existing build directory"
+    sudo rm -rf "${DIST_DIR}/build" || {
+      echo "Failed to clean build directory. You may need to run: sudo rm -rf ${DIST_DIR}/build"
+      exit 1
+    }
+  fi
+
   echo "==> Using local kiwi-ng"
   kiwi-ng --color-output --debug --logfile "${DIST_DIR}/kiwi.log" --target-arch "${ARCH}" \
     system build \
