@@ -58,6 +58,10 @@
     <package name="conmon"/>
     <package name="crun"/>
 
+    <!-- Cloud-init for automated testing and configuration -->
+    <package name="cloud-init"/>
+    <package name="cloud-init-config-MicroOS"/>
+
     <!-- Boot chain -->
     <package name="shim"/>
     <package name="grub2"/>

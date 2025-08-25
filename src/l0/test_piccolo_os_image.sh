@@ -51,11 +51,11 @@ usage() {
 
 check_dependencies() {
     log "Checking for required dependencies..."
-    local deps=("qemu-system-x86_64" "ssh" "ssh-keygen" "ss" "nc" "sshpass")
+    local deps=("qemu-system-x86_64" "ssh" "ssh-keygen" "ss" "nc" "sshpass" "genisoimage")
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             log "Error: Required dependency '$dep' is not installed." >&2
-            log "On Debian/Ubuntu, try: sudo apt-get install -y qemu-system-x86 openssh-client iproute2 netcat-openbsd sshpass"
+            log "On Debian/Ubuntu, try: sudo apt-get install -y qemu-system-x86 openssh-client iproute2 netcat-openbsd sshpass genisoimage"
             exit 1
         fi
     done
@@ -178,15 +178,51 @@ main() {
     local iso_path="${BUILD_DIR}/piccolo-os-x86_64-${PICCOLO_VERSION}.iso"
     local uefi_code_copy="${test_dir}/$(basename "$UEFI_CODE")"
     local uefi_vars_copy="${test_dir}/$(basename "$UEFI_VARS")"
+    local ssh_key="${test_dir}/id_rsa_test"
+    local seed_iso="${test_dir}/seed.iso"
+    local cloud_config_dir="${test_dir}/cloud-config"
 
     # Clean up previous run just in case
     rm -rf "$test_dir"
-    mkdir -p "$test_dir"
+    mkdir -p "$test_dir" "$cloud_config_dir"
     if [ ! -f "$iso_path" ]; then log "Error: ISO file not found at ${iso_path}" >&2; exit 1; fi
     
     log "Creating local copies of UEFI firmware files for this test run..."
     cp "$UEFI_CODE" "$uefi_code_copy"
     cp "$UEFI_VARS" "$uefi_vars_copy"
+
+    log "Generating SSH key for cloud-init authentication..."
+    ssh-keygen -t rsa -b 4096 -f "$ssh_key" -N "" -q
+
+    log "Creating cloud-init configuration for SSH access..."
+    cat > "${cloud_config_dir}/user-data" << EOF
+#cloud-config
+users:
+  - name: root
+    lock_passwd: false
+    plain_text_passwd: 'testpassword123'
+    ssh_authorized_keys:
+      - $(cat "${ssh_key}.pub")
+
+ssh_pwauth: true
+disable_root: false
+
+runcmd:
+  - systemctl enable --now sshd
+  - systemctl status sshd
+EOF
+
+    cat > "${cloud_config_dir}/meta-data" << EOF
+instance-id: piccolo-test-$(date +%s)
+local-hostname: piccolo-test
+EOF
+
+    log "Creating cloud-init seed ISO with CIDATA label..."
+    genisoimage -quiet -output "$seed_iso" -volid CIDATA -joliet -rational-rock "${cloud_config_dir}/user-data" "${cloud_config_dir}/meta-data" 2>/dev/null
+    if [ $? -ne 0 ]; then
+        log "Error: Failed to create cloud-init seed ISO. Ensure genisoimage is installed." >&2
+        exit 1
+    fi
 
     # ---
     # Step 2: Boot VM with Direct QEMU Command
@@ -210,6 +246,7 @@ main() {
     log "    -drive if=pflash,format=raw,readonly=on,file=\"$uefi_code_copy\" \\"
     log "    -drive if=pflash,format=raw,file=\"$uefi_vars_copy\" \\"
     log "    -cdrom \"$iso_path\" \\"
+    log "    -drive file=\"$seed_iso\",media=cdrom,if=virtio \\"
     log "    -boot d \\"
     log "    -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22 \\"
     log "    -device virtio-net-pci,netdev=n0 \\"
@@ -224,6 +261,7 @@ main() {
         -drive if=pflash,format=raw,readonly=on,file="$uefi_code_copy" \
         -drive if=pflash,format=raw,file="$uefi_vars_copy" \
         -cdrom "$iso_path" \
+        -drive file="$seed_iso",media=cdrom,if=virtio \
         -boot d \
         -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22 \
         -device virtio-net-pci,netdev=n0 \
@@ -239,9 +277,9 @@ main() {
     local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
     local checks_passed=false
     
-    # Wait for VM to boot
-    log "Waiting for VM to complete boot process..."
-    sleep 45  # Give more time for full boot
+    # Wait for VM to boot and cloud-init to finish
+    log "Waiting for VM to complete boot process and cloud-init configuration..."
+    sleep 30  # Reduced wait time for faster testing
     
     # Test if SSH is listening on port 22
     log "Checking if SSH service is listening on port 22..."
@@ -254,34 +292,33 @@ main() {
         sleep 5
     done
     
-    # Try SSH connection with common MicroOS users and no password/key
-    local test_users=("root" "core" "opensuse" "user" "linux")
+    # Test SSH connection with cloud-init configured credentials
+    log "Testing SSH connection with cloud-init configured credentials..."
     
-    for user in "${test_users[@]}"; do
-        log "Testing SSH connection as user: $user"
+    # Try SSH key authentication first (should work with cloud-init)
+    if ssh -q -p "$SSH_PORT" -i "$ssh_key" $ssh_opts "root@localhost" "echo 'SSH key auth works'" 2>/dev/null; then
+        log "✅ SSH is working with key authentication for user: root"
+        SSH_USER="root"
+        SSH_KEY="$ssh_key"
+        checks_passed=true
+    # Fall back to password authentication
+    elif sshpass -p "testpassword123" ssh -q -p "$SSH_PORT" -o PasswordAuthentication=yes -o PubkeyAuthentication=no $ssh_opts "root@localhost" "echo 'SSH password works'" 2>/dev/null; then
+        log "✅ SSH is working with password authentication for user: root"
+        SSH_USER="root"
+        SSH_PASS="testpassword123"
+        checks_passed=true
+    else
+        # Debug: Try to see what's happening with cloud-init
+        log "Attempting to check cloud-init status via SSH with no authentication..."
+        log "This might work if SSH is enabled but authentication isn't configured yet..."
         
-        # Skip SSH key auth since we removed the key generation
-        
-        # Try with no authentication (empty password)
-        if sshpass -p "" ssh -q -p "$SSH_PORT" -o PasswordAuthentication=yes -o PubkeyAuthentication=no $ssh_opts "${user}@localhost" "echo 'SSH no-password works'" 2>/dev/null; then
-            log "✅ SSH is working with no password for user: $user"
-            SSH_USER="$user"
-            SSH_AUTH="nopass"
-            checks_passed=true
-            break
+        # Try connecting without authentication to get debugging info
+        if timeout 10 ssh -q -p "$SSH_PORT" $ssh_opts "root@localhost" "systemctl status cloud-init.target; cloud-init status; journalctl -u cloud-init --no-pager -n 20" 2>/dev/null | head -20; then
+            log "Got some cloud-init debug info above"
+        else
+            log "Could not get cloud-init debug info via SSH"
         fi
-        
-        # Try with common passwords
-        for passwd in "" "root" "opensuse" "linux" "user" "$user"; do
-            if [ -n "$passwd" ] && sshpass -p "$passwd" ssh -q -p "$SSH_PORT" -o PasswordAuthentication=yes -o PubkeyAuthentication=no $ssh_opts "${user}@localhost" "echo 'SSH password works'" 2>/dev/null; then
-                log "✅ SSH is working with password '$passwd' for user: $user"
-                SSH_USER="$user"
-                SSH_PASS="$passwd"
-                checks_passed=true
-                break 2
-            fi
-        done
-    done
+    fi
     
     if [ "$checks_passed" = false ]; then
         log "❌ SSH connection failed with all attempted users and authentication methods."
@@ -309,8 +346,11 @@ main() {
         local ssh_cmd
         if [ -n "${SSH_PASS:-}" ]; then
             ssh_cmd="sshpass -p '$SSH_PASS' ssh -p '$SSH_PORT' -o PasswordAuthentication=yes -o PubkeyAuthentication=no $ssh_opts '${SSH_USER}@localhost'"
+        elif [ -n "${SSH_KEY:-}" ]; then
+            ssh_cmd="ssh -p '$SSH_PORT' -i '$SSH_KEY' $ssh_opts '${SSH_USER}@localhost'"
         else
-            ssh_cmd="ssh -p '$SSH_PORT' -i '${ssh_key}' $ssh_opts '${SSH_USER}@localhost'"
+            log "Error: No valid SSH authentication method detected" >&2
+            exit 1
         fi
         
         # These checks run against the LIVE environment booted from our ISO.

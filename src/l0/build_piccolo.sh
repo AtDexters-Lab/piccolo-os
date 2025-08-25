@@ -72,7 +72,7 @@ DIST_DIR="${ROOT_DIR}/dist"
 RELEASES_DIR="${ROOT_DIR}/releases"
 VERSION_RELEASES_DIR="${RELEASES_DIR}/${VERSION}"
 IMAGE_NAME="piccolo-os"
-IMAGE_LABEL="${IMAGE_NAME}-${ARCH}-${VERSION}"
+IMAGE_LABEL="${IMAGE_NAME}.${ARCH}-${VERSION}"
 
 mkdir -p "${WORK_DIR}" "${DIST_DIR}" "${OVERLAY_DIR}" "${RELEASES_DIR}" "${VERSION_RELEASES_DIR}"
 
@@ -192,16 +192,12 @@ if [[ -z "${ISO_SRC}" ]]; then
   exit 1
 fi
 
-FINAL_ISO="${DIST_DIR}/${IMAGE_LABEL}.iso"
 RELEASE_ISO="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.iso"
 RELEASE_LOG="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.log"
 
-# Move the generated ISO to final location in dist (for immediate use)
-mv -f "${ISO_SRC}" "${FINAL_ISO}"
-
 # Copy artifacts to releases directory for preservation
 echo "==> Preserving build artifacts in releases directory"
-cp -f "${FINAL_ISO}" "${RELEASE_ISO}"
+cp -f "${ISO_SRC}" "${RELEASE_ISO}"
 if [[ -f "${DIST_DIR}/kiwi.log" ]]; then
   cp -f "${DIST_DIR}/kiwi.log" "${RELEASE_LOG}"
 fi
