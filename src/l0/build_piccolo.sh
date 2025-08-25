@@ -90,48 +90,15 @@ function have_kiwi_local() {
 # -------- config.xml is checked into git, no need to generate ----------
 CONFIG_XML="${KIWI_DIR}/config.xml"
 
-# -------- ensure overlay directory structure exists ----------
-mkdir -p "${OVERLAY_DIR}/etc/systemd/system" \
-         "${OVERLAY_DIR}/usr/local/piccolo/v1/bin" \
-         "${OVERLAY_DIR}/etc/piccolo"
-
-cat > "${OVERLAY_DIR}/etc/systemd/system/piccolod.service" <<'UNIT'
-[Unit]
-Description=Piccolo Orchestrator (piccolod)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=notify
-ExecStart=/usr/local/piccolo/current/bin/piccolod serve --config /etc/piccolo/config.yaml
-Restart=always
-RestartSec=2s
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-LockPersonality=yes
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-cat > "${OVERLAY_DIR}/etc/piccolo/config.yaml" <<'YAML'
-# Piccolo default config (edit in your repo)
-listen: "0.0.0.0:443"
-data_dir: "/var/lib/piccolo"
-YAML
+# -------- ensure binary directory exists ----------
+mkdir -p "${OVERLAY_DIR}/usr/local/piccolo/v1/bin"
 
 # -------- copy piccolod into overlay ----------
 install -m 0755 "${PICCOLOD_BIN}" "${OVERLAY_DIR}/usr/local/piccolo/v1/bin/piccolod"
 if [[ -L "${OVERLAY_DIR}/usr/local/piccolo/current" ]]; then
   rm -f "${OVERLAY_DIR}/usr/local/piccolo/current"
 fi
-ln -sfn ../v1 "${OVERLAY_DIR}/usr/local/piccolo/current"
-
-mkdir -p "${OVERLAY_DIR}/etc/systemd/system/multi-user.target.wants"
-ln -sfn /etc/systemd/system/piccolod.service \
-  "${OVERLAY_DIR}/etc/systemd/system/multi-user.target.wants/piccolod.service"
+ln -sfn v1 "${OVERLAY_DIR}/usr/local/piccolo/current"
 
 # -------- bump version in config.xml to match CLI arg ----------
 if command -v python3 >/dev/null 2>&1; then
@@ -188,12 +155,6 @@ if [[ -n "${RUNTIME}" ]]; then
     -v piccolo-kiwi-bundle-cache:/var/cache/kiwi \
     --env KIWI_DEBUG=1 \
     --privileged \
-    --cap-add=SYS_ADMIN \
-    --cap-add=MKNOD \
-    --cap-add=SYS_CHROOT \
-    --cap-add=SETFCAP \
-    --cap-add=SYS_RESOURCE \
-    --device-cgroup-rule="b 7:* rmw" \
     -v /dev:/dev \
     "${BUILDER_IMG_TAG}" \
     kiwi-ng --color-output --debug --logfile /build/result/kiwi.log --target-arch "${ARCH}" \
