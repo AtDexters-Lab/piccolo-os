@@ -1,0 +1,11 @@
+[Unit]
+Description=Piccolo Failure Handler - Logs failures for MicroOS rollback detection
+After=piccolod.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'echo "$(date): CRITICAL - piccolod service failed to start. This may trigger OS rollback." | systemd-cat -t piccolod-failure -p crit; logger -p daemon.crit "PICCOLO_SERVICE_FAILURE: $(date) - piccolod failed to start or maintain health checks"'
+RemainAfterExit=no
+
+# Note: MicroOS health-checker will detect this failure and may trigger automatic rollback
+# if this happens during or shortly after an OS update

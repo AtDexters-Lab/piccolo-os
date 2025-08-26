@@ -2,3 +2,4 @@ enable NetworkManager.service
 enable sshd.service
 enable cloud-init.target
 enable piccolod.service
+enable piccolod-health-check.service

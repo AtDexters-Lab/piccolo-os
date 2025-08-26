@@ -1,3 +1,0 @@
-# Piccolo default config (edit in your repo)
-listen: "0.0.0.0:443"
-data_dir: "/var/lib/piccolo"

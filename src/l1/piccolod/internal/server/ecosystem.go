@@ -24,6 +24,56 @@ type EcosystemResponse struct {
 	Permissions map[string]string `json:"permissions"` // Key capability info
 }
 
+// ReadinessResponse represents a simple boolean health check result
+type ReadinessResponse struct {
+	Ready   bool   `json:"ready"`
+	Status  string `json:"status"` // "healthy", "degraded", "unhealthy"
+	Message string `json:"message,omitempty"`
+}
+
+// handleReadinessCheck provides a simple boolean health check for systemd/K8s
+func (s *Server) handleReadinessCheck() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Reuse the same ecosystem logic internally
+		ecosystemResponse := s.runEcosystemChecks()
+
+		var ready bool
+		var statusCode int
+
+		// Convert ecosystem status to simple boolean
+		switch ecosystemResponse.Overall {
+		case "healthy", "degraded":
+			ready = true
+			statusCode = http.StatusOK // 200
+		case "unhealthy":
+			ready = false
+			statusCode = http.StatusServiceUnavailable // 503
+		default:
+			ready = false
+			statusCode = http.StatusInternalServerError // 500
+		}
+
+		response := ReadinessResponse{
+			Ready:   ready,
+			Status:  ecosystemResponse.Overall,
+			Message: ecosystemResponse.Summary,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(statusCode)
+
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, "Failed to encode readiness response", http.StatusInternalServerError)
+		}
+	}
+}
+
 // handleEcosystemTest performs comprehensive environment validation
 func (s *Server) handleEcosystemTest() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +84,24 @@ func (s *Server) handleEcosystemTest() http.HandlerFunc {
 
 		response := s.runEcosystemChecks()
 
+		// Set appropriate HTTP status code based on health status
+		// This is CRITICAL for MicroOS rollback detection
+		var statusCode int
+		switch response.Overall {
+		case "healthy":
+			statusCode = http.StatusOK // 200
+		case "degraded":
+			statusCode = http.StatusOK // 200 - degraded still works
+		case "unhealthy":
+			statusCode = http.StatusServiceUnavailable // 503
+		default:
+			statusCode = http.StatusInternalServerError // 500
+		}
+
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache") // Prevent caching for health checks
+		w.WriteHeader(statusCode)
+
 		if err := json.NewEncoder(w).Encode(response); err != nil {
 			http.Error(w, "Failed to encode ecosystem test results", http.StatusInternalServerError)
 		}

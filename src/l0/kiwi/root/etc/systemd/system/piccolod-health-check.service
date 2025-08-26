@@ -1,0 +1,14 @@
+[Unit]
+Description=Piccolo Health Check for OS Updates
+After=piccolod.service
+Requires=piccolod.service
+PartOf=health-check.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/piccolod-health-check.sh
+TimeoutSec=120
+RemainAfterExit=yes
+
+[Install]
+WantedBy=health-check.target multi-user.target

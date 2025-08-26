@@ -13,6 +13,7 @@ import (
 	"piccolod/internal/storage"
 	"piccolod/internal/trust"
 	"piccolod/internal/update"
+	"github.com/coreos/go-systemd/v22/daemon"
 )
 
 // Server holds all the core components for our application.
@@ -69,7 +70,7 @@ func New(opts ...ServerOption) (*Server, error) {
 
 // Start runs the HTTP server and starts mDNS advertising.
 func (s *Server) Start() error {
-	const port = "8080"
+	const port = "80"
 	
 	// Start mDNS advertising - this must succeed
 	if err := s.mdnsManager.Start(); err != nil {
@@ -77,6 +78,15 @@ func (s *Server) Start() error {
 	}
 	
 	log.Printf("INFO: Starting piccolod server on http://localhost:%s", port)
+	
+	// Notify systemd that we're ready (for Type=notify services)
+	// This enables proper health checking and rollback functionality in MicroOS
+	if sent, err := daemon.SdNotify(false, daemon.SdNotifyReady); err != nil {
+		log.Printf("WARN: Failed to notify systemd of readiness: %v", err)
+	} else if sent {
+		log.Printf("INFO: Notified systemd that service is ready")
+	}
+	
 	return http.ListenAndServe(":"+port, s.router)
 }
 
@@ -101,8 +111,9 @@ func (s *Server) setupRoutes() {
 	mux.HandleFunc("/version", s.handleVersion())
 	
 	// Health and ecosystem testing
-	mux.HandleFunc("/api/v1/health", s.handleEcosystemTest())
-	mux.HandleFunc("/api/v1/ecosystem", s.handleEcosystemTest())
+	mux.HandleFunc("/api/v1/health", s.handleEcosystemTest())           // Full ecosystem details
+	mux.HandleFunc("/api/v1/health/ready", s.handleReadinessCheck())    // Simple boolean health
+	mux.HandleFunc("/api/v1/ecosystem", s.handleEcosystemTest())        // Full ecosystem details
 
 	s.router = mux
 }
