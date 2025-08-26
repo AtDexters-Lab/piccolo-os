@@ -11,4 +11,4 @@ cd "${SCRIPT_DIR}"
 PICCOLOD_OUTPUT=${SCRIPT_DIR}/../l1/piccolod/build/piccolod
 ./build_piccolo.sh --version ${PICCOLO_VERSION} --binary-path $PICCOLOD_OUTPUT  > build.out 2>&1
 
-./test_piccolo_os_image.sh --build-dir ./build/output/${PICCOLO_VERSION} --version ${PICCOLO_VERSION} > test.out 2>&1
+./test_piccolo_os_image.sh --build-dir ./releases/${PICCOLO_VERSION} --version ${PICCOLO_VERSION} > test.out 2>&1
