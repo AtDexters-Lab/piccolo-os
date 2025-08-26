@@ -1,9 +1,13 @@
 #!/bin/bash
 #
-# Piccolo OS - Interactive SSH Script v2.0
+# Piccolo OS - Interactive SSH Script v2.1
 #
 # This script boots the Piccolo MicroOS ISO with UEFI support in a QEMU virtual machine
 # and provides an interactive SSH console for debugging and exploration.
+#
+# v2.1 Refactor:
+# - Extract shared utilities to lib/piccolo_common.sh for maintainability
+# - Reduce code duplication with test_piccolo_os_image.sh
 #
 # v2.0 Major Updates:
 # - Updated for MicroOS-based artifacts (piccolo-os-x86_64-*.iso naming)
@@ -20,6 +24,9 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SSH_PORT=2222 # The host port to forward to the VM's SSH port (22)
 
+# Source shared utilities
+source "${SCRIPT_DIR}/lib/piccolo_common.sh"
+
 # ---
 # Global variables for the trap handler
 # ---
@@ -30,11 +37,8 @@ test_dir=""
 
 
 # ---
-# Helper Functions
+# Helper Functions (log function now sourced from common utilities)
 # ---
-log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
-}
 
 usage() {
     echo "Usage: $0 --build-dir <PATH_TO_BUILD_OUTPUT> --version <VERSION>"
@@ -44,55 +48,7 @@ usage() {
 }
 
 check_dependencies() {
-    log "Checking for required dependencies..."
-    local deps=("qemu-system-x86_64" "ssh" "ssh-keygen" "ss" "genisoimage")
-    for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            log "Error: Required dependency '$dep' is not installed." >&2
-            log "On Debian/Ubuntu, try: sudo apt-get install -y qemu-system-x86 openssh-client iproute2 genisoimage"
-            exit 1
-        fi
-    done
-    
-    # Check for UEFI firmware files (secboot versions preferred, then 4MB versions)
-    local uefi_firmware_paths=(
-        "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd"
-        "/usr/share/OVMF/OVMF_CODE.secboot.fd"
-        "/usr/share/OVMF/OVMF_CODE_4M.fd"
-        "/usr/share/OVMF/OVMF_CODE.fd"
-    )
-    
-    local uefi_vars_paths=(
-        "/usr/share/OVMF/OVMF_VARS_4M.fd"
-        "/usr/share/OVMF/OVMF_VARS.fd"
-    )
-    
-    UEFI_CODE=""
-    UEFI_VARS=""
-    
-    for path in "${uefi_firmware_paths[@]}"; do
-        if [ -f "$path" ]; then
-            UEFI_CODE="$path"
-            break
-        fi
-    done
-    
-    for path in "${uefi_vars_paths[@]}"; do
-        if [ -f "$path" ]; then
-            UEFI_VARS="$path"
-            break
-        fi
-    done
-    
-    if [ -z "$UEFI_CODE" ] || [ -z "$UEFI_VARS" ]; then
-        log "Error: UEFI firmware files not found. Please install OVMF package." >&2
-        log "On Debian/Ubuntu, try: sudo apt-get install -y ovmf"
-        exit 1
-    fi
-    
-    log "All dependencies are installed."
-    log "Using UEFI firmware: $UEFI_CODE"
-    log "Using UEFI vars: $UEFI_VARS"
+    check_vm_dependencies
 }
 
 # This function contains the robust cleanup logic.
@@ -100,31 +56,10 @@ cleanup() {
     # FIX: Disable the trap to prevent it from running multiple times.
     trap - EXIT INT TERM
     log "### Cleaning up..."
-    # Check if the QEMU PID was set and if the process still exists
-    if [ -n "${qemu_pid:-}" ] && ps -p "$qemu_pid" > /dev/null; then
-        log "Attempting graceful shutdown of QEMU PID: $qemu_pid..."
-        kill "$qemu_pid" 2>/dev/null
-        # Wait up to 3 seconds for it to terminate
-        for _ in {1..3}; do
-            if ! ps -p "$qemu_pid" > /dev/null; then
-                break
-            fi
-            sleep 1
-        done
-
-        # If it's still alive, it's stuck. Force kill it.
-        if ps -p "$qemu_pid" > /dev/null; then
-            log "QEMU did not shut down gracefully. Forcing termination (kill -9)..."
-            kill -9 "$qemu_pid" 2>/dev/null
-        fi
-        log "QEMU process terminated."
-    fi
     
-    # Now that test_dir is global, this will work reliably.
-    if [ -d "${test_dir:-}" ]; then
-        rm -rf "$test_dir"
-        log "Test directory cleaned up."
-    fi
+    cleanup_qemu_process "$qemu_pid"
+    cleanup_test_directory "$test_dir"
+    
     log "Cleanup complete."
 }
 
@@ -149,7 +84,8 @@ main() {
         esac
     done
     if [ -z "${BUILD_DIR:-}" ] || [ -z "${PICCOLO_VERSION:-}" ]; then usage; fi
-    if [ ! -d "$BUILD_DIR" ]; then log "Error: Build directory not found at $BUILD_DIR" >&2; exit 1; fi
+    
+    validate_build_directory "$BUILD_DIR"
     check_dependencies
 
     # ---
@@ -158,7 +94,7 @@ main() {
     log "### Step 1: Preparing the environment..."
     # Assign a value to the global test_dir variable
     test_dir="${SCRIPT_DIR}/build/ssh-session-${PICCOLO_VERSION}"
-    local iso_path="${BUILD_DIR}/piccolo-os-x86_64-${PICCOLO_VERSION}.iso"
+    local iso_path=$(resolve_piccolo_iso_path "$BUILD_DIR" "$PICCOLO_VERSION")
     local ssh_key="${test_dir}/id_rsa_test"
     local uefi_code_copy="${test_dir}/$(basename "$UEFI_CODE")"
     local uefi_vars_copy="${test_dir}/$(basename "$UEFI_VARS")"
@@ -168,45 +104,17 @@ main() {
     # Clean up previous run just in case
     rm -rf "$test_dir"
     mkdir -p "$test_dir" "$cloud_config_dir"
-    if [ ! -f "$iso_path" ]; then log "Error: ISO file not found at ${iso_path}" >&2; exit 1; fi
+    validate_iso_file "$iso_path"
     
     log "Creating local copies of UEFI firmware files..."
     cp "$UEFI_CODE" "$uefi_code_copy"
     cp "$UEFI_VARS" "$uefi_vars_copy"
     
-    log "Generating temporary SSH key for this session..."
-    ssh-keygen -t rsa -b 4096 -f "$ssh_key" -N "" -q
+    generate_temp_ssh_key "$ssh_key"
 
     log "Creating cloud-init configuration for SSH access..."
-    cat > "${cloud_config_dir}/user-data" << EOF
-#cloud-config
-users:
-  - name: root
-    lock_passwd: false
-    plain_text_passwd: 'piccolo123'
-    ssh_authorized_keys:
-      - $(cat "${ssh_key}.pub")
-
-ssh_pwauth: true
-disable_root: false
-
-write_files:
-  - path: /etc/ssh/sshd_config.d/99-cloud-init-root.conf
-    content: |
-      PermitRootLogin yes
-      PasswordAuthentication yes
-      PubkeyAuthentication yes
-    permissions: '0600'
-
-runcmd:
-  - systemctl enable --now sshd
-  - systemctl reload sshd
-EOF
-
-    cat > "${cloud_config_dir}/meta-data" << EOF
-instance-id: piccolo-ssh-$(date +%s)
-local-hostname: piccolo-ssh
-EOF
+    generate_cloud_init_user_data "$(cat "${ssh_key}.pub")" "$cloud_config_dir"
+    generate_cloud_init_meta_data "$cloud_config_dir" "$0"
 
     log "Creating cloud-init seed ISO with CIDATA label..."
     genisoimage -quiet -output "$seed_iso" -volid CIDATA -joliet -rational-rock "${cloud_config_dir}/user-data" "${cloud_config_dir}/meta-data" 2>/dev/null
