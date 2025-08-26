@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 
@@ -219,15 +220,13 @@ func (s *Server) checkProcessIdentity() EcosystemCheck {
 // checkFileSystemAccess validates access to essential directories
 func (s *Server) checkFileSystemAccess() EcosystemCheck {
 	requiredPaths := []string{
-		"/var/run",
+		"/run", // MicroOS uses /run instead of /var/run
 		"/var/log",
 		"/tmp",
 		"/etc",
 	}
 
 	optionalPaths := []string{
-		"/var/lib/docker",
-		"/var/lib/piccolod",
 		"/sys/firmware/efi/efivars",
 	}
 
@@ -331,32 +330,33 @@ func (s *Server) checkDeviceAccess() EcosystemCheck {
 	}
 }
 
-// checkDockerAccess validates Docker socket accessibility
+// checkDockerAccess validates Podman container runtime socket accessibility
 func (s *Server) checkDockerAccess() EcosystemCheck {
-	socketPath := "/var/run/docker.sock"
+	podmanSocket := "/run/podman/podman.sock"
 
-	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+	if _, err := os.Stat(podmanSocket); os.IsNotExist(err) {
 		return EcosystemCheck{
-			Name:        "Docker Access",
+			Name:        "Podman Access",
 			Status:      "fail",
-			Description: "Docker socket not found - container management will fail",
-			Details:     socketPath + " does not exist",
+			Description: "Podman socket not found - container management will fail",
+			Details:     podmanSocket + " does not exist",
 		}
 	}
 
-	if err := unix.Access(socketPath, unix.R_OK|unix.W_OK); err != nil {
+	if err := unix.Access(podmanSocket, unix.R_OK|unix.W_OK); err != nil {
 		return EcosystemCheck{
-			Name:        "Docker Access",
+			Name:        "Podman Access",
 			Status:      "fail",
-			Description: "Docker socket not accessible",
-			Details:     "Cannot read/write " + socketPath,
+			Description: "Podman socket not accessible",
+			Details:     "Cannot read/write " + podmanSocket,
 		}
 	}
 
 	return EcosystemCheck{
-		Name:        "Docker Access",
+		Name:        "Podman Access",
 		Status:      "pass",
-		Description: "Docker socket accessible for container management",
+		Description: "Podman socket accessible for container management",
+		Details:     "Using " + podmanSocket,
 	}
 }
 
@@ -419,7 +419,7 @@ func (s *Server) getPermissionInfo() map[string]string {
 
 	info["uid"] = "0" // We know we're root if we got this far
 	info["gid"] = "0"
-	info["pid"] = string(rune(os.Getpid()))
+	info["pid"] = fmt.Sprintf("%d", os.Getpid()) // Fix PID conversion
 
 	// Additional permission info could be added here
 	// (capabilities, systemd properties, etc.)

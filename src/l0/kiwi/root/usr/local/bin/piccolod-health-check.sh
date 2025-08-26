@@ -30,7 +30,9 @@ for attempt in $(seq 1 $MAX_ATTEMPTS); do
                 echo "❌ Attempt $attempt/$MAX_ATTEMPTS: Service UNHEALTHY (HTTP $status_code)"
                 # Get detailed ecosystem info for troubleshooting
                 if detailed_info=$(curl -s "$ECOSYSTEM_ENDPOINT" 2>/dev/null); then
-                    echo "   Issue details: $(echo "$detailed_info" | jq -r '.summary // "Unable to get details"' 2>/dev/null || echo "JSON parse failed")"
+                    # Extract summary without jq dependency using basic text processing
+                    summary=$(echo "$detailed_info" | grep -o '"summary":"[^"]*"' | sed 's/"summary":"\([^"]*\)"/\1/' 2>/dev/null || echo "Unable to parse details")
+                    echo "   Issue details: $summary"
                 fi
                 ;;
             "000")

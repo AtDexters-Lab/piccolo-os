@@ -32,12 +32,15 @@ Test the complete OS in a VM:
 ./test_piccolo_os_image.sh --build-dir ./dist --version 1.0.0
 ```
 
-This automated test script (v2.8):
+This automated test script (v3.1+):
+- Detects and uses proper UEFI firmware (prioritizing secboot variants)
 - Boots the ISO in QEMU with SSH port forwarding (2222)
+- Configures cloud-init for SSH access and system setup
 - Verifies piccolod binary installation and service status
-- Tests HTTP API endpoints on port 8080
-- Validates container runtime (Podman) functionality
+- Tests HTTP API endpoints on port 80 (both health endpoints)
+- Validates container runtime (Podman socket and functionality)
 - Runs comprehensive ecosystem health checks via `/api/v1/ecosystem`
+- Tests MicroOS rollback integration via `/api/v1/health/ready`
 - Provides detailed pass/warn/fail analysis with actionable feedback
 
 ### Interactive Debugging
@@ -107,9 +110,10 @@ The build process integrates piccolod into openSUSE MicroOS through KIWI NG:
 - **`build_piccolo.sh`**: Main KIWI NG build orchestration with container runtime detection
 - **`build.sh`**: Simple wrapper that builds piccolod then calls build_piccolo.sh  
 - **`build.Dockerfile`**: Container image definition with KIWI NG and MicroOS dependencies
-- **`test_piccolo_os_image.sh`**: Comprehensive automated testing framework (v2.8)
-- **`ssh_into_piccolo.sh`**: Interactive debugging tool for manual testing
-- **`kiwi/config.xml`**: KIWI NG system configuration with MicroOS packages
+- **`test_piccolo_os_image.sh`**: Comprehensive automated testing framework (v3.1+) with UEFI and health check validation
+- **`ssh_into_piccolo.sh`**: Interactive debugging tool for manual testing (v2.1+) with UEFI support
+- **`lib/piccolo_common.sh`**: Shared utilities for VM management, UEFI detection, and cloud-init
+- **`kiwi/config.xml`**: KIWI NG system configuration with MicroOS packages and cloud-init
 - **`kiwi/root/`**: Overlay filesystem for custom files and systemd services
 - **`piccolo.env`**: Build configuration (GPG keys, update server URLs)
 
@@ -141,10 +145,36 @@ All previous builds are automatically preserved and listed after each build
 ### Systemd Service Configuration
 
 The piccolod.service is defined in `kiwi/root/etc/systemd/system/` and configured for:
-- Installation to `/usr/local/piccolo/v1/bin/piccolod` 
-- Automatic startup via symlink in `multi-user.target.wants/`
-- Integration with MicroOS's systemd-based architecture
-- Container runtime integration with Podman
+- **Type=notify**: Proper systemd integration with `sd_notify()` for health monitoring
+- **Security**: `ProtectSystem=strict` with specific `ReadWritePaths=/run /var /tmp /etc`
+- **Capabilities**: `CAP_NET_BIND_SERVICE` for binding to port 80
+- **Installation**: Binary at `/usr/local/piccolo/v1/bin/piccolod`
+- **Failure Handling**: `OnFailure=piccolod-failure-handler.service` for MicroOS rollback
+- **Container Integration**: Podman socket enabled via systemd preset
+
+### MicroOS Rollback Integration
+
+Critical for OS update safety with automatic rollback capability:
+
+**Health Check Services:**
+- `piccolod-health-check.service` - Validates piccolod functionality after boot
+- `piccolod-failure-handler.service` - Logs critical failures for rollback detection
+- Both services enabled automatically via `80-piccolo.preset`
+
+**Health Endpoints:**
+- `/api/v1/health/ready` - Boolean health check (HTTP 200/503) for systemd integration
+- `/api/v1/ecosystem` - Detailed diagnostics with comprehensive system validation
+
+**Systemd Preset File** (`80-piccolo.preset`):
+```
+enable NetworkManager.service
+enable sshd.service  
+enable cloud-init.target
+enable podman.socket
+enable piccolod.service
+enable piccolod-health-check.service
+enable piccolod-failure-handler.service
+```
 
 ### MicroOS Integration
 
@@ -175,20 +205,82 @@ Required system dependencies:
 - Architecture: `x86_64` (default, `aarch64` supported)
 - Base OS: openSUSE Tumbleweed/MicroOS
 - Container runtime: Podman
-- HTTP port: `8080`
+- HTTP port: `80` (requires CAP_NET_BIND_SERVICE capability)
 - Binary path: `/usr/local/piccolo/v1/bin/piccolod`
 
 ## Testing Framework
 
 The test suite validates:
 1. **Binary Installation**: piccolod present and executable at correct path
-2. **Service Status**: systemd service active and running 
-3. **API Functionality**: HTTP endpoints responding on port 8080
-4. **Container Runtime**: Podman functionality and container management
-5. **Ecosystem Health**: Comprehensive self-validation via `/api/v1/ecosystem`
-6. **System Integration**: MicroOS base system functionality
+2. **Service Status**: systemd service active and running with Type=notify
+3. **API Functionality**: HTTP endpoints responding on port 80
+   - `/api/v1/health/ready` - Boolean health check for systemd integration  
+   - `/api/v1/ecosystem` - Detailed ecosystem validation and diagnostics
+4. **Container Runtime**: Podman socket availability and container management
+5. **Ecosystem Health**: Comprehensive self-validation with proper MicroOS paths
+6. **System Integration**: MicroOS base system functionality and rollback readiness
+
+### UEFI and Secure Boot Testing
+
+The test framework automatically detects and uses proper UEFI firmware:
+
+**UEFI Firmware Priority:**
+1. `/usr/share/OVMF/OVMF_CODE_4M.secboot.fd` (preferred - secure boot capable)
+2. `/usr/share/OVMF/OVMF_CODE.secboot.fd` (fallback secure boot)
+3. `/usr/share/OVMF/OVMF_CODE_4M.fd` (standard UEFI)
+4. `/usr/share/OVMF/OVMF_CODE.fd` (basic UEFI)
+
+**Cloud-Init Integration:**
+- Generates NoCloud seed ISO with CIDATA volume label
+- Configures SSH keys and root password for test access
+- Enables NetworkManager and SSH services via cloud-init
+- Provides immediate SSH access for automated validation
 
 Tests run in an isolated QEMU VM with SSH key injection and port forwarding (host:2222 → guest:22).
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+**UEFI Boot Problems:**
+- **Symptom**: System boots to UEFI Shell instead of MicroOS
+- **Solution**: Ensure using secboot UEFI firmware (`OVMF_CODE_4M.secboot.fd`)
+- **Test**: Boot with proper QEMU command including `-bios` parameter
+
+**SSH Authentication Failures:**
+- **Symptom**: SSH port open but authentication fails
+- **Root Cause**: NetworkManager not enabled, missing SSH configuration
+- **Solution**: Systemd preset file automatically enables required services
+- **Manual Fix**: `systemctl enable NetworkManager` in live system
+
+**Health Check Failures:**
+- **Symptom**: piccolod reports "unhealthy" status
+- **Common Causes**: 
+  - Filesystem access blocked by `ProtectSystem=strict`
+  - Podman socket not available (`podman.socket` disabled)
+  - Wrong filesystem paths for MicroOS (`/var/run` vs `/run`)
+- **Solution**: Systemd unit configured with proper `ReadWritePaths` and Podman socket enabled
+
+**Service Enablement Issues:**
+- **Symptom**: Services show "disabled; preset: enabled" or "static"
+- **Root Cause**: Missing `[Install]` sections or wrong `WantedBy` targets
+- **Solution**: Use `multi-user.target` instead of non-existent targets like `health-check.target`
+
+### Health Check Validation
+
+Verify system health in live VM:
+```bash
+# Check all service statuses
+systemctl status piccolod piccolod-health-check piccolod-failure-handler podman.socket
+
+# Test health endpoints directly
+curl -s http://localhost/api/v1/health/ready | jq .
+curl -s http://localhost/api/v1/ecosystem | jq .
+
+# Validate Podman integration
+podman version
+ls -la /run/podman/podman.sock
+```
 
 ## Migration Notes
 
