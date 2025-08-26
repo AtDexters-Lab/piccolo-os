@@ -175,7 +175,7 @@ main() {
     log "### Step 1: Preparing the test environment..."
     # Assign a value to the global test_dir variable
     test_dir="${SCRIPT_DIR}/build/test-${PICCOLO_VERSION}"
-    local iso_path="${BUILD_DIR}/piccolo-os-x86_64-${PICCOLO_VERSION}.iso"
+    local iso_path="${BUILD_DIR}/piccolo-os.x86_64-${PICCOLO_VERSION}.iso"
     local uefi_code_copy="${test_dir}/$(basename "$UEFI_CODE")"
     local uefi_vars_copy="${test_dir}/$(basename "$UEFI_VARS")"
     local ssh_key="${test_dir}/id_rsa_test"
@@ -207,8 +207,17 @@ users:
 ssh_pwauth: true
 disable_root: false
 
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-cloud-init-root.conf
+    content: |
+      PermitRootLogin yes
+      PasswordAuthentication yes
+      PubkeyAuthentication yes
+    permissions: '0600'
+
 runcmd:
   - systemctl enable --now sshd
+  - systemctl reload sshd
   - systemctl status sshd
 EOF
 
@@ -279,7 +288,7 @@ EOF
     
     # Wait for VM to boot and cloud-init to finish
     log "Waiting for VM to complete boot process and cloud-init configuration..."
-    sleep 30  # Reduced wait time for faster testing
+    sleep 60  # Give cloud-init more time to complete configuration
     
     # Test if SSH is listening on port 22
     log "Checking if SSH service is listening on port 22..."

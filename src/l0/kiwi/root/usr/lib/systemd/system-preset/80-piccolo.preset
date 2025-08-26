@@ -1,0 +1,4 @@
+enable NetworkManager.service
+enable sshd.service
+enable cloud-init.target
+enable piccolod.service

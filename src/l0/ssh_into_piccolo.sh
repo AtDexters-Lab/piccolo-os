@@ -1,14 +1,16 @@
 #!/bin/bash
 #
-# Piccolo OS - Interactive SSH Script v1.1
+# Piccolo OS - Interactive SSH Script v2.0
 #
-# This script boots the Piccolo Live ISO in a temporary QEMU virtual machine
+# This script boots the Piccolo MicroOS ISO with UEFI support in a QEMU virtual machine
 # and provides an interactive SSH console for debugging and exploration.
 #
-# v1.1 Improvements:
-# - Fixes a race condition by retrying the SSH connection, allowing cloud-init
-#   time to apply the SSH key before attempting to log in.
-# - Adds a trap guard to the cleanup function to prevent it from ever running twice.
+# v2.0 Major Updates:
+# - Updated for MicroOS-based artifacts (piccolo-os-x86_64-*.iso naming)
+# - Added UEFI/OVMF boot support with proper firmware configuration
+# - Updated for cloud-init with seed ISO approach
+# - Added UEFI firmware detection and configuration
+# - Fixed SSH authentication for root user with proper permissions
 #
 
 # ---
@@ -43,15 +45,54 @@ usage() {
 
 check_dependencies() {
     log "Checking for required dependencies..."
-    local deps=("qemu-system-x86_64" "ssh" "ssh-keygen" "ss")
+    local deps=("qemu-system-x86_64" "ssh" "ssh-keygen" "ss" "genisoimage")
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             log "Error: Required dependency '$dep' is not installed." >&2
-            log "On Debian/Ubuntu, try: sudo apt-get install -y qemu-system-x86 openssh-client iproute2"
+            log "On Debian/Ubuntu, try: sudo apt-get install -y qemu-system-x86 openssh-client iproute2 genisoimage"
             exit 1
         fi
     done
+    
+    # Check for UEFI firmware files (secboot versions preferred, then 4MB versions)
+    local uefi_firmware_paths=(
+        "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd"
+        "/usr/share/OVMF/OVMF_CODE.secboot.fd"
+        "/usr/share/OVMF/OVMF_CODE_4M.fd"
+        "/usr/share/OVMF/OVMF_CODE.fd"
+    )
+    
+    local uefi_vars_paths=(
+        "/usr/share/OVMF/OVMF_VARS_4M.fd"
+        "/usr/share/OVMF/OVMF_VARS.fd"
+    )
+    
+    UEFI_CODE=""
+    UEFI_VARS=""
+    
+    for path in "${uefi_firmware_paths[@]}"; do
+        if [ -f "$path" ]; then
+            UEFI_CODE="$path"
+            break
+        fi
+    done
+    
+    for path in "${uefi_vars_paths[@]}"; do
+        if [ -f "$path" ]; then
+            UEFI_VARS="$path"
+            break
+        fi
+    done
+    
+    if [ -z "$UEFI_CODE" ] || [ -z "$UEFI_VARS" ]; then
+        log "Error: UEFI firmware files not found. Please install OVMF package." >&2
+        log "On Debian/Ubuntu, try: sudo apt-get install -y ovmf"
+        exit 1
+    fi
+    
     log "All dependencies are installed."
+    log "Using UEFI firmware: $UEFI_CODE"
+    log "Using UEFI vars: $UEFI_VARS"
 }
 
 # This function contains the robust cleanup logic.
@@ -117,25 +158,62 @@ main() {
     log "### Step 1: Preparing the environment..."
     # Assign a value to the global test_dir variable
     test_dir="${SCRIPT_DIR}/build/ssh-session-${PICCOLO_VERSION}"
-    local iso_path="${BUILD_DIR}/piccolo-os-live-${PICCOLO_VERSION}.iso"
+    local iso_path="${BUILD_DIR}/piccolo-os-x86_64-${PICCOLO_VERSION}.iso"
     local ssh_key="${test_dir}/id_rsa_test"
-    local config_drive_dir="${test_dir}/config-drive"
+    local uefi_code_copy="${test_dir}/$(basename "$UEFI_CODE")"
+    local uefi_vars_copy="${test_dir}/$(basename "$UEFI_VARS")"
+    local seed_iso="${test_dir}/seed.iso"
+    local cloud_config_dir="${test_dir}/cloud-config"
 
     # Clean up previous run just in case
     rm -rf "$test_dir"
-    mkdir -p "$test_dir"
-    mkdir -p "${config_drive_dir}/openstack/latest"
+    mkdir -p "$test_dir" "$cloud_config_dir"
     if [ ! -f "$iso_path" ]; then log "Error: ISO file not found at ${iso_path}" >&2; exit 1; fi
+    
+    log "Creating local copies of UEFI firmware files..."
+    cp "$UEFI_CODE" "$uefi_code_copy"
+    cp "$UEFI_VARS" "$uefi_vars_copy"
     
     log "Generating temporary SSH key for this session..."
     ssh-keygen -t rsa -b 4096 -f "$ssh_key" -N "" -q
 
-    log "Creating cloud-config for SSH key injection..."
-    cat > "${config_drive_dir}/openstack/latest/user_data" <<EOF
+    log "Creating cloud-init configuration for SSH access..."
+    cat > "${cloud_config_dir}/user-data" << EOF
 #cloud-config
-ssh_authorized_keys:
-  - $(cat "${ssh_key}.pub")
+users:
+  - name: root
+    lock_passwd: false
+    plain_text_passwd: 'piccolo123'
+    ssh_authorized_keys:
+      - $(cat "${ssh_key}.pub")
+
+ssh_pwauth: true
+disable_root: false
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-cloud-init-root.conf
+    content: |
+      PermitRootLogin yes
+      PasswordAuthentication yes
+      PubkeyAuthentication yes
+    permissions: '0600'
+
+runcmd:
+  - systemctl enable --now sshd
+  - systemctl reload sshd
 EOF
+
+    cat > "${cloud_config_dir}/meta-data" << EOF
+instance-id: piccolo-ssh-$(date +%s)
+local-hostname: piccolo-ssh
+EOF
+
+    log "Creating cloud-init seed ISO with CIDATA label..."
+    genisoimage -quiet -output "$seed_iso" -volid CIDATA -joliet -rational-rock "${cloud_config_dir}/user-data" "${cloud_config_dir}/meta-data" 2>/dev/null
+    if [ $? -ne 0 ]; then
+        log "Error: Failed to create cloud-init seed ISO." >&2
+        exit 1
+    fi
 
     # ---
     # Step 2: Boot VM with Direct QEMU Command
@@ -150,18 +228,18 @@ EOF
     
     qemu-system-x86_64 \
         -name "Piccolo-SSH-${PICCOLO_VERSION}" \
-        -m 2048 \
-        -machine q35,accel=kvm \
+        -enable-kvm \
+        -machine q35,smm=on,accel=kvm \
         -cpu host \
-        -smp "$(getconf _NPROCESSORS_ONLN)" \
-        -netdev user,id=eth0,hostfwd=tcp::${SSH_PORT}-:22 \
-        -device virtio-net-pci,netdev=eth0 \
-        -object rng-random,filename=/dev/urandom,id=rng0 \
-        -device virtio-rng-pci,rng=rng0 \
-        -drive file="$iso_path",media=cdrom,format=raw \
-        -fsdev local,id=conf,security_model=none,readonly=on,path="${config_drive_dir}" \
-        -device virtio-9p-pci,fsdev=conf,mount_tag=config-2 \
-        -boot order=d \
+        -smp 4 \
+        -m 4096 \
+        -drive if=pflash,format=raw,readonly=on,file="$uefi_code_copy" \
+        -drive if=pflash,format=raw,file="$uefi_vars_copy" \
+        -cdrom "$iso_path" \
+        -drive file="$seed_iso",media=cdrom,if=virtio \
+        -boot d \
+        -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22 \
+        -device virtio-net-pci,netdev=n0 \
         -nographic &
     # Assign a value to the global qemu_pid variable
     qemu_pid=$!
@@ -172,9 +250,13 @@ EOF
     # ---
     log "### Step 3: Waiting for SSH to become available on port ${SSH_PORT}..."
     
+    # Wait for cloud-init to complete and SSH to be ready
+    log "Waiting for cloud-init and SSH setup..."
+    sleep 60  # Give cloud-init time to complete
+    
     # Wait for up to 2 minutes for SSH to be ready
     for i in {1..120}; do
-        if ssh -q -p "$SSH_PORT" -i "${ssh_key}" -o ConnectTimeout=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "core@localhost" "echo 'SSH is ready'" 2>/dev/null; then
+        if ssh -q -p "$SSH_PORT" -i "${ssh_key}" -o ConnectTimeout=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "root@localhost" "echo 'SSH is ready'" 2>/dev/null; then
             log "SSH port is open."
             break
         fi
@@ -194,15 +276,15 @@ EOF
     log "Type 'exit' or press Ctrl+D to close the session and shut down the VM."
     
     local connected=false
-    # FIX: Retry the connection to give cloud-init time to apply the key.
+    # Retry the connection to give cloud-init time to apply the key.
     for i in {1..5}; do
-        if ssh -p "$SSH_PORT" -i "${ssh_key}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes "core@localhost" "echo 'Connection successful'" 2>/dev/null; then
+        if ssh -p "$SSH_PORT" -i "${ssh_key}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes "root@localhost" "echo 'Connection successful'" 2>/dev/null; then
             # Now connect for real for the interactive session
             ssh -p "$SSH_PORT" \
                 -i "${ssh_key}" \
                 -o StrictHostKeyChecking=no \
                 -o UserKnownHostsFile=/dev/null \
-                "core@localhost"
+                "root@localhost"
             connected=true
             break
         else

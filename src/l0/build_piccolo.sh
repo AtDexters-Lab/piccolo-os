@@ -132,11 +132,11 @@ if [[ -n "${RUNTIME}" ]]; then
   fi
 
   echo "==> Cleaning previous build artifacts"
-  # Clean up any previous build directories that might cause conflicts
-  if [[ -d "${DIST_DIR}/build" ]]; then
-    echo "--> Removing existing build directory"
-    sudo rm -rf "${DIST_DIR}/build" || {
-      echo "Failed to clean build directory. You may need to run: sudo rm -rf ${DIST_DIR}/build"
+  # Clean up any previous build directories and old ISOs that might cause conflicts
+  if [[ -d "${DIST_DIR}/build" ]] || ls "${DIST_DIR}"/*.iso >/dev/null 2>&1; then
+    echo "--> Removing existing build directory and old ISOs"
+    sudo rm -rf "${DIST_DIR}/build" "${DIST_DIR}"/*.iso "${DIST_DIR}"/*.log || {
+      echo "Failed to clean build directory. You may need to run: sudo rm -rf ${DIST_DIR}/build ${DIST_DIR}/*.iso"
       exit 1
     }
   fi
@@ -166,11 +166,11 @@ if [[ -n "${RUNTIME}" ]]; then
 
 elif have_kiwi_local; then
   echo "==> Cleaning previous build artifacts"
-  # Clean up any previous build directories that might cause conflicts
-  if [[ -d "${DIST_DIR}/build" ]]; then
-    echo "--> Removing existing build directory"
-    sudo rm -rf "${DIST_DIR}/build" || {
-      echo "Failed to clean build directory. You may need to run: sudo rm -rf ${DIST_DIR}/build"
+  # Clean up any previous build directories and old ISOs that might cause conflicts
+  if [[ -d "${DIST_DIR}/build" ]] || ls "${DIST_DIR}"/*.iso >/dev/null 2>&1; then
+    echo "--> Removing existing build directory and old ISOs"
+    sudo rm -rf "${DIST_DIR}/build" "${DIST_DIR}"/*.iso "${DIST_DIR}"/*.log || {
+      echo "Failed to clean build directory. You may need to run: sudo rm -rf ${DIST_DIR}/build ${DIST_DIR}/*.iso"
       exit 1
     }
   fi
@@ -223,7 +223,7 @@ fi
 
 echo
 echo "✔ Build complete"
-echo "ISO: ${FINAL_ISO}"
+echo "ISO: ${ISO_SRC}"
 echo "Release ISO: ${RELEASE_ISO}"
 echo "Log: ${DIST_DIR}/kiwi.log"
 echo "Release Log: ${RELEASE_LOG}"
@@ -254,6 +254,6 @@ fi
 
 echo
 echo "Next steps:"
-echo "  - Test in UEFI/QEMU: qemu-system-x86_64 -enable-kvm -m 2048 -cpu host -machine q35,accel=kvm -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom ${FINAL_ISO}"
+echo "  - Test in UEFI/QEMU: qemu-system-x86_64 -enable-kvm -m 2048 -cpu host -machine q35,accel=kvm -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom ${ISO_SRC}"
 echo "  - Install to disk, boot with Secure Boot enabled (shim+signed kernel from repo)."
 echo
