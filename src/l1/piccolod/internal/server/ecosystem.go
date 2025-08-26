@@ -295,13 +295,13 @@ func (s *Server) checkDockerAccess() EcosystemCheck {
 
 // checkNetworkAccess validates network capabilities
 func (s *Server) checkNetworkAccess() EcosystemCheck {
-	// Test if we can bind to port 8080 (we're already running on it)
+	// Test if we can bind to port 80 (we're already running on it)
 	// This is a basic check - more sophisticated network tests could be added
 	return EcosystemCheck{
 		Name:        "Network Access",
 		Status:      "pass",
 		Description: "Network capabilities functional (HTTP server running)",
-		Details:     "Bound to port 8080",
+		Details:     "Bound to port 80",
 	}
 }
 

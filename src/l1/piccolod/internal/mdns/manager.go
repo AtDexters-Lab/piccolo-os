@@ -42,7 +42,7 @@ func NewManager() *Manager {
 	return &Manager{
 		interfaces: make(map[string]*InterfaceState),
 		hostname:   "piccolo",
-		port:       8080,
+		port:       80,
 		stopCh:     make(chan struct{}),
 		baseName:   "piccolo",
 		machineID:  machineID,

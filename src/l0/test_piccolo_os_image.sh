@@ -310,7 +310,7 @@ echo "--- CHECK 4: piccolod version via HTTP ---"
 for i in {1..5}; do
     # Use --fail to make curl exit with an error if the HTTP request fails (e.g., 404, 500)
     # Use -s for silent mode
-    VERSION_JSON=$(curl -s --fail http://localhost:8080/version 2>/dev/null)
+    VERSION_JSON=$(curl -s --fail http://localhost:80/version 2>/dev/null)
     if [ $? -eq 0 ]; then
         break
     fi
@@ -354,7 +354,13 @@ echo "--- CHECK 6: Ecosystem and environment validation ---"
 # This tests what piccolod can actually access from within its systemd security context
 ECOSYSTEM_JSON=""
 for i in {1..3}; do
-    ECOSYSTEM_JSON=$(curl -s --fail http://localhost:8080/api/v1/ecosystem 2>/dev/null)
+    # Use dedicated health/ready endpoint for simple boolean check
+    if curl -f -s http://localhost:80/api/v1/health/ready >/dev/null 2>&1; then
+        # Get detailed ecosystem info for comprehensive validation
+        ECOSYSTEM_JSON=$(curl -s --fail http://localhost:80/api/v1/ecosystem 2>/dev/null)
+    else
+        ECOSYSTEM_JSON=""
+    fi
     if [ $? -eq 0 ] && [ -n "$ECOSYSTEM_JSON" ]; then
         break
     fi
