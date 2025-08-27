@@ -25,6 +25,7 @@ set -euo pipefail
 # Defaults
 VERSION="0.1.0"
 ARCH="x86_64"
+VARIANT="dev"  # Default to development variant (safer for testing)
 PICCOLOD_BIN=""
 
 # Parse command-line arguments
@@ -46,8 +47,26 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    --variant)
+      VARIANT="$2"
+      if [[ "$VARIANT" != "prod" && "$VARIANT" != "dev" ]]; then
+        echo "ERROR: --variant must be 'prod' or 'dev'"
+        exit 1
+      fi
+      shift # past argument
+      shift # past value
+      ;;
     -h|--help)
-      echo "Usage: ./build_piccolo.sh --binary-path <path> [--version <ver>] [--arch <arch>]"
+      echo "Usage: ./build_piccolo.sh --binary-path <path> [--variant prod|dev] [--version <ver>] [--arch <arch>]"
+      echo ""
+      echo "  --binary-path <path>  Path to piccolod binary (required)"
+      echo "  --variant <variant>   Build variant: 'prod' (hardened) or 'dev' (with cloud-init) [default: dev]"
+      echo "  --version <version>   Version tag [default: 0.1.0]" 
+      echo "  --arch <arch>         Architecture [default: x86_64]"
+      echo ""
+      echo "Examples:"
+      echo "  ./build_piccolo.sh --binary-path ../l1/piccolod/build/piccolod --variant prod --version 1.0.0"
+      echo "  ./build_piccolo.sh --binary-path ../l1/piccolod/build/piccolod --variant dev"
       exit 0
       ;;
     *)
@@ -67,11 +86,24 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="${ROOT_DIR}/.work"
 KIWI_DIR="${ROOT_DIR}/kiwi"
-OVERLAY_DIR="${ROOT_DIR}/kiwi/root"
 DIST_DIR="${ROOT_DIR}/dist"
 RELEASES_DIR="${ROOT_DIR}/releases"
 VERSION_RELEASES_DIR="${RELEASES_DIR}/${VERSION}"
-IMAGE_NAME="piccolo-os"
+
+# Variant-specific configuration
+if [[ "$VARIANT" == "prod" ]]; then
+  VARIANT_KIWI_DIR="${KIWI_DIR}/prod"
+  IMAGE_NAME="piccolo-os-prod"
+  echo "🔒 PRODUCTION BUILD: Zero-access hardened configuration"
+else
+  # Development builds use additive approach: prod base + dev additions
+  VARIANT_KIWI_DIR="${WORK_DIR}/kiwi-dev-generated"
+  IMAGE_NAME="piccolo-os-dev"
+  echo "🔧 DEVELOPMENT BUILD: Production base + Cloud-init additions"
+fi
+
+OVERLAY_DIR="${VARIANT_KIWI_DIR}/root"
+
 IMAGE_LABEL="${IMAGE_NAME}.${ARCH}-${VERSION}"
 
 mkdir -p "${WORK_DIR}" "${DIST_DIR}" "${OVERLAY_DIR}" "${RELEASES_DIR}" "${VERSION_RELEASES_DIR}"
@@ -89,8 +121,63 @@ function have_kiwi_local() {
   command -v kiwi-ng >/dev/null 2>&1
 }
 
-# -------- config.xml is checked into git, no need to generate ----------
-CONFIG_XML="${KIWI_DIR}/config.xml"
+# -------- validate and prepare variant configuration ----------
+if [[ "$VARIANT" == "prod" ]]; then
+  # Production: Use existing prod directory
+  if [[ ! -d "${VARIANT_KIWI_DIR}" ]]; then
+    echo "ERROR: Production variant directory not found: ${VARIANT_KIWI_DIR}"
+    exit 1
+  fi
+  if [[ ! -f "${VARIANT_KIWI_DIR}/config.xml" ]]; then
+    echo "ERROR: Production config file not found: ${VARIANT_KIWI_DIR}/config.xml"
+    exit 1
+  fi
+else
+  # Development: Generate from prod base + dev additions
+  echo "==> Generating development configuration from production base..."
+  
+  # Validate dev additions exist
+  if [[ ! -d "${KIWI_DIR}/dev" ]]; then
+    echo "ERROR: Development additions directory not found: ${KIWI_DIR}/dev"
+    exit 1
+  fi
+  
+  # Clean and create dev build directory
+  rm -rf "${VARIANT_KIWI_DIR}"
+  mkdir -p "${VARIANT_KIWI_DIR}"
+  
+  # Copy production as base
+  echo "--> Copying production base configuration..."
+  cp -r "${KIWI_DIR}/prod"/* "${VARIANT_KIWI_DIR}/"
+  
+  # Change image name from prod to dev
+  echo "--> Updating image name for development variant..."
+  sed -i 's/name="piccolo-os-prod"/name="piccolo-os-dev"/' "${VARIANT_KIWI_DIR}/config.xml"
+  sed -i 's/MicroOS-based hardened production appliance/MicroOS-based development appliance/' "${VARIANT_KIWI_DIR}/config.xml"
+  sed -i 's/ZERO ACCESS/SSH + Cloud-init enabled/' "${VARIANT_KIWI_DIR}/config.xml"
+  
+  # Apply dev package additions
+  if [[ -f "${KIWI_DIR}/dev/packages.xml" ]]; then
+    echo "--> Adding development packages..."
+    sed -i '/<!-- DEV_PACKAGES_INSERT_POINT -->/r '"${KIWI_DIR}/dev/packages.xml" "${VARIANT_KIWI_DIR}/config.xml"
+    sed -i '/<!-- DEV_PACKAGES_INSERT_POINT -->/d' "${VARIANT_KIWI_DIR}/config.xml"
+  fi
+  
+  # Apply dev service additions
+  if [[ -f "${KIWI_DIR}/dev/services.sh" ]]; then
+    echo "--> Adding development services..."
+    sed -i '/# DEV_SERVICES_INSERT_POINT/r '"${KIWI_DIR}/dev/services.sh" "${VARIANT_KIWI_DIR}/config.sh"
+    sed -i '/# DEV_SERVICES_INSERT_POINT/d' "${VARIANT_KIWI_DIR}/config.sh"
+  fi
+  
+  # Overlay dev-specific files
+  if [[ -d "${KIWI_DIR}/dev/root" ]]; then
+    echo "--> Adding development overlay files..."
+    cp -r "${KIWI_DIR}/dev/root"/* "${VARIANT_KIWI_DIR}/root/" 2>/dev/null || true
+  fi
+  
+  echo "--> Development configuration generated successfully"
+fi
 
 # -------- ensure binary directory exists ----------
 mkdir -p "${OVERLAY_DIR}/usr/local/piccolo/v1/bin"
@@ -102,16 +189,17 @@ if [[ -L "${OVERLAY_DIR}/usr/local/piccolo/current" ]]; then
 fi
 ln -sfn v1 "${OVERLAY_DIR}/usr/local/piccolo/current"
 
-# -------- bump version in config.xml to match CLI arg ----------
-if command -v python3 >/dev/null 2>&1; then
-  python3 - <<PY >/dev/null 2>&1 || true
-from pathlib import Path
-p=Path("${CONFIG_XML}")
-s=p.read_text()
-s=s.replace("<version>0.1.0</version>", "<version>${VERSION}</version>")
-p.write_text(s)
-PY
+# -------- validate variant-specific configuration script ----------
+VARIANT_CONFIG_SCRIPT="${VARIANT_KIWI_DIR}/config.sh"
+if [[ -f "${VARIANT_CONFIG_SCRIPT}" ]]; then
+  echo "==> Validating ${VARIANT} configuration script"
+  echo "--> Found variant config: ${VARIANT_CONFIG_SCRIPT}"
+else
+  echo "ERROR: Variant configuration script not found: ${VARIANT_CONFIG_SCRIPT}"
+  exit 1
 fi
+
+# Note: Version is managed in config.xml directly - no dynamic replacement needed
 
 # --- containerized build (preferred for portability) ---
 if [[ -n "${RUNTIME}" ]]; then
@@ -132,13 +220,21 @@ if [[ -n "${RUNTIME}" ]]; then
   fi
 
   echo "==> Cleaning previous build artifacts"
-  # Clean up any previous build directories and old ISOs that might cause conflicts
-  if [[ -d "${DIST_DIR}/build" ]] || ls "${DIST_DIR}"/*.iso >/dev/null 2>&1; then
-    echo "--> Removing existing build directory and old ISOs"
-    sudo rm -rf "${DIST_DIR}/build" "${DIST_DIR}"/*.iso "${DIST_DIR}"/*.log || {
-      echo "Failed to clean build directory. You may need to run: sudo rm -rf ${DIST_DIR}/build ${DIST_DIR}/*.iso"
-      exit 1
-    }
+  
+  # Clean entire dist directory for fresh build
+  echo "--> Removing entire dist directory for clean build"
+  sudo rm -rf "${DIST_DIR}" || {
+    echo "Failed to clean dist directory. You may need to run: sudo rm -rf ${DIST_DIR}"
+    exit 1
+  }
+  mkdir -p "${DIST_DIR}"
+  
+  # Clean existing artifacts for this variant and version in releases directory
+  if [[ -d "${VERSION_RELEASES_DIR}" ]]; then
+    echo "--> Removing existing ${VARIANT} artifacts for version ${VERSION}"
+    rm -f "${VERSION_RELEASES_DIR}/${IMAGE_NAME}.${ARCH}-${VERSION}".*
+    # Remove old ISO artifacts that shouldn't exist anymore
+    rm -f "${VERSION_RELEASES_DIR}"/piccolo-os*.iso "${VERSION_RELEASES_DIR}"/piccolo-os.x86_64-*
   fi
 
   echo "==> Running KIWI build using pre-built image with persistent cache"
@@ -151,7 +247,7 @@ if [[ -n "${RUNTIME}" ]]; then
   
   ${RUNTIME} run --rm \
     --user root \
-    -v "${KIWI_DIR}:/build/kiwi" \
+    -v "${VARIANT_KIWI_DIR}:/build/kiwi-config" \
     -v "${DIST_DIR}:/build/result" \
     -v piccolo-zypper-cache:/var/cache/zypp \
     -v piccolo-kiwi-bundle-cache:/var/cache/kiwi \
@@ -161,24 +257,32 @@ if [[ -n "${RUNTIME}" ]]; then
     "${BUILDER_IMG_TAG}" \
     kiwi-ng --color-output --debug --logfile /build/result/kiwi.log --target-arch "${ARCH}" \
       system build \
-      --description /build/kiwi \
+      --description /build/kiwi-config \
       --target-dir /build/result
 
 elif have_kiwi_local; then
   echo "==> Cleaning previous build artifacts"
-  # Clean up any previous build directories and old ISOs that might cause conflicts
-  if [[ -d "${DIST_DIR}/build" ]] || ls "${DIST_DIR}"/*.iso >/dev/null 2>&1; then
-    echo "--> Removing existing build directory and old ISOs"
-    sudo rm -rf "${DIST_DIR}/build" "${DIST_DIR}"/*.iso "${DIST_DIR}"/*.log || {
-      echo "Failed to clean build directory. You may need to run: sudo rm -rf ${DIST_DIR}/build ${DIST_DIR}/*.iso"
-      exit 1
-    }
+  
+  # Clean entire dist directory for fresh build
+  echo "--> Removing entire dist directory for clean build"
+  sudo rm -rf "${DIST_DIR}" || {
+    echo "Failed to clean dist directory. You may need to run: sudo rm -rf ${DIST_DIR}"
+    exit 1
+  }
+  mkdir -p "${DIST_DIR}"
+  
+  # Clean existing artifacts for this variant and version in releases directory
+  if [[ -d "${VERSION_RELEASES_DIR}" ]]; then
+    echo "--> Removing existing ${VARIANT} artifacts for version ${VERSION}"
+    rm -f "${VERSION_RELEASES_DIR}/${IMAGE_NAME}.${ARCH}-${VERSION}".*
+    # Remove old ISO artifacts that shouldn't exist anymore
+    rm -f "${VERSION_RELEASES_DIR}"/piccolo-os*.iso "${VERSION_RELEASES_DIR}"/piccolo-os.x86_64-*
   fi
 
   echo "==> Using local kiwi-ng"
   kiwi-ng --color-output --debug --logfile "${DIST_DIR}/kiwi.log" --target-arch "${ARCH}" \
     system build \
-    --description "${KIWI_DIR}" \
+    --description "${VARIANT_KIWI_DIR}" \
     --target-dir "${DIST_DIR}"
 else
   echo "ERROR: Neither podman/docker nor kiwi-ng found."
@@ -186,18 +290,29 @@ else
 fi
 
 # -------- collect artefacts ----------
+# Look for disk image first (.raw), then fallback to ISO for backward compatibility
+DISK_SRC="$(ls -t "${DIST_DIR}"/*.raw 2>/dev/null | head -n1 || true)"
 ISO_SRC="$(ls -t "${DIST_DIR}"/*.iso 2>/dev/null | head -n1 || true)"
-if [[ -z "${ISO_SRC}" ]]; then
-  echo "ERROR: No ISO produced. Check ${DIST_DIR}/kiwi.log for details."
+
+if [[ -n "${DISK_SRC}" ]]; then
+  IMAGE_SRC="${DISK_SRC}"
+  IMAGE_EXT="raw"
+  IMAGE_TYPE="disk image"
+elif [[ -n "${ISO_SRC}" ]]; then
+  IMAGE_SRC="${ISO_SRC}"
+  IMAGE_EXT="iso"
+  IMAGE_TYPE="ISO"
+else
+  echo "ERROR: No disk image or ISO produced. Check ${DIST_DIR}/kiwi.log for details."
   exit 1
 fi
 
-RELEASE_ISO="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.iso"
+RELEASE_IMAGE="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.${IMAGE_EXT}"
 RELEASE_LOG="${VERSION_RELEASES_DIR}/${IMAGE_LABEL}.log"
 
 # Copy artifacts to releases directory for preservation
 echo "==> Preserving build artifacts in releases directory"
-cp -f "${ISO_SRC}" "${RELEASE_ISO}"
+cp -f "${IMAGE_SRC}" "${RELEASE_IMAGE}"
 if [[ -f "${DIST_DIR}/kiwi.log" ]]; then
   cp -f "${DIST_DIR}/kiwi.log" "${RELEASE_LOG}"
 fi
@@ -222,9 +337,22 @@ if [[ -f "${DIST_DIR}/kiwi.result.json" ]]; then
 fi
 
 echo
-echo "✔ Build complete"
-echo "ISO: ${ISO_SRC}"
-echo "Release ISO: ${RELEASE_ISO}"
+echo "✔ Build complete for ${VARIANT} variant"
+if [[ "$VARIANT" == "prod" ]]; then
+  echo "🔒 PRODUCTION ${IMAGE_TYPE^^}: Zero-access hardened appliance"
+  echo "   - USB bootable disk image with systemd-boot"
+  echo "   - NO SSH access"
+  echo "   - NO cloud-init"  
+  echo "   - NO serial console"
+  echo "   - API-only access via piccolod on port 80"
+  echo "   - Can install to internal drives via OEM modules"
+else
+  echo "🔧 DEVELOPMENT ${IMAGE_TYPE^^}: Cloud-init enabled for testing"
+  echo "   - USB bootable disk image with systemd-boot"
+  echo "   - SSH access via cloud-init"
+fi
+echo "${IMAGE_TYPE^^}: ${IMAGE_SRC}"
+echo "Release ${IMAGE_TYPE}: ${RELEASE_IMAGE}"
 echo "Log: ${DIST_DIR}/kiwi.log"
 echo "Release Log: ${RELEASE_LOG}"
 echo
@@ -236,15 +364,16 @@ echo "  Metadata: ${RELEASE_METADATA}"
 # Show summary of all preserved releases
 echo
 echo "📦 All preserved releases:"
-if [[ -d "${RELEASES_DIR}" ]] && find "${RELEASES_DIR}" -name "*.iso" -type f | head -1 >/dev/null 2>&1; then
+if [[ -d "${RELEASES_DIR}" ]] && (find "${RELEASES_DIR}" -name "*.raw" -type f | head -1 >/dev/null 2>&1); then
   for version_dir in "${RELEASES_DIR}"/*/; do
     if [[ -d "$version_dir" ]]; then
       version=$(basename "$version_dir")
-      iso_path="${version_dir}/${IMAGE_NAME}-${ARCH}-${version}.iso"
-      if [[ -f "$iso_path" ]]; then
-        size=$(du -h "$iso_path" | cut -f1)
+      # Look for disk image
+      disk_path="${version_dir}/${IMAGE_NAME}-${ARCH}-${version}.raw"
+      if [[ -f "$disk_path" ]]; then
+        size=$(du -h "$disk_path" | cut -f1)
         artifact_count=$(find "$version_dir" -type f | wc -l)
-        echo "  - v${version} (${size}, ${artifact_count} artifacts)"
+        echo "  - v${version} (${size}, ${artifact_count} artifacts) [DISK IMAGE]"
       fi
     fi
   done
@@ -254,6 +383,7 @@ fi
 
 echo
 echo "Next steps:"
-echo "  - Test in UEFI/QEMU: qemu-system-x86_64 -enable-kvm -m 2048 -cpu host -machine q35,accel=kvm -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom ${ISO_SRC}"
-echo "  - Install to disk, boot with Secure Boot enabled (shim+signed kernel from repo)."
+echo "  - Write to USB: sudo dd if=${IMAGE_SRC} of=/dev/sdX bs=4M status=progress && sync"
+echo "  - Test in QEMU: qemu-system-x86_64 -enable-kvm -m 4096 -cpu host -machine q35,accel=kvm -bios /usr/share/OVMF/OVMF_CODE.fd -drive file=${IMAGE_SRC},format=raw"
+echo "  - Boot from USB with UEFI + Secure Boot enabled (systemd-boot + shim)"
 echo

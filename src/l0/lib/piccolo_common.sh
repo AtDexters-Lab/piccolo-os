@@ -205,13 +205,24 @@ cleanup_test_directory() {
 }
 
 # ---
-# ISO Path Resolution
+# Disk Image Path Resolution
 # ---
-resolve_piccolo_iso_path() {
+resolve_piccolo_image_path() {
     local build_dir="$1"
     local version="$2"
     
-    echo "${build_dir}/piccolo-os.x86_64-${version}.iso"
+    # Look for dev variant first, then prod variant
+    local disk_image_dev="${build_dir}/piccolo-os-dev.x86_64-${version}.raw"
+    local disk_image_prod="${build_dir}/piccolo-os-prod.x86_64-${version}.raw"
+    
+    if [ -f "$disk_image_dev" ]; then
+        echo "$disk_image_dev"
+    elif [ -f "$disk_image_prod" ]; then
+        echo "$disk_image_prod"
+    else
+        # Return the expected dev disk image path for error messages
+        echo "$disk_image_dev"
+    fi
 }
 
 # ---
@@ -226,11 +237,14 @@ validate_build_directory() {
     fi
 }
 
-validate_iso_file() {
-    local iso_path="$1"
+validate_disk_image() {
+    local image_path="$1"
     
-    if [ ! -f "$iso_path" ]; then
-        log "Error: ISO file not found at ${iso_path}" >&2
+    if [ ! -f "$image_path" ]; then
+        log "Error: Disk image not found at ${image_path}" >&2
+        log "Expected .raw disk image file" >&2
         return 1
     fi
+    
+    log "Found disk image: ${image_path}"
 }

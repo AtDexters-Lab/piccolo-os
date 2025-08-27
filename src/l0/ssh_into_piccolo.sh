@@ -2,7 +2,7 @@
 #
 # Piccolo OS - Interactive SSH Script v2.1
 #
-# This script boots the Piccolo MicroOS ISO with UEFI support in a QEMU virtual machine
+# This script boots the Piccolo MicroOS disk image with UEFI support in a QEMU virtual machine
 # and provides an interactive SSH console for debugging and exploration.
 #
 # v2.1 Refactor:
@@ -10,7 +10,7 @@
 # - Reduce code duplication with test_piccolo_os_image.sh
 #
 # v2.0 Major Updates:
-# - Updated for MicroOS-based artifacts (piccolo-os-x86_64-*.iso naming)
+# - Updated for MicroOS-based artifacts (piccolo-os-dev.x86_64-*.raw naming)
 # - Added UEFI/OVMF boot support with proper firmware configuration
 # - Updated for cloud-init with seed ISO approach
 # - Added UEFI firmware detection and configuration
@@ -42,8 +42,10 @@ test_dir=""
 
 usage() {
     echo "Usage: $0 --build-dir <PATH_TO_BUILD_OUTPUT> --version <VERSION>"
-    echo "  --build-dir    (Required) The path to the build output directory containing the ISO."
+    echo "  --build-dir    (Required) The path to the build output directory containing the disk image."
     echo "  --version      (Required) The version of the image being debugged (e.g., 1.0.0)."
+    echo ""
+    echo "The script will automatically detect dev or prod variant .raw disk images."
     exit 1
 }
 
@@ -94,7 +96,7 @@ main() {
     log "### Step 1: Preparing the environment..."
     # Assign a value to the global test_dir variable
     test_dir="${SCRIPT_DIR}/build/ssh-session-${PICCOLO_VERSION}"
-    local iso_path=$(resolve_piccolo_iso_path "$BUILD_DIR" "$PICCOLO_VERSION")
+    local image_path=$(resolve_piccolo_image_path "$BUILD_DIR" "$PICCOLO_VERSION")
     local ssh_key="${test_dir}/id_rsa_test"
     local uefi_code_copy="${test_dir}/$(basename "$UEFI_CODE")"
     local uefi_vars_copy="${test_dir}/$(basename "$UEFI_VARS")"
@@ -104,7 +106,7 @@ main() {
     # Clean up previous run just in case
     rm -rf "$test_dir"
     mkdir -p "$test_dir" "$cloud_config_dir"
-    validate_iso_file "$iso_path"
+    validate_disk_image "$image_path"
     
     log "Creating local copies of UEFI firmware files..."
     cp "$UEFI_CODE" "$uefi_code_copy"
@@ -126,7 +128,7 @@ main() {
     # ---
     # Step 2: Boot VM with Direct QEMU Command
     # ---
-    log "### Step 2: Booting Piccolo Live ISO in QEMU..."
+    log "### Step 2: Booting Piccolo disk image in QEMU..."
     
     # Check if the port is already in use
     if ss -Hltn "sport = :${SSH_PORT}" | grep -q "LISTEN"; then
@@ -143,9 +145,8 @@ main() {
         -m 4096 \
         -drive if=pflash,format=raw,readonly=on,file="$uefi_code_copy" \
         -drive if=pflash,format=raw,file="$uefi_vars_copy" \
-        -cdrom "$iso_path" \
+        -drive file="$image_path",format=raw \
         -drive file="$seed_iso",media=cdrom,if=virtio \
-        -boot d \
         -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22 \
         -device virtio-net-pci,netdev=n0 \
         -nographic &

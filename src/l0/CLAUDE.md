@@ -4,40 +4,54 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Layer 0 (l0) contains the openSUSE MicroOS-based OS build system for Piccolo OS. This layer uses KIWI NG to create bootable ISO images that include the piccolod daemon integrated as a systemd service. The system has evolved from Flatcar Linux to MicroOS for better UEFI support and container-native architecture.
+Layer 0 (l0) contains the openSUSE MicroOS-based OS build system for Piccolo OS. This layer uses KIWI NG to create USB-bootable disk images (OEM format) that include the piccolod daemon integrated as a systemd service. The system has evolved from Flatcar Linux to MicroOS and from ISO to OEM disk images for better UEFI, systemd-boot, and Secure Boot support.
 
 ## Development Commands
 
 ### Complete OS Build
-Build the entire Piccolo OS including ISO and update packages:
+Build the entire Piccolo OS including USB-bootable disk image:
 ```bash
-./build.sh
+# Development build (default - with SSH and cloud-init for testing)
+./build.sh dev
+
+# Production build (hardened - zero access, API-only)
+./build.sh prod
 ```
 
 This script:
 1. Builds the piccolod binary from `../l1/piccolod`
 2. Creates a custom MicroOS image with piccolod integrated using KIWI NG
-3. Generates bootable ISO with UEFI support
-4. Copies the piccolod binary into the overlay filesystem
+3. Generates USB-bootable disk image (.raw) with UEFI and systemd-boot support
+4. Uses additive configuration: production base + development additions for dev variant
+5. Automatically tests development builds with cloud-init integration
 
 ### Direct Build Script
-For more control over the build process:
+For more control over the build process with variant selection:
 ```bash
-./build_piccolo.sh --version 1.0.0 --binary-path ../l1/piccolod/build/piccolod
+# Development build (default - includes cloud-init and SSH)
+./build_piccolo.sh --binary-path ../l1/piccolod/build/piccolod --variant dev --version 1.0.0
+
+# Production build (hardened - no SSH, no cloud-init)
+./build_piccolo.sh --binary-path ../l1/piccolod/build/piccolod --variant prod --version 1.0.0
 ```
 
 ### Testing the Built Image
 Test the complete OS in a VM:
 ```bash
-./test_piccolo_os_image.sh --build-dir ./dist --version 1.0.0
+# Test from current build artifacts
+./test_piccolo_os_image.sh --build-dir ./releases/1.0.0 --version 1.0.0
+
+# Development builds are automatically tested after build
+# Production builds require manual verification (no SSH access)
 ```
 
-This automated test script (v3.1+):
-- Detects and uses proper UEFI firmware (prioritizing secboot variants)
-- Boots the ISO in QEMU with SSH port forwarding (2222)
-- Configures cloud-init for SSH access and system setup
+This automated test script (v4.0+):
+- Automatically detects dev or prod variant disk images (.raw)
+- Detects and uses proper UEFI firmware (prioritizing secboot variants) 
+- Boots disk images in QEMU with cloud-init seed ISO injection
+- SSH authentication via cloud-init configured keys and passwords
 - Verifies piccolod binary installation and service status
-- Tests HTTP API endpoints on port 80 (both health endpoints)
+- Tests HTTP API endpoints on port 80 (health and ecosystem endpoints)
 - Validates container runtime (Podman socket and functionality)
 - Runs comprehensive ecosystem health checks via `/api/v1/ecosystem`
 - Tests MicroOS rollback integration via `/api/v1/health/ready`
@@ -46,8 +60,10 @@ This automated test script (v3.1+):
 ### Interactive Debugging
 For manual testing and debugging:
 ```bash
-./ssh_into_piccolo.sh --build-dir ./dist --version 1.0.0
+./ssh_into_piccolo.sh --build-dir ./releases/1.0.0 --version 1.0.0
 ```
+
+Note: Only works with development variant images (cloud-init + SSH enabled)
 
 ### Managing Releases
 List all preserved releases:
@@ -59,8 +75,10 @@ ls -lh ./releases/1.0.0/  # View specific version artifacts
 Test a specific preserved release:
 ```bash
 ./test_piccolo_os_image.sh --build-dir ./releases/1.0.0 --version 1.0.0
-qemu-system-x86_64 -enable-kvm -m 2048 -cpu host -machine q35,accel=kvm \
-  -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom ./releases/1.0.0/piccolo-os-x86_64-1.0.0.iso
+
+# Manual QEMU testing (automatically detects dev or prod variant disk images)
+qemu-system-x86_64 -enable-kvm -m 4096 -cpu host -machine q35,accel=kvm \
+  -bios /usr/share/OVMF/OVMF_CODE.fd -drive file=./releases/1.0.0/piccolo-os-dev.x86_64-1.0.0.raw,format=raw
 ```
 
 ### Using Preserved Artifacts for Updates
@@ -68,11 +86,12 @@ The preserved artifacts enable comprehensive update management:
 
 **Package Analysis:**
 ```bash
-# Compare package versions between releases
-diff ./releases/1.0.0/piccolo-os-x86_64-1.0.0.packages ./releases/1.1.0/piccolo-os-x86_64-1.1.0.packages
+# Compare package versions between releases (dev and prod variants)
+diff ./releases/1.0.0/piccolo-os-dev.x86_64-1.0.0.packages ./releases/1.1.0/piccolo-os-dev.x86_64-1.1.0.packages
+diff ./releases/1.0.0/piccolo-os-prod.x86_64-1.0.0.packages ./releases/1.1.0/piccolo-os-prod.x86_64-1.1.0.packages
 
 # Extract package list for vulnerability scanning
-cut -d'|' -f1,4 ./releases/1.0.0/piccolo-os-x86_64-1.0.0.packages
+cut -d'|' -f1,4 ./releases/1.0.0/piccolo-os-dev.x86_64-1.0.0.packages
 
 # Show all versions of a specific package across releases
 for version in ./releases/*/; do
@@ -98,43 +117,62 @@ diff ./releases/1.0.0/piccolo-os-x86_64-1.0.0.verified ./releases/1.1.0/piccolo-
 
 ### Build System Integration
 
-The build process integrates piccolod into openSUSE MicroOS through KIWI NG:
+The build process integrates piccolod into openSUSE MicroOS through KIWI NG with a dual variant system:
 
-1. **KIWI Configuration**: Uses `kiwi/config.xml` to define MicroOS base system with Tumbleweed repositories
-2. **Container-Based Building**: Leverages openSUSE Tumbleweed container with KIWI NG for reproducible builds
-3. **Overlay Filesystem**: Copies piccolod binary to `/usr/local/piccolo/v1/bin/` with symlink at `/usr/local/piccolo/current`
-4. **Package Selection**: Includes MicroOS base patterns, Podman container runtime, and live ISO support
+1. **Production Base**: `kiwi/prod/` provides hardened, zero-access base configuration
+2. **Development Additions**: `kiwi/dev/` adds SSH, cloud-init, and testing capabilities  
+3. **Additive Architecture**: Development builds copy production base + apply dev additions
+4. **Dynamic Configuration**: Generated dev config in `.work/kiwi-dev-generated/` with proper image naming
+5. **Container-Based Building**: Uses persistent Docker containers with cached packages for fast rebuilds
+6. **Comprehensive Cleanup**: Full dist/ removal and version-specific artifact management
+7. **Service Management**: Proper systemd masking/unmasking and cloud-init marker handling
 
 ### Key Build Components
 
 - **`build_piccolo.sh`**: Main KIWI NG build orchestration with container runtime detection
 - **`build.sh`**: Simple wrapper that builds piccolod then calls build_piccolo.sh  
 - **`build.Dockerfile`**: Container image definition with KIWI NG and MicroOS dependencies
-- **`test_piccolo_os_image.sh`**: Comprehensive automated testing framework (v3.1+) with UEFI and health check validation
-- **`ssh_into_piccolo.sh`**: Interactive debugging tool for manual testing (v2.1+) with UEFI support
+- **`test_piccolo_os_image.sh`**: Comprehensive automated testing framework (v4.0+) with disk image support and cloud-init integration
+- **`ssh_into_piccolo.sh`**: Interactive debugging tool (v2.2+) with disk image support and UEFI
 - **`lib/piccolo_common.sh`**: Shared utilities for VM management, UEFI detection, and cloud-init
-- **`kiwi/config.xml`**: KIWI NG system configuration with MicroOS packages and cloud-init
+- **`kiwi/prod/`**: Production base configuration (hardened, zero-access)
+  - `config.xml`: MicroOS + systemd-boot + minimal packages
+  - `config.sh`: Security hardening and service masking
+  - `root/`: Production overlay files and systemd services
+- **`kiwi/dev/`**: Development additions applied on top of production
+  - `packages.xml`: SSH + cloud-init packages
+  - `services.sh`: Enable SSH/cloud-init, remove disable markers
+  - `root/`: Development overlay files
 - **`kiwi/root/`**: Overlay filesystem for custom files and systemd services
 - **`piccolo.env`**: Build configuration (GPG keys, update server URLs)
 
 ### Generated Artifacts
 
 **Current Build Outputs** (in `./dist/`):
-- `piccolo-os-{arch}-{version}.iso` - Bootable live ISO with UEFI support (overwritten each build)
+- `piccolo-os-{variant}.{arch}-{version}.raw` - USB-bootable disk image with systemd-boot and UEFI support
 - `kiwi.log` - Current build log for troubleshooting
+- `kiwi.result.json` - Build metadata and artifact information
 - KIWI NG temporary files during build process
+
+Note: Entire `dist/` directory is cleaned before each build for consistency
 
 **Preserved Releases** (in `./releases/{version}/`):
 Each version is stored in its own subdirectory for better organization:
 ```
 ./releases/
 ├── 1.0.0/
-│   ├── piccolo-os-x86_64-1.0.0.iso     - Bootable ISO
-│   ├── piccolo-os-x86_64-1.0.0.log     - Build log
-│   ├── piccolo-os-x86_64-1.0.0.packages - Package manifest (critical for updates)
-│   ├── piccolo-os-x86_64-1.0.0.changes  - Package changelog and history
-│   ├── piccolo-os-x86_64-1.0.0.verified - File integrity verification
-│   └── piccolo-os-x86_64-1.0.0.json     - Build metadata
+│   ├── piccolo-os-dev.x86_64-1.0.0.raw     - Development disk image (cloud-init enabled)
+│   ├── piccolo-os-prod.x86_64-1.0.0.raw    - Production disk image (hardened, zero-access)
+│   ├── piccolo-os-dev.x86_64-1.0.0.log     - Development build log
+│   ├── piccolo-os-prod.x86_64-1.0.0.log    - Production build log
+│   ├── piccolo-os-dev.x86_64-1.0.0.packages - Development package manifest
+│   ├── piccolo-os-prod.x86_64-1.0.0.packages - Production package manifest
+│   ├── piccolo-os-dev.x86_64-1.0.0.changes  - Development changelog
+│   ├── piccolo-os-prod.x86_64-1.0.0.changes - Production changelog
+│   ├── piccolo-os-dev.x86_64-1.0.0.verified - Development integrity verification
+│   ├── piccolo-os-prod.x86_64-1.0.0.verified - Production integrity verification  
+│   ├── piccolo-os-dev.x86_64-1.0.0.json     - Development build metadata
+│   └── piccolo-os-prod.x86_64-1.0.0.json    - Production build metadata
 ├── 1.1.0/
 │   └── ...
 └── 1.2.0/
@@ -142,9 +180,33 @@ Each version is stored in its own subdirectory for better organization:
 ```
 All previous builds are automatically preserved and listed after each build
 
+### Dual Variant System
+
+**Production Variant** (`piccolo-os-prod.*.raw`):
+- **Zero-Access Security**: No SSH, no cloud-init, no interactive console access
+- **API-Only Access**: Communication only via piccolod REST API on port 80
+- **Hardened Configuration**: Services masked, minimal logging, kernel hardening
+- **Use Cases**: Production deployments, untrusted environments, appliance mode
+
+**Development Variant** (`piccolo-os-dev.*.raw`):
+- **Full Access**: SSH with key/password auth, cloud-init for automation
+- **Testing Integration**: NoCloud datasource, automated provisioning
+- **Interactive Access**: Serial console, interactive login, standard logging
+- **Use Cases**: Development, testing, debugging, CI/CD pipelines
+
+**Key Differences**:
+| Feature | Production | Development |
+|---------|------------|-------------|
+| SSH Access | ❌ Disabled & Masked | ✅ Enabled |
+| Cloud-init | ❌ Disabled & Marked | ✅ Enabled |
+| Interactive Login | ❌ Masked | ✅ Available |
+| Logging Level | Minimal (warnings+) | Standard (info+) |
+| Serial Console | ❌ Disabled | ✅ Available |
+| Authentication | API-only | SSH keys + passwords |
+
 ### Systemd Service Configuration
 
-The piccolod.service is defined in `kiwi/root/etc/systemd/system/` and configured for:
+The piccolod.service is defined in `kiwi/prod/root/etc/systemd/system/` and configured for:
 - **Type=notify**: Proper systemd integration with `sd_notify()` for health monitoring
 - **Security**: `ProtectSystem=strict` with specific `ReadWritePaths=/run /var /tmp /etc`
 - **Capabilities**: `CAP_NET_BIND_SERVICE` for binding to port 80
@@ -284,8 +346,24 @@ ls -la /run/podman/podman.sock
 
 ## Migration Notes
 
-This system has migrated from Flatcar Linux to openSUSE MicroOS. Key differences:
-- Build system changed from Gentoo/Portage to KIWI NG
-- Container runtime changed from Docker to Podman
-- Update mechanism uses MicroOS transactional updates instead of CoreOS update_engine
-- Research and migration documentation available in `foundation.md` and `coreos-migration-research.md`
+This system has undergone major architectural evolution:
+
+**Platform Migration (Flatcar → MicroOS)**:
+- Build system: Gentoo/Portage → KIWI NG
+- Container runtime: Docker → Podman  
+- Update mechanism: CoreOS update_engine → MicroOS transactional updates
+
+**Image Format Migration (ISO → OEM Disk Images)**:
+- Format: ISO images (.iso) → USB-bootable disk images (.raw)
+- Bootloader: GRUB → systemd-boot for modern UEFI compatibility
+- Boot method: El Torito CD/DVD boot → direct USB/disk boot with GPT
+- Constraints: 31MB El Torito limit → 1GB ESP with full systemd-boot support
+
+**Architecture Enhancements**:
+- **Dual Variant System**: Production (zero-access) + Development (cloud-init)
+- **Additive Configuration**: Production base + development additions
+- **Simplified Codebase**: Removed all ISO backward compatibility (~100+ lines)
+- **Modern UEFI Support**: Secure Boot ready with shim + systemd-boot
+- **Cloud-init Integration**: Full NoCloud datasource support for automated testing
+
+**Migration Documentation**: `foundation.md` and `coreos-migration-research.md`

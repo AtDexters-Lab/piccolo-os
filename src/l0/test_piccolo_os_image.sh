@@ -2,7 +2,7 @@
 #
 # Piccolo OS - Automated QA Smoke Test Script v3.1
 #
-# This script boots the Piccolo MicroOS ISO with UEFI support using QEMU and runs 
+# This script boots the Piccolo MicroOS disk image with UEFI support using QEMU and runs 
 # automated checks to verify its integrity and core functionality including mDNS.
 #
 # v3.1 Refactor:
@@ -11,7 +11,7 @@
 #
 # v3.0 Major Improvements:
 # - Added full UEFI/OVMF boot support with proper firmware configuration
-# - Updated for MicroOS-based artifacts (piccolo-os-x86_64-*.iso naming)
+# - Updated for MicroOS-based artifacts (piccolo-os-dev.x86_64-*.raw naming)
 # - Fixed QEMU boot order using bootindex=0 for reliable CD-ROM boot
 # - Updated container runtime from Docker to Podman for MicroOS compatibility
 # - Added binary path compatibility for both MicroOS and Flatcar locations
@@ -48,8 +48,10 @@ test_dir=""
 
 usage() {
     echo "Usage: $0 --build-dir <PATH_TO_BUILD_OUTPUT> --version <VERSION>"
-    echo "  --build-dir    (Required) The path to the build output directory containing the ISO."
+    echo "  --build-dir    (Required) The path to the build output directory containing the disk image."
     echo "  --version      (Required) The version of the image being tested (e.g., 1.0.0)."
+    echo ""
+    echo "The script will automatically detect dev or prod variant .raw disk images."
     exit 1
 }
 
@@ -98,7 +100,7 @@ main() {
     log "### Step 1: Preparing the test environment..."
     # Assign a value to the global test_dir variable
     test_dir="${SCRIPT_DIR}/build/test-${PICCOLO_VERSION}"
-    local iso_path=$(resolve_piccolo_iso_path "$BUILD_DIR" "$PICCOLO_VERSION")
+    local image_path=$(resolve_piccolo_image_path "$BUILD_DIR" "$PICCOLO_VERSION")
     local uefi_code_copy="${test_dir}/$(basename "$UEFI_CODE")"
     local uefi_vars_copy="${test_dir}/$(basename "$UEFI_VARS")"
     local ssh_key="${test_dir}/id_rsa_test"
@@ -108,7 +110,7 @@ main() {
     # Clean up previous run just in case
     rm -rf "$test_dir"
     mkdir -p "$test_dir" "$cloud_config_dir"
-    validate_iso_file "$iso_path"
+    validate_disk_image "$image_path"
     
     log "Creating local copies of UEFI firmware files for this test run..."
     cp "$UEFI_CODE" "$uefi_code_copy"
@@ -130,7 +132,7 @@ main() {
     # ---
     # Step 2: Boot VM with Direct QEMU Command
     # ---
-    log "### Step 2: Booting Piccolo Live ISO in QEMU..."
+    log "### Step 2: Booting Piccolo disk image in QEMU..."
     
     # Check if the port is already in use
     if ss -Hltn "sport = :${SSH_PORT}" | grep -q "LISTEN"; then
@@ -148,9 +150,8 @@ main() {
     log "    -m 4096 \\"
     log "    -drive if=pflash,format=raw,readonly=on,file=\"$uefi_code_copy\" \\"
     log "    -drive if=pflash,format=raw,file=\"$uefi_vars_copy\" \\"
-    log "    -cdrom \"$iso_path\" \\"
+    log "    -drive file=\"$image_path\",format=raw \\"
     log "    -drive file=\"$seed_iso\",media=cdrom,if=virtio \\"
-    log "    -boot d \\"
     log "    -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22 \\"
     log "    -device virtio-net-pci,netdev=n0 \\"
     log "    -nographic"
@@ -163,9 +164,8 @@ main() {
         -m 4096 \
         -drive if=pflash,format=raw,readonly=on,file="$uefi_code_copy" \
         -drive if=pflash,format=raw,file="$uefi_vars_copy" \
-        -cdrom "$iso_path" \
+        -drive file="$image_path",format=raw \
         -drive file="$seed_iso",media=cdrom,if=virtio \
-        -boot d \
         -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22 \
         -device virtio-net-pci,netdev=n0 \
         -nographic &
@@ -234,7 +234,7 @@ main() {
         log "  1. Boot with: qemu-system-x86_64 -enable-kvm -machine q35,smm=on,accel=kvm -cpu host -smp 4 -m 4096 \\"
         log "     -drive if=pflash,format=raw,readonly=on,file=$UEFI_CODE \\"
         log "     -drive if=pflash,format=raw,file=$uefi_vars_copy \\"
-        log "     -cdrom $iso_path -boot d -device virtio-net-pci,netdev=n0 \\"
+        log "     -drive file=$image_path,format=raw -device virtio-net-pci,netdev=n0 \\"
         log "     -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22 -display gtk"
         log "  2. Log in via GUI console and run: systemctl status sshd"
         log "  3. If not running: systemctl enable --now sshd"
