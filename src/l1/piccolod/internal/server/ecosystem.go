@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 
@@ -24,6 +25,56 @@ type EcosystemResponse struct {
 	Permissions map[string]string `json:"permissions"` // Key capability info
 }
 
+// ReadinessResponse represents a simple boolean health check result
+type ReadinessResponse struct {
+	Ready   bool   `json:"ready"`
+	Status  string `json:"status"` // "healthy", "degraded", "unhealthy"
+	Message string `json:"message,omitempty"`
+}
+
+// handleReadinessCheck provides a simple boolean health check for systemd/K8s
+func (s *Server) handleReadinessCheck() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Reuse the same ecosystem logic internally
+		ecosystemResponse := s.runEcosystemChecks()
+
+		var ready bool
+		var statusCode int
+
+		// Convert ecosystem status to simple boolean
+		switch ecosystemResponse.Overall {
+		case "healthy", "degraded":
+			ready = true
+			statusCode = http.StatusOK // 200
+		case "unhealthy":
+			ready = false
+			statusCode = http.StatusServiceUnavailable // 503
+		default:
+			ready = false
+			statusCode = http.StatusInternalServerError // 500
+		}
+
+		response := ReadinessResponse{
+			Ready:   ready,
+			Status:  ecosystemResponse.Overall,
+			Message: ecosystemResponse.Summary,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(statusCode)
+
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, "Failed to encode readiness response", http.StatusInternalServerError)
+		}
+	}
+}
+
 // handleEcosystemTest performs comprehensive environment validation
 func (s *Server) handleEcosystemTest() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +85,24 @@ func (s *Server) handleEcosystemTest() http.HandlerFunc {
 
 		response := s.runEcosystemChecks()
 
+		// Set appropriate HTTP status code based on health status
+		// This is CRITICAL for MicroOS rollback detection
+		var statusCode int
+		switch response.Overall {
+		case "healthy":
+			statusCode = http.StatusOK // 200
+		case "degraded":
+			statusCode = http.StatusOK // 200 - degraded still works
+		case "unhealthy":
+			statusCode = http.StatusServiceUnavailable // 503
+		default:
+			statusCode = http.StatusInternalServerError // 500
+		}
+
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache") // Prevent caching for health checks
+		w.WriteHeader(statusCode)
+
 		if err := json.NewEncoder(w).Encode(response); err != nil {
 			http.Error(w, "Failed to encode ecosystem test results", http.StatusInternalServerError)
 		}
@@ -152,15 +220,13 @@ func (s *Server) checkProcessIdentity() EcosystemCheck {
 // checkFileSystemAccess validates access to essential directories
 func (s *Server) checkFileSystemAccess() EcosystemCheck {
 	requiredPaths := []string{
-		"/var/run",
+		"/run", // MicroOS uses /run instead of /var/run
 		"/var/log",
 		"/tmp",
 		"/etc",
 	}
 
 	optionalPaths := []string{
-		"/var/lib/docker",
-		"/var/lib/piccolod",
 		"/sys/firmware/efi/efivars",
 	}
 
@@ -264,44 +330,45 @@ func (s *Server) checkDeviceAccess() EcosystemCheck {
 	}
 }
 
-// checkDockerAccess validates Docker socket accessibility
+// checkDockerAccess validates Podman container runtime socket accessibility
 func (s *Server) checkDockerAccess() EcosystemCheck {
-	socketPath := "/var/run/docker.sock"
+	podmanSocket := "/run/podman/podman.sock"
 
-	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+	if _, err := os.Stat(podmanSocket); os.IsNotExist(err) {
 		return EcosystemCheck{
-			Name:        "Docker Access",
+			Name:        "Podman Access",
 			Status:      "fail",
-			Description: "Docker socket not found - container management will fail",
-			Details:     socketPath + " does not exist",
+			Description: "Podman socket not found - container management will fail",
+			Details:     podmanSocket + " does not exist",
 		}
 	}
 
-	if err := unix.Access(socketPath, unix.R_OK|unix.W_OK); err != nil {
+	if err := unix.Access(podmanSocket, unix.R_OK|unix.W_OK); err != nil {
 		return EcosystemCheck{
-			Name:        "Docker Access",
+			Name:        "Podman Access",
 			Status:      "fail",
-			Description: "Docker socket not accessible",
-			Details:     "Cannot read/write " + socketPath,
+			Description: "Podman socket not accessible",
+			Details:     "Cannot read/write " + podmanSocket,
 		}
 	}
 
 	return EcosystemCheck{
-		Name:        "Docker Access",
+		Name:        "Podman Access",
 		Status:      "pass",
-		Description: "Docker socket accessible for container management",
+		Description: "Podman socket accessible for container management",
+		Details:     "Using " + podmanSocket,
 	}
 }
 
 // checkNetworkAccess validates network capabilities
 func (s *Server) checkNetworkAccess() EcosystemCheck {
-	// Test if we can bind to port 8080 (we're already running on it)
+	// Test if we can bind to port 80 (we're already running on it)
 	// This is a basic check - more sophisticated network tests could be added
 	return EcosystemCheck{
 		Name:        "Network Access",
 		Status:      "pass",
 		Description: "Network capabilities functional (HTTP server running)",
-		Details:     "Bound to port 8080",
+		Details:     "Bound to port 80",
 	}
 }
 
@@ -352,7 +419,7 @@ func (s *Server) getPermissionInfo() map[string]string {
 
 	info["uid"] = "0" // We know we're root if we got this far
 	info["gid"] = "0"
-	info["pid"] = string(rune(os.Getpid()))
+	info["pid"] = fmt.Sprintf("%d", os.Getpid()) // Fix PID conversion
 
 	// Additional permission info could be added here
 	// (capabilities, systemd properties, etc.)

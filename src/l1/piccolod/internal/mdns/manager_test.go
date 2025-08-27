@@ -19,8 +19,8 @@ func TestNewManager(t *testing.T) {
 		t.Errorf("hostname = %v, want %v", manager.hostname, "piccolo")
 	}
 
-	if manager.port != 8080 {
-		t.Errorf("port = %v, want %v", manager.port, 8080)
+	if manager.port != 80 {
+		t.Errorf("port = %v, want %v", manager.port, 80)
 	}
 
 	if manager.baseName != "piccolo" {

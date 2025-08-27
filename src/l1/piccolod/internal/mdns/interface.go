@@ -37,10 +37,11 @@ func (m *Manager) discoverInterfaces() error {
 	}
 
 	if activeCount == 0 {
-		return fmt.Errorf("no suitable network interfaces found")
+		log.Printf("WARN: No active network interfaces found during initial discovery")
+	} else {
+		log.Printf("INFO: Successfully configured %d network interfaces for mDNS", activeCount)
 	}
 
-	log.Printf("INFO: Successfully configured %d network interfaces for mDNS", activeCount)
 	return nil
 }
 

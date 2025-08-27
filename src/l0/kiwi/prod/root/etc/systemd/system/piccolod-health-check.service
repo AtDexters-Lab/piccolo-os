@@ -1,0 +1,40 @@
+[Unit]
+Description=Piccolo Health Check for OS Updates - PRODUCTION MODE
+Documentation=https://piccolospace.com/docs/health-checks
+After=piccolod.service
+Requires=piccolod.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/piccolod-health-check-prod.sh
+TimeoutSec=60
+RemainAfterExit=yes
+
+# PRODUCTION SECURITY HARDENING
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadOnlyPaths=/
+ReadWritePaths=/run /var/log
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+PrivateDevices=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+MemoryDenyWriteExecute=yes
+
+# PRODUCTION LOGGING - Minimal output
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=piccolod-healthcheck-prod
+
+[Install]
+WantedBy=multi-user.target
