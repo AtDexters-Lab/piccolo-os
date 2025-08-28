@@ -1,0 +1,38 @@
+# Web service example - typical self-hosted app
+name: nextcloud
+image: nextcloud:latest
+subdomain: files
+
+ports:
+  web:
+    container: 80
+    host: 8080
+
+storage:
+  persistent:
+    data:
+      container: /var/www/html
+      size_limit: 50GB
+    config:
+      container: /var/www/html/config
+      size_limit: 1GB
+
+environment:
+  MYSQL_HOST: db.piccolo.local
+  MYSQL_DATABASE: nextcloud
+  NEXTCLOUD_ADMIN_USER: admin
+
+permissions:
+  network:
+    internet: allow     # Needs internet for app store, updates
+  preset: web_service
+
+healthcheck:
+  http:
+    path: /status.php
+    port: web
+    timeout: 30s
+    retries: 3
+
+depends_on:
+  - mysql

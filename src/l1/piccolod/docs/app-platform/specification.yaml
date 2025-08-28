@@ -1,0 +1,352 @@
+# specification.yaml
+# 
+# Complete app.yaml specification for Piccolo OS App Platform
+# Updated to use Podman/OCI standards and terminology
+#
+# This file serves as:
+# - Documentation for app developers
+# - Reference for implementation
+# - Schema foundation for validation
+#
+# This example shows a complex development environment with all possible fields.
+# Most real apps will use only a subset of these fields.
+
+# =============================================================================
+# REQUIRED FIELDS
+# =============================================================================
+
+# Unique identifier for this app within the Piccolo instance
+# Used for:
+# - Container naming
+# - Storage directory naming (/var/piccolo/storage/<name>)
+# - Default subdomain generation
+# - Service discovery
+name: dev-workspace
+
+# Container image configuration (one of 'image' or 'build' required)
+# For pre-built images from registries:
+image: ubuntu:22.04
+# Supports:
+# - Container registries: quay.io/user/app:tag, ghcr.io/owner/repo:tag
+# - Private registries: registry.company.com/app:v1.0
+# - Local images: my-app:dev
+
+# OR build configuration for custom containers:
+build:
+  # OCI standard filename (Containerfile or Dockerfile both supported)
+  containerfile: |
+    FROM node:18
+    WORKDIR /app
+    COPY package*.json ./
+    RUN npm install
+    COPY . .
+    EXPOSE 3000
+    CMD ["npm", "start"]
+  
+  # Or reference external file (when using API upload)
+  # containerfile: Containerfile
+  
+  # Build context directory (default: .)
+  context: .
+  
+  # Container build arguments
+  build_args:
+    NODE_ENV: production
+    API_VERSION: "v2"
+  
+  # Multi-stage build target
+  target: production
+  
+  # Alternative: Git-based builds
+  # git: https://github.com/user/repo.git
+  # branch: main
+
+# =============================================================================
+# CORE OPTIONAL FIELDS
+# =============================================================================
+
+# Subdomain for remote access via https://<subdomain>.<user>.piccolospace.com
+# Default: derived from name (dev-workspace -> https://dev-workspace.user.piccolospace.com)
+subdomain: code
+
+# App type determines startup order and lifecycle
+# - system: Starts during boot sequence, before user authentication
+# - user: Starts after user unlocks their data (default)
+type: user
+
+# =============================================================================
+# NETWORK CONFIGURATION
+# =============================================================================
+
+ports:
+  # Named port mappings using OCI-standard syntax
+  # Format: semantic_name -> {container: port, host: port}
+  
+  web:
+    container: 8080        # Port inside container
+    host: 3000             # Port on host for local access (piccolo.local:3000)
+    
+  ssh:
+    container: 22          # SSH access to development environment
+    host: 2222             # Host port 2222
+    
+  debug:
+    container: 5005        # Java/Node.js debug port
+    host: 5005             # Same port on host for simplicity
+
+# =============================================================================
+# STORAGE CONFIGURATION (Sandboxed Architecture)
+# =============================================================================
+
+storage:
+  # Persistent storage backed by federated storage network
+  # Survives container restarts, syncs across devices
+  persistent:
+    # Host path: /var/piccolo/storage/dev-workspace/projects
+    projects:
+      container: /workspace/projects
+      size_limit: 50GB     # Optional quota enforcement
+      
+    # Host path: /var/piccolo/storage/dev-workspace/dotfiles  
+    dotfiles:
+      container: /home/developer/.config
+      size_limit: 1GB
+      
+    # Host path: /var/piccolo/storage/dev-workspace/ssh
+    ssh_config:
+      container: /home/developer/.ssh
+      size_limit: 100MB
+  
+  # Temporary storage backed by host /tmp
+  # Cleared on container restart, not synced
+  temporary:
+    # Host path: /tmp/piccolo/apps/dev-workspace/build
+    build_cache:
+      container: /workspace/build
+      size_limit: 10GB
+      
+    # Host path: /tmp/piccolo/apps/dev-workspace/logs
+    logs:
+      container: /var/log/app
+      size_limit: 1GB
+
+# =============================================================================
+# FILESYSTEM PERSISTENCE (Optional)
+# =============================================================================
+
+filesystem:
+  # Whether container can modify its root filesystem persistently
+  # Default: false (immutable, changes lost on restart)
+  # When true: changes to / persist via local storage overlay
+  persistent: true
+  
+  # Note: Filesystem persistence is always local storage only
+  # This is optimal for performance (OS files need fast I/O)
+  # and use case (dev tools, not user data)
+
+# =============================================================================
+# SECURITY & PERMISSIONS
+# =============================================================================
+
+permissions:
+  network:
+    # Internet access control (default: deny for security)
+    internet: allow        # allow | deny
+    
+    # Local network access (other Piccolo apps, local services)
+    local_network: allow   # allow | deny (default: allow)
+    
+    # DNS resolution
+    dns: allow            # allow | deny (default: allow)
+    
+    # Whitelist specific external domains (when internet: deny but need specific access)
+    allowed_domains:
+      - "github.com"
+      - "registry.npmjs.org"
+      - "pypi.org"
+      
+    # Whitelist specific IP ranges
+    allowed_ips:
+      - "192.168.1.0/24"   # Local network
+      - "10.0.0.0/8"       # Private networks
+      
+  resources:
+    # Process and resource limits (cgroups-based via Podman)
+    max_processes: 200     # Maximum number of processes
+    max_open_files: 2048   # File descriptor limit
+    
+    # Security capabilities
+    privileged: false      # No privileged operations (default: false)
+    
+  filesystem:
+    # Root filesystem permissions
+    read_only_root: false  # Allow root filesystem modifications (when filesystem.persistent: true)
+    
+    # Device access (/dev/*)
+    device_access: deny    # allow | deny (default: deny)
+    
+  # Preset configurations for common app types
+  # preset: isolated | web_service | database | media_server
+  # (commented out since we're using custom config above)
+
+# =============================================================================
+# RUNTIME CONFIGURATION
+# =============================================================================
+
+environment:
+  # Simple key-value environment variables
+  NODE_ENV: development
+  DEBUG: "true"
+  WORKSPACE_ROOT: /workspace/projects
+  
+  # Container can access these at runtime
+  DATABASE_HOST: postgres.piccolo.local
+  REDIS_URL: redis://redis.piccolo.local:6379
+
+resources:
+  limits:
+    # Memory limit (supports: MB, GB, TB)
+    memory: 4GB
+    
+    # CPU limit (fractional cores allowed)
+    cpu: 2.0             # 2 CPU cores
+    
+    # Total persistent storage limit across all persistent volumes
+    storage: 100GB
+
+# =============================================================================
+# HEALTH MONITORING
+# =============================================================================
+
+healthcheck:
+  http:
+    # HTTP endpoint to check for health
+    path: /health
+    
+    # Named port to check (references ports section)
+    port: web
+    
+    # Request timeout
+    timeout: 30s
+    
+    # Number of retries before marking unhealthy
+    retries: 3
+    
+    # How often to check (future enhancement)
+    # interval: 30s
+
+# =============================================================================
+# DEPENDENCIES
+# =============================================================================
+
+depends_on:
+  # List of app names that must be running before this app starts
+  # Apps wait for dependencies to be healthy, not just started
+  - postgres             # Database must be running
+  - redis                # Cache must be available
+  
+  # Start order: postgres -> redis -> dev-workspace
+  # Stop order: dev-workspace -> redis -> postgres
+
+# =============================================================================
+# APP-SPECIFIC CONFIGURATION
+# =============================================================================
+
+app_config:
+  # This entire section is available to the container at:
+  # /piccolo/config/app.yaml (full config)
+  # 
+  # The app can parse this section for its own configuration needs.
+  # This enables flexible, app-specific customization without
+  # requiring changes to the Piccolo core.
+  
+  # Development environment setup
+  development:
+    default_shell: /bin/zsh
+    install_packages:
+      - git
+      - vim
+      - curl
+      - build-essential
+    
+    # IDE configuration
+    vscode_extensions:
+      - ms-python.python
+      - golang.go
+      - rust-lang.rust-analyzer
+      
+  # Custom services this app should start
+  services:
+    jupyter:
+      enabled: true
+      port: 8888
+    
+    code_server:
+      enabled: true
+      auth_method: password
+      
+  # Backup preferences (for future x-piccolo implementation)
+  backup:
+    include_paths:
+      - /workspace/projects
+      - /home/developer/.config
+    exclude_patterns:
+      - "*.log"
+      - "node_modules/"
+      - ".git/"
+
+# =============================================================================
+# EXTENSIBILITY
+# =============================================================================
+
+x-piccolo:
+  # Vendor-specific extensions for future Piccolo features
+  # These fields are ignored by current parser but preserved for future use
+  
+  # Auto-update configuration (future feature)
+  auto_update:
+    enabled: false         # Don't auto-update development environments
+    schedule: manual       # manual | daily | weekly
+    
+  # Monitoring integration (future feature)
+  monitoring:
+    metrics: true
+    log_level: info
+    
+  # Custom labels for organization (future feature)
+  labels:
+    category: development
+    maintainer: user@domain.com
+    version: "1.0"
+
+# =============================================================================
+# API UPLOAD METHODS
+# =============================================================================
+
+# This specification supports multiple upload methods via HTTP API:
+
+# Method 1: Inline Containerfile (shown above)
+# POST /api/v1/apps
+# Content-Type: application/yaml
+# <this entire file>
+
+# Method 2: Multi-part upload
+# POST /api/v1/apps
+# Content-Type: multipart/form-data
+# - app_definition: <app.yaml with containerfile: Containerfile>
+# - containerfile: <Containerfile content>
+# - context: <build-context.tar.gz>
+
+# Method 3: Git-based
+# POST /api/v1/apps
+# Content-Type: application/json
+# {
+#   "git_url": "https://github.com/user/repo.git",
+#   "path": "apps/my-app.yaml"
+# }
+
+# =============================================================================
+# YAML SCHEMA VALIDATION (Future)
+# =============================================================================
+
+# $schema: https://schemas.piccolo.dev/app.yaml/v1

@@ -1,0 +1,27 @@
+name: test-complete
+image: nginx:alpine
+subdomain: test
+type: user
+
+ports:
+  web:
+    container: 80
+    host: 8080
+
+storage:
+  persistent:
+    data:
+      container: /data
+      size_limit: 1GB
+
+environment:
+  ENV: test
+
+permissions:
+  network:
+    internet: deny
+
+resources:
+  limits:
+    memory: 512MB
+    cpu: 0.5

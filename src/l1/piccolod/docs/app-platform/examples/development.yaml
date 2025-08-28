@@ -1,0 +1,49 @@
+# Development environment with filesystem persistence
+name: code-server
+image: codercom/code-server:latest
+subdomain: code
+
+ports:
+  web:
+    container: 8080
+    host: 8080
+  ssh:
+    container: 22
+    host: 2222
+
+storage:
+  persistent:
+    projects:
+      container: /home/coder/projects
+      size_limit: 100GB
+    config:
+      container: /home/coder/.local
+      size_limit: 5GB
+  temporary:
+    cache:
+      container: /tmp/cache
+      size_limit: 10GB
+
+# Enable filesystem persistence for package installs, etc.
+filesystem:
+  persistent: true
+
+environment:
+  PASSWORD: mypassword
+  SUDO_PASSWORD: mypassword
+
+permissions:
+  network:
+    internet: allow
+    allowed_domains:
+      - github.com
+      - npmjs.org
+      - pypi.org
+
+app_config:
+  extensions:
+    - ms-python.python
+    - golang.go
+  settings:
+    theme: dark
+    font_size: 14

@@ -4,16 +4,18 @@ import (
 	"context"
 	"log"
 
-	"piccolod/internal/api" // Fictional import path
-
-	"github.com/docker/docker/client"
+	"piccolod/internal/api"
 )
 
-type Manager struct{ dockerClient *client.Client }
+// Manager handles container lifecycle using Podman
+type Manager struct {
+	// Future: Podman client or direct podman CLI integration
+	// podmanClient *podman.Client
+}
 
 func NewManager() (*Manager, error) {
-	// In a real implementation, we would use a proper Docker client.
-	log.Println("INFO: Container Manager initialized (placeholder)")
+	// In a real implementation, we would use Podman client/CLI
+	log.Println("INFO: Container Manager initialized with Podman backend (placeholder)")
 	return &Manager{}, nil
 }
 

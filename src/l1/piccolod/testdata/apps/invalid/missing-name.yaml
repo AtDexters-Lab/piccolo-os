@@ -1,0 +1,2 @@
+# Missing required 'name' field
+image: nginx:latest
