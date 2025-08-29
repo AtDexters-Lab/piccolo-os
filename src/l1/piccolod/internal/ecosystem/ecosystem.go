@@ -1,10 +1,17 @@
-package server
+package ecosystem
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
+	"piccolod/internal/app"
+	"piccolod/internal/backup"
+	"piccolod/internal/container"
+	"piccolod/internal/federation"
+	"piccolod/internal/installer"
+	"piccolod/internal/network"
+	"piccolod/internal/storage"
+	"piccolod/internal/trust"
+	"piccolod/internal/update"
 
 	"golang.org/x/sys/unix"
 )
@@ -32,85 +39,44 @@ type ReadinessResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
-// handleReadinessCheck provides a simple boolean health check for systemd/K8s
-func (s *Server) handleReadinessCheck() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+type Manager struct {
+	containerManager  *container.Manager
+	appManager        *app.FSManager
+	storageManager    *storage.Manager
+	trustAgent        *trust.Agent
+	installer         *installer.Installer
+	updateManager     *update.Manager
+	networkManager    *network.Manager
+	backupManager     *backup.Manager
+	federationManager *federation.Manager
+}
 
-		// Reuse the same ecosystem logic internally
-		ecosystemResponse := s.runEcosystemChecks()
-
-		var ready bool
-		var statusCode int
-
-		// Convert ecosystem status to simple boolean
-		switch ecosystemResponse.Overall {
-		case "healthy", "degraded":
-			ready = true
-			statusCode = http.StatusOK // 200
-		case "unhealthy":
-			ready = false
-			statusCode = http.StatusServiceUnavailable // 503
-		default:
-			ready = false
-			statusCode = http.StatusInternalServerError // 500
-		}
-
-		response := ReadinessResponse{
-			Ready:   ready,
-			Status:  ecosystemResponse.Overall,
-			Message: ecosystemResponse.Summary,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.WriteHeader(statusCode)
-
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			http.Error(w, "Failed to encode readiness response", http.StatusInternalServerError)
-		}
+func NewManager(
+	containerManager *container.Manager,
+	appManager *app.FSManager,
+	storageManager *storage.Manager,
+	trustAgent *trust.Agent,
+	installer *installer.Installer,
+	updateManager *update.Manager,
+	networkManager *network.Manager,
+	backupManager *backup.Manager,
+	federationManager *federation.Manager,
+) *Manager {
+	return &Manager{
+		containerManager:  containerManager,
+		appManager:        appManager,
+		storageManager:    storageManager,
+		trustAgent:        trustAgent,
+		installer:         installer,
+		updateManager:     updateManager,
+		networkManager:    networkManager,
+		backupManager:     backupManager,
+		federationManager: federationManager,
 	}
 }
 
-// handleEcosystemTest performs comprehensive environment validation
-func (s *Server) handleEcosystemTest() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		response := s.runEcosystemChecks()
-
-		// Set appropriate HTTP status code based on health status
-		// This is CRITICAL for MicroOS rollback detection
-		var statusCode int
-		switch response.Overall {
-		case "healthy":
-			statusCode = http.StatusOK // 200
-		case "degraded":
-			statusCode = http.StatusOK // 200 - degraded still works
-		case "unhealthy":
-			statusCode = http.StatusServiceUnavailable // 503
-		default:
-			statusCode = http.StatusInternalServerError // 500
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-cache") // Prevent caching for health checks
-		w.WriteHeader(statusCode)
-
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			http.Error(w, "Failed to encode ecosystem test results", http.StatusInternalServerError)
-		}
-	}
-}
-
-// runEcosystemChecks executes all environment validation tests
-func (s *Server) runEcosystemChecks() EcosystemResponse {
+// RunEcosystemChecks executes all environment validation tests
+func (s *Manager) RunEcosystemChecks() EcosystemResponse {
 	var checks []EcosystemCheck
 	var failCount, warnCount int
 
@@ -196,7 +162,7 @@ func (s *Server) runEcosystemChecks() EcosystemResponse {
 }
 
 // checkProcessIdentity validates process user, PID, and basic runtime state
-func (s *Server) checkProcessIdentity() EcosystemCheck {
+func (s *Manager) checkProcessIdentity() EcosystemCheck {
 	uid := os.Getuid()
 	gid := os.Getgid()
 
@@ -218,7 +184,7 @@ func (s *Server) checkProcessIdentity() EcosystemCheck {
 }
 
 // checkFileSystemAccess validates access to essential directories
-func (s *Server) checkFileSystemAccess() EcosystemCheck {
+func (s *Manager) checkFileSystemAccess() EcosystemCheck {
 	requiredPaths := []string{
 		"/run", // MicroOS uses /run instead of /var/run
 		"/var/log",
@@ -273,7 +239,7 @@ func (s *Server) checkFileSystemAccess() EcosystemCheck {
 }
 
 // checkDeviceAccess validates access to hardware devices
-func (s *Server) checkDeviceAccess() EcosystemCheck {
+func (s *Manager) checkDeviceAccess() EcosystemCheck {
 	var available, unavailable []string
 
 	// Check TPM device
@@ -331,7 +297,7 @@ func (s *Server) checkDeviceAccess() EcosystemCheck {
 }
 
 // checkDockerAccess validates Podman container runtime socket accessibility
-func (s *Server) checkDockerAccess() EcosystemCheck {
+func (s *Manager) checkDockerAccess() EcosystemCheck {
 	podmanSocket := "/run/podman/podman.sock"
 
 	if _, err := os.Stat(podmanSocket); os.IsNotExist(err) {
@@ -361,7 +327,7 @@ func (s *Server) checkDockerAccess() EcosystemCheck {
 }
 
 // checkNetworkAccess validates network capabilities
-func (s *Server) checkNetworkAccess() EcosystemCheck {
+func (s *Manager) checkNetworkAccess() EcosystemCheck {
 	// Test if we can bind to port 80 (we're already running on it)
 	// This is a basic check - more sophisticated network tests could be added
 	return EcosystemCheck{
@@ -373,7 +339,7 @@ func (s *Server) checkNetworkAccess() EcosystemCheck {
 }
 
 // checkManagerComponents validates that all manager components initialized properly
-func (s *Server) checkManagerComponents() EcosystemCheck {
+func (s *Manager) checkManagerComponents() EcosystemCheck {
 	var healthy, unhealthy []string
 
 	// Check each manager component
@@ -414,7 +380,7 @@ func (s *Server) checkManagerComponents() EcosystemCheck {
 }
 
 // getPermissionInfo returns key permission and capability information
-func (s *Server) getPermissionInfo() map[string]string {
+func (s *Manager) getPermissionInfo() map[string]string {
 	info := make(map[string]string)
 
 	info["uid"] = "0" // We know we're root if we got this far

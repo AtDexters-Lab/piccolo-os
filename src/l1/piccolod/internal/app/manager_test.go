@@ -37,6 +37,11 @@ func (m *MockContainerManager) CreateContainer(ctx context.Context, spec contain
 	if m.createError != nil {
 		return "", m.createError
 	}
+	
+	// Initialize containers map if nil (safety check)
+	if m.containers == nil {
+		m.containers = make(map[string]*MockContainer)
+	}
 
 	containerID := generateMockContainerID(m.nextID)
 	m.nextID++

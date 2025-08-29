@@ -35,6 +35,15 @@ func ParseAppDefinition(content []byte) (*api.AppDefinition, error) {
 	return &app, nil
 }
 
+// SerializeAppDefinition serializes AppDefinition to YAML bytes
+func SerializeAppDefinition(app *api.AppDefinition) ([]byte, error) {
+	data, err := yaml.Marshal(app)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal YAML: %w", err)
+	}
+	return data, nil
+}
+
 // SetDefaults sets default values for AppDefinition fields
 func SetDefaults(app *api.AppDefinition) {
 	// Default type is "user"
