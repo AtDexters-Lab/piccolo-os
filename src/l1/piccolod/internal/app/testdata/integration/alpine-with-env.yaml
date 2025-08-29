@@ -1,0 +1,7 @@
+name: alpine-env-test
+image: docker.io/library/alpine:latest
+type: user
+environment:
+  TEST_MODE: integration
+  DEBUG_LEVEL: "3"
+  APP_CONFIG: /etc/app/config.json

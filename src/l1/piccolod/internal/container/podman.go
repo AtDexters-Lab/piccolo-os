@@ -8,6 +8,11 @@ import (
 	"strings"
 )
 
+// ErrContainerNotFound returns an error for when a container is not found
+func ErrContainerNotFound(containerID string) error {
+	return fmt.Errorf("container not found: %s", containerID)
+}
+
 // PodmanCLI provides safe Podman CLI integration with injection prevention
 type PodmanCLI struct{}
 
