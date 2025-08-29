@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Piccolo OS - Container Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'piccolo': {
+                            50: '#eff6ff',
+                            500: '#2563eb',
+                            600: '#1d4ed8',
+                            700: '#1e40af',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="app">
+        <!-- Loading state -->
+        <div id="loading" class="min-h-screen flex flex-col items-center justify-center bg-white">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-piccolo-500 mb-4"></div>
+            <p class="text-gray-600 text-lg">Loading Piccolo OS...</p>
+        </div>
+
+        <!-- Error state -->
+        <div id="error" class="min-h-screen flex items-center justify-center bg-gray-50" style="display: none;">
+            <div class="bg-white rounded-xl shadow-lg p-8 max-w-md mx-4 text-center">
+                <div class="text-red-500 text-5xl mb-4">⚠️</div>
+                <h2 class="text-xl font-bold text-gray-900 mb-2">Connection Error</h2>
+                <p id="error-message" class="text-gray-600 mb-6">Unable to connect to Piccolo OS API</p>
+                <button onclick="window.location.reload()" class="bg-piccolo-500 hover:bg-piccolo-600 text-white px-6 py-2 rounded-lg transition-colors">Retry</button>
+            </div>
+        </div>
+
+        <!-- Main application -->
+        <div id="main-app" class="min-h-screen bg-gray-50" style="display: none;">
+            <!-- Header -->
+            <header class="bg-white border-b border-gray-200 sticky top-0 z-40">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div class="flex justify-between items-center py-4">
+                        <div class="flex items-center space-x-3">
+                            <h1 class="text-2xl font-bold text-gray-900 flex items-center">
+                                <span class="text-3xl mr-2">🏠</span>
+                                Piccolo OS
+                            </h1>
+                            <span id="version-badge" class="bg-piccolo-500 text-white text-xs font-medium px-2 py-1 rounded-full">v-.-.-</span>
+                        </div>
+                        <div id="connection-status" class="flex items-center space-x-2">
+                            <div class="w-2 h-2 rounded-full status-dot"></div>
+                            <span class="text-sm text-gray-600">Connecting...</span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Navigation -->
+            <nav class="bg-white border-b border-gray-200">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div class="flex space-x-8">
+                        <button class="nav-btn border-b-2 border-piccolo-500 text-piccolo-600 py-4 px-1 text-sm font-medium" data-view="apps" onclick="showView('apps')">
+                            <span class="mr-2">📱</span>Applications
+                        </button>
+                        <button class="nav-btn border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 py-4 px-1 text-sm font-medium transition-colors" data-view="containers" onclick="showView('containers')">
+                            <span class="mr-2">🐳</span>Containers
+                        </button>
+                        <button class="nav-btn border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 py-4 px-1 text-sm font-medium transition-colors" data-view="health" onclick="showView('health')">
+                            <span class="mr-2">❤️</span>System Health
+                        </button>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- Main content area -->
+            <main class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+                <!-- Applications View -->
+                <div id="apps-view" class="view active">
+                    <div class="flex justify-between items-center mb-8">
+                        <h2 class="text-3xl font-bold text-gray-900">Applications</h2>
+                        <button onclick="showInstallDialog()" class="bg-piccolo-500 hover:bg-piccolo-600 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center space-x-2 shadow-sm">
+                            <span class="text-lg">➕</span>
+                            <span>Install App</span>
+                        </button>
+                    </div>
+                    
+                    <div id="apps-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div class="col-span-full text-center py-12">
+                            <div class="text-6xl mb-4">📱</div>
+                            <p class="text-xl text-gray-600 mb-2">No applications installed yet.</p>
+                            <p class="text-gray-500">Install your first app to get started!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Containers View -->
+                <div id="containers-view" class="view">
+                    <div class="mb-8">
+                        <h2 class="text-3xl font-bold text-gray-900">Container Management</h2>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm p-8 text-center">
+                        <div class="text-6xl mb-4">🐳</div>
+                        <p class="text-gray-600">Container management coming soon...</p>
+                    </div>
+                </div>
+
+                <!-- Health View -->
+                <div id="health-view" class="view">
+                    <div class="flex justify-between items-center mb-8">
+                        <h2 class="text-3xl font-bold text-gray-900">System Health</h2>
+                        <button onclick="refreshHealth()" class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center space-x-2 shadow-sm">
+                            <span>🔄</span>
+                            <span>Refresh</span>
+                        </button>
+                    </div>
+                    <div id="health-dashboard" class="space-y-6">
+                        <div class="flex justify-center py-12">
+                            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-piccolo-500"></div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Install App Dialog -->
+    <div id="install-dialog" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" style="display: none;">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-screen overflow-y-auto">
+            <div class="flex items-center justify-between p-6 border-b border-gray-200">
+                <h3 class="text-xl font-semibold text-gray-900">Install Application</h3>
+                <button onclick="closeInstallDialog()" class="text-gray-400 hover:text-gray-600 p-2">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="p-6">
+                <div class="mb-6">
+                    <label for="app-yaml" class="block text-sm font-medium text-gray-700 mb-2">Application Definition (app.yaml)</label>
+                    <textarea 
+                        id="app-yaml" 
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-piccolo-500 focus:border-piccolo-500 font-mono text-sm resize-none"
+                        placeholder="Paste your app.yaml content here...&#10;&#10;Example:&#10;name: nginx&#10;image: docker.io/nginx:latest&#10;subdomain: web&#10;ports:&#10;  http:&#10;    container: 80&#10;    host: 8080"
+                        rows="18"></textarea>
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button onclick="closeInstallDialog()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+                        Cancel
+                    </button>
+                    <button onclick="installApp()" class="px-6 py-2 text-sm font-medium text-white bg-piccolo-500 hover:bg-piccolo-600 rounded-lg transition-colors flex items-center space-x-2">
+                        <span class="install-btn-text">Install App</span>
+                        <div class="install-btn-spinner animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" style="display: none;"></div>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast notifications -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

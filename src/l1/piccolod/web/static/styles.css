@@ -1,0 +1,79 @@
+/* Piccolo OS Web UI - Minimal Custom Styles */
+
+/* Custom CSS for what Tailwind doesn't cover */
+.view {
+    display: none;
+}
+
+.view.active {
+    display: block;
+}
+
+/* Make sure the status dots work properly */
+.status-dot {
+    transition: all 0.2s ease;
+}
+
+/* Custom focus styles for form elements */
+textarea:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* Smooth slide animations for toasts */
+.toast {
+    transition: transform 0.3s ease-in-out;
+}
+
+/* Loading animation keyframes (in case Tailwind animate-spin doesn't work) */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.custom-spin {
+    animation: spin 1s linear infinite;
+}
+
+/* Ensure proper text selection and cursor behavior */
+.font-mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Monaco, Inconsolata, "Roboto Mono", monospace;
+}
+
+/* Custom scrollbar for textarea */
+textarea {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+textarea::-webkit-scrollbar {
+    width: 8px;
+}
+
+textarea::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+}
+
+textarea::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 4px;
+}
+
+textarea::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+}
+
+/* Ensure proper mobile viewport handling */
+@media (max-width: 640px) {
+    .max-w-48 {
+        max-width: 8rem;
+    }
+}
+
+/* Print styles - hide non-essential elements */
+@media print {
+    .fixed, .sticky {
+        display: none !important;
+    }
+}

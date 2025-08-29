@@ -180,13 +180,20 @@ func (s *GinServer) setupGinRoutes() {
 	s.router = r
 }
 
-// Placeholder handlers - we'll implement these next
+// Root handler - serve web UI or API info based on Accept header
 func (s *GinServer) handleGinRoot(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Piccolo OS Container Platform API",
-		"version": s.version,
-		"status":  "running",
-	})
+	// Check if this is an API request (Accept: application/json)
+	if c.GetHeader("Accept") == "application/json" {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Piccolo OS Container Platform API",
+			"version": s.version,
+			"status":  "running",
+		})
+		return
+	}
+	
+	// Otherwise serve the web UI
+	c.File("./web/index.html")
 }
 
 func (s *GinServer) handleGinContainers(c *gin.Context) {
@@ -270,13 +277,9 @@ func (s *GinServer) setupStaticRoutes(r *gin.Engine) {
 	r.GET("/apps/*path", s.handleWebUI)
 }
 
-// handleWebUI serves the web UI (placeholder for future implementation)
+// handleWebUI serves the web UI
 func (s *GinServer) handleWebUI(c *gin.Context) {
-	// TODO: Serve actual web UI
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Web UI not yet implemented",
-		"path":    c.Request.URL.Path,
-		"api_url": "/api/v1",
-		"docs":    "/api/v1/docs", // Future: API documentation
-	})
+	// Serve the main HTML file for all web UI routes
+	// This enables client-side routing for the SPA
+	c.File("./web/index.html")
 }
