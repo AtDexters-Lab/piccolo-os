@@ -43,7 +43,7 @@ go test -v ./internal/mdns        # Verbose output
 go test -run TestSpecificFunction # Run specific test
 ```
 
-The test suite is primarily in the `internal/mdns` package with comprehensive unit and integration tests.
+The test suite includes 15 test files across multiple packages, with the most comprehensive test coverage in `internal/mdns` (8 test files covering security, integration, protocol, and resilience testing). The `internal/app` package also has solid test coverage with unit and integration tests.
 
 ### Development
 
@@ -51,6 +51,23 @@ The test suite is primarily in the `internal/mdns` package with comprehensive un
 go mod tidy                       # Clean dependencies
 go fmt ./...                      # Format code
 go vet ./...                      # Static analysis
+```
+
+### Testing Specific Packages
+
+Due to the distributed test coverage across packages, focus testing on:
+
+```bash
+# mDNS package (most comprehensive tests)
+go test -v ./internal/mdns/...    # All mDNS tests
+go test -v ./internal/mdns -run TestSecurity  # Security-specific tests
+
+# App management (core functionality)
+go test -v ./internal/app/...     # App lifecycle tests
+go test -v ./internal/app -run TestIntegration  # Integration tests
+
+# Server endpoints  
+go test -v ./internal/server/...  # Gin handler tests
 ```
 
 ## Architecture
@@ -74,8 +91,8 @@ The server initializes and manages these core managers:
 
 ### Entry Point
 
-- `cmd/piccolod/main.go` - Simple entry point that creates and starts the server
-- `internal/server/server.go` - Main server initialization and component coordination
+- `cmd/piccolod/main.go` - Simple entry point that creates and starts the Gin server
+- `internal/server/gin_server.go` - Main Gin-based server initialization and component coordination
 
 ### HTTP API
 
@@ -140,10 +157,13 @@ listeners:
 
 ### Key Patterns
 
-- Each manager is initialized in `server.New()` and follows a consistent interface pattern
-- The server uses systemd notify protocol for proper service lifecycle management
-- mDNS manager handles service discovery and must start successfully for the server to run
+- Each manager is initialized in `NewGinServer()` and follows a consistent interface pattern
+- The server uses systemd notify protocol for proper service lifecycle management  
+- mDNS manager handles service discovery and must start successfully for the server to run (critical dependency)
 - All managers are designed to be independently testable
+- **Gin Framework**: Uses Gin web framework with middleware for CORS, security headers, logging, and recovery
+- **Manager Composition**: EcosystemManager aggregates all other managers for unified health checks
+- **Filesystem State**: AppManager uses filesystem-based state management for persistence
 - **Security Model**: Two-level encryption (TPM + user passphrase), ephemeral in-memory keys
 - **Storage Architecture**: Apps.db on federated storage tracks all application state
 - **Container Security**: All containers forced to bind to 127.0.0.1 only (fortress architecture)
