@@ -10,8 +10,10 @@ This is the `piccolod` Go service - Layer 1 of the Piccolo OS architecture. It's
 
 - **Stateless Device Model**: Applications and data persist on federated storage, making the physical device recoverable
 - **Two-Level Security**: TPM-based device key + user passphrase for data encryption
-- **Unified Access**: Supports both local (`piccolo.local:PORT`) and remote (`app.user.piccolospace.com`) access
-- **Container Native**: All applications run as Docker containers with strict sandboxing
+- **Service-Oriented Architecture**: Apps expose named services, system auto-allocates ports
+- **Three-Layer Security**: Container (internal) → Host binding (127.0.0.1) → Public proxy (0.0.0.0)
+- **Unified Access**: Supports both local (auto-allocated ports) and remote (`app.user.piccolospace.com:port`) access
+- **Container Native**: All applications run as Podman containers with strict sandboxing
 
 ## Development Commands
 
@@ -57,7 +59,10 @@ go vet ./...                      # Static analysis
 
 The server initializes and manages these core managers:
 
-- `container.Manager` - Docker container operations
+- `container.Manager` - Podman container operations with security-first defaults
+- `app.FSManager` - Application lifecycle with filesystem-based state management
+- `ServiceManager` - Service-oriented port allocation and discovery (planned)
+- `ProxyManager` - Three-layer proxy system with middleware (planned)
 - `storage.Manager` - Storage management 
 - `network.Manager` - Network configuration
 - `trust.Agent` - Security and trust operations
@@ -77,25 +82,50 @@ The server initializes and manages these core managers:
 The server runs on port 80 and provides REST endpoints:
 
 **Current Implementation:**
+- `/` - Web UI (SPA with Tailwind CSS)
 - `/api/v1/containers` - Container management
+- `/api/v1/apps` - App management (install, list, start/stop, uninstall)
 - `/api/v1/health` - Full ecosystem health details
 - `/api/v1/health/ready` - Simple readiness check
 - `/version` - Version information
 
-**Planned App Platform API (from PRD):**
-- `POST /api/v1/apps` - Install/register new app from app.yaml
-- `GET /api/v1/apps` - List all apps and their status
-- `DELETE /api/v1/apps/{id}` - Uninstall app
-- `POST /api/v1/apps/{id}/start|stop` - Control app state
+**Service-Oriented API (planned):**
+- `GET /api/v1/services` - List all services across apps
+- `GET /api/v1/apps/{app}/services` - List services for specific app
+- `GET /api/v1/services/{service}` - Get specific service details
+- Service discovery endpoints for dynamic port allocation
 
 ### App Definition Format
 
 Applications are defined in `app.yaml` files with:
+
+**Legacy Structure (current):**
 - `name` - Application identifier
 - `image` - Container image
 - `subdomain` - For remote access routing
 - `type` - `system` or `user` (determines boot order)
-- Optional: `ports`, `volumes`, `environment`
+- `ports` - Port mappings (host:container)
+
+**Service-Oriented Structure (planned):**
+```yaml
+name: myapp
+subdomain: myapp
+listeners:
+  - name: frontend        # Service name
+    guest_port: 80        # Port inside container
+    protocol: http        # Protocol hint for optimization
+    flow: tcp            # tcp (piccolod handles TLS) | tls (passthrough)
+    middleware: [auth, rate_limit]
+```
+
+**Three-Layer Port Allocation:**
+- **Layer 1**: Container internal ports (80, 8080)
+- **Layer 2**: Host security binding (127.0.0.1:15001, 127.0.0.1:15002)  
+- **Layer 3**: Public proxy listeners (0.0.0.0:35001, 0.0.0.0:35002)
+
+**Access Patterns:**
+- **Local**: `http://localhost:35001` (public proxy port)
+- **Remote**: `https://myapp.user.piccolospace.com:80` (service-based routing)
 
 ### Boot & Unlock Sequence (from PRD)
 
@@ -116,6 +146,9 @@ Applications are defined in `app.yaml` files with:
 - All managers are designed to be independently testable
 - **Security Model**: Two-level encryption (TPM + user passphrase), ephemeral in-memory keys
 - **Storage Architecture**: Apps.db on federated storage tracks all application state
+- **Container Security**: All containers forced to bind to 127.0.0.1 only (fortress architecture)
+- **Service Discovery**: Apps expose named services, system handles all port allocation
+- **Proxy Architecture**: Three-layer routing with middleware processing capabilities
 
 ### Package Structure
 

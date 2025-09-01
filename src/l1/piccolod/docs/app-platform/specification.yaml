@@ -75,24 +75,150 @@ subdomain: code
 type: user
 
 # =============================================================================
-# NETWORK CONFIGURATION
+# SERVICE-ORIENTED NETWORK CONFIGURATION (Three-Layer Architecture)
 # =============================================================================
 
-ports:
-  # Named port mappings using OCI-standard syntax
-  # Format: semantic_name -> {container: port, host: port}
+listeners:
+  # Service-oriented configuration - system automatically allocates all host ports
+  # Each listener represents a named service that the app exposes
+  # 
+  # Three-Layer Port Architecture:
+  # Layer 1: Container internal ports (guest_port)
+  # Layer 2: Host security binding (127.0.0.1:auto-allocated) 
+  # Layer 3: Public proxy listeners (0.0.0.0:auto-allocated)
   
-  web:
-    container: 8080        # Port inside container
-    host: 3000             # Port on host for local access (piccolo.local:3000)
+  - name: web-frontend     # Service name - used for identification and discovery
+    guest_port: 8080       # Port inside container (Layer 1)
+    # host_port: REMOVED - system auto-allocates both security and proxy ports
     
-  ssh:
-    container: 22          # SSH access to development environment
-    host: 2222             # Host port 2222
+    # Traffic flow handling
+    flow: tcp              # tcp | tls
+    # - tcp: Piccolo terminates TLS and can apply protocol-specific processing
+    # - tls: Direct TLS passthrough, app handles TLS termination
     
-  debug:
-    container: 5005        # Java/Node.js debug port
-    host: 5005             # Same port on host for simplicity
+    # Protocol hint for processing optimization
+    protocol: http         # http | websocket | raw | postgresql | smtp | etc.
+    # This enables protocol-specific optimizations and monitoring
+    
+    # Middleware pipeline (only available when flow: tcp)
+    protocol_middleware:
+      - name: enforce_private_auth
+        params:
+          auth_provider: oauth2         # session | oauth2 | jwt | api_key
+          required_scopes: ["openid", "profile"]
+          
+      - name: csrf_protection
+        params:
+          cookie_name: "_piccolo_csrf"
+          
+      - name: rate_limit
+        params:
+          requests_per_minute: 200
+          burst_limit: 50
+          
+      - name: request_logging
+        params:
+          log_level: info
+          include_headers: ["User-Agent", "X-Forwarded-For"]
+  
+  - name: ssh-dev
+    guest_port: 22         # SSH service inside container
+    flow: tcp              # Piccolo handles TLS termination
+    protocol: ssh          # Protocol hint for monitoring
+    protocol_middleware:
+      - name: enforce_private_auth
+        params:
+          auth_provider: session
+      - name: connection_limit
+        params:
+          max_connections_per_ip: 3
+          max_total_connections: 10
+  
+  - name: api-backend
+    guest_port: 9443       # API service inside container
+    flow: tls              # Direct TLS passthrough - app manages TLS
+    protocol: http         # Hint only, no processing applied
+    # No middleware - app handles everything including TLS and auth
+    
+  - name: debug-port
+    guest_port: 5005       # Debug service inside container
+    flow: tcp              # Piccolo terminates TLS
+    protocol: raw          # Raw TCP proxy, no HTTP processing
+    protocol_middleware:
+      - name: enforce_private_auth
+        params:
+          auth_provider: session
+      - name: ip_whitelist
+        params:
+          allowed_ips: ["127.0.0.1", "192.168.1.0/24"]
+
+# =============================================================================
+# SERVICE DISCOVERY & ACCESS PATTERNS
+# =============================================================================
+
+# With service-oriented architecture, apps are accessed via:
+#
+# Remote Access (via Nexus):
+#   https://dev-workspace.user.piccolospace.com:8080  # web-frontend service
+#   https://dev-workspace.user.piccolospace.com:22    # ssh-dev service  
+#   https://dev-workspace.user.piccolospace.com:9443  # api-backend service
+#
+# Local Access (via auto-allocated proxy ports):
+#   http://localhost:35001   # web-frontend service (auto-allocated)
+#   tcp://localhost:35002    # ssh-dev service (auto-allocated)
+#   https://localhost:35003  # api-backend service (auto-allocated)
+#
+# Service Discovery API:
+#   GET /api/v1/services                    # List all services
+#   GET /api/v1/apps/dev-workspace/services # List services for this app
+#   GET /api/v1/services/web-frontend       # Get specific service details
+#
+# Example Service Discovery Response:
+# {
+#   "app": "dev-workspace",
+#   "subdomain": "code", 
+#   "services": {
+#     "web-frontend": {
+#       "guest_port": 8080,
+#       "public_port": 35001,
+#       "local_url": "http://localhost:35001",
+#       "remote_url": "https://code.user.piccolospace.com:8080",
+#       "protocol": "http",
+#       "status": "running"
+#     }
+#   }
+# }
+
+# =============================================================================
+# MIDDLEWARE EXTENSIBILITY
+# =============================================================================
+
+# The protocol_middleware system is designed for extensibility:
+# - New middleware types can be added without breaking existing configurations
+# - Parameter structures are flexible and middleware-specific
+# - Custom middleware can be implemented as plugins
+# - Built-in middleware will continue to evolve with new options
+#
+# Middleware Processing Order:
+# 1. Security middleware (auth, CSRF, rate limiting)
+# 2. Request modification middleware (headers, logging)
+# 3. Protocol-specific middleware (WebSocket handling, etc.)
+# 4. Proxy to container
+#
+# Available Middleware (evolving list):
+# - enforce_private_auth: Owner authentication
+# - enforce_protected_auth: Multi-user authentication  
+# - csrf_protection: Cross-site request forgery protection
+# - rate_limit: Request and connection rate limiting
+# - ddos_protection: DDoS attack mitigation
+# - ip_whitelist: IP address filtering
+# - security_headers: HTTP security header injection
+# - request_logging: Request/response logging and metrics
+# - connection_limit: Connection count management
+# - websocket_rate_limit: WebSocket-specific rate limiting
+# - metrics_auth: API key authentication for metrics endpoints
+#
+# Custom middleware can be loaded via plugins in future versions
 
 # =============================================================================
 # STORAGE CONFIGURATION (Sandboxed Architecture)

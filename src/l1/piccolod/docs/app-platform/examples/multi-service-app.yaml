@@ -1,0 +1,210 @@
+# multi-service-app.yaml
+# 
+# Advanced example demonstrating service-oriented three-layer architecture
+# with multiple listeners, different security policies, and traffic flows
+#
+# This example shows a complex e-commerce application with:
+# - Public storefront (rate limited, DDoS protection) 
+# - Private admin panel (session auth, CSRF protection)
+# - High-performance API (app-managed TLS)
+# - Database port (TLS passthrough)  
+# - WebSocket gaming (connection limits)
+#
+# SERVICE-ORIENTED ARCHITECTURE:
+# Each service gets auto-allocated ports across three layers:
+# Layer 1: Container internal ports (8080, 8443, etc.)
+# Layer 2: Security bindings (127.0.0.1:auto-allocated)
+# Layer 3: Public proxy listeners (0.0.0.0:auto-allocated) 
+#
+# Access via: https://shop.user.piccolospace.com:8080 (storefront)
+#            https://shop.user.piccolospace.com:8443 (admin)
+#            etc.
+
+name: e-commerce-platform
+image: my-company/ecommerce:v2.1
+
+# Global subdomain for the main service
+subdomain: shop
+
+listeners:
+  # =============================================================================
+  # PUBLIC STOREFRONT - High traffic, public access, rate limited
+  # =============================================================================
+  - name: storefront
+    guest_port: 8080       # App serves on port 8080 (Layer 1)
+    flow: tcp              # Piccolo handles TLS termination
+    protocol: http         # Enable HTTP-specific processing
+    protocol_middleware:
+      - name: public_rate_limit
+        params:
+          requests_per_minute: 1000
+          burst_limit: 100
+          per_ip_limit: 60    # Individual IP limit
+          
+      - name: ddos_protection
+        params:
+          max_connections_per_ip: 20
+          block_duration: 300  # 5 minutes
+          
+      - name: security_headers
+        params:
+          hsts: true
+          content_security_policy: "default-src 'self'"
+          
+      - name: request_logging
+        params:
+          log_level: info
+          sample_rate: 0.1    # Log 10% of requests for performance
+
+  # =============================================================================
+  # ADMIN PANEL - Private access, full security pipeline
+  # =============================================================================
+  - name: admin-panel
+    guest_port: 8080       # Same container, different routes
+    flow: tcp              # Piccolo handles TLS
+    protocol: http
+    protocol_middleware:
+      - name: enforce_private_auth
+        params:
+          auth_provider: session
+          require_2fa: true
+          session_timeout: 3600  # 1 hour
+          
+      - name: csrf_protection
+        params:
+          cookie_name: "_admin_csrf"
+          strict_referer: true
+          
+      - name: admin_audit_logging
+        params:
+          log_all_requests: true
+          log_request_body: true  # For audit compliance
+          
+      - name: ip_whitelist
+        params:
+          allowed_ips: 
+            - "192.168.1.0/24"    # Local network only
+            - "10.0.0.0/8"        # VPN network
+          
+      - name: rate_limit
+        params:
+          requests_per_minute: 300  # Lower limit for admin
+          burst_limit: 20
+
+  # =============================================================================
+  # HIGH-PERFORMANCE API - App manages TLS for performance
+  # =============================================================================
+  - name: api-backend
+    guest_port: 9443       # App handles TLS directly
+    flow: tls              # Direct passthrough - zero processing overhead
+    protocol: http         # Hint for monitoring only
+    # No middleware - app optimizes its own TLS and auth for performance
+
+  # =============================================================================
+  # PAYMENT WEBHOOK - External service integration
+  # =============================================================================
+  - name: payment-webhook
+    guest_port: 7000
+    flow: tls              # Payment processor needs direct TLS
+    protocol: http
+    # External payment processors connect here
+    # App validates webhook signatures internally
+
+  # =============================================================================
+  # WEBSOCKET GAMING - Real-time multiplayer features
+  # =============================================================================
+  - name: game-websocket
+    guest_port: 6000
+    flow: tcp              # Piccolo handles TLS for WebSocket
+    protocol: websocket    # Enable WebSocket-specific optimizations
+    protocol_middleware:
+      - name: websocket_rate_limit
+        params:
+          connections_per_ip: 5
+          messages_per_minute: 6000
+          max_message_size: 1024
+          
+      - name: game_auth
+        params:
+          auth_provider: jwt
+          token_header: "X-Game-Token"
+          
+      - name: connection_monitoring
+        params:
+          track_connection_duration: true
+          alert_on_long_connections: 7200  # 2 hours
+
+  # =============================================================================
+  # DATABASE PORT - Direct TLS for maximum performance
+  # =============================================================================
+  - name: postgres
+    guest_port: 5432
+    flow: tls              # Database handles TLS directly
+    protocol: postgresql   # Monitoring hint
+    # Direct connection for other apps and external tools
+
+  # =============================================================================
+  # METRICS ENDPOINT - Internal monitoring
+  # =============================================================================
+  - name: metrics
+    guest_port: 9090
+    flow: tcp
+    protocol: http
+    protocol_middleware:
+      - name: metrics_auth
+        params:
+          auth_provider: api_key
+          api_key_header: "X-Metrics-Key"
+          
+      - name: ip_whitelist
+        params:
+          allowed_ips: ["127.0.0.1"]  # Localhost only
+
+# =============================================================================
+# STORAGE & RESOURCES
+# =============================================================================
+
+storage:
+  persistent:
+    database:
+      container: /var/lib/postgresql/data
+      size_limit: 100GB
+    uploads:
+      container: /app/uploads
+      size_limit: 50GB
+
+resources:
+  limits:
+    memory: 8GB
+    cpu: 4.0
+    storage: 200GB
+
+# =============================================================================
+# SECURITY PERMISSIONS
+# =============================================================================
+
+permissions:
+  network:
+    internet: allow        # E-commerce needs external APIs
+    local_network: allow
+    allowed_domains:
+      - "stripe.com"       # Payment processing
+      - "paypal.com"
+      - "cdn.jsdelivr.net" # CDN resources
+
+environment:
+  NODE_ENV: production
+  DATABASE_URL: postgresql://localhost:5432/ecommerce
+  REDIS_URL: redis://redis.piccolo.local:6379
+  STRIPE_API_KEY: "${STRIPE_API_KEY}"  # From secrets management
+
+# =============================================================================
+# MONITORING & HEALTH
+# =============================================================================
+
+healthcheck:
+  http:
+    path: /health
+    port: storefront      # Check main service health
+    timeout: 10s
+    retries: 3

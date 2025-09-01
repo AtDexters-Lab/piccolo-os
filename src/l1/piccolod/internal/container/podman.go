@@ -148,10 +148,10 @@ func (p *PodmanCLI) CreateContainer(ctx context.Context, spec ContainerCreateSpe
 		args = append(args, "--name", spec.Name)
 	}
 	
-	// Add port mappings
+	// Add port mappings - SECURITY: Force localhost binding for fortress architecture
 	for _, port := range spec.Ports {
 		args = append(args, "--publish", 
-			fmt.Sprintf("%d:%d", port.Host, port.Container))
+			fmt.Sprintf("127.0.0.1:%d:%d", port.Host, port.Container))
 	}
 	
 	// Add volume mappings
