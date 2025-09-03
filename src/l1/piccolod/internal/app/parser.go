@@ -46,38 +46,50 @@ func SerializeAppDefinition(app *api.AppDefinition) ([]byte, error) {
 
 // SetDefaults sets default values for AppDefinition fields
 func SetDefaults(app *api.AppDefinition) {
-	// Default type is "user"
-	if app.Type == "" {
-		app.Type = "user"
-	}
-	
-	// Default subdomain is the app name (if not specified)
-	if app.Subdomain == "" {
-		app.Subdomain = app.Name
-	}
+    // Default type is "user"
+    if app.Type == "" {
+        app.Type = "user"
+    }
+
+    // Default subdomain is the app name (if not specified)
+    if app.Subdomain == "" {
+        app.Subdomain = app.Name
+    }
+
+    // Listeners defaults
+    for i := range app.Listeners {
+        // Default flow is tcp
+        if strings.TrimSpace(app.Listeners[i].Flow) == "" {
+            app.Listeners[i].Flow = "tcp"
+        }
+        // Default protocol is raw
+        if strings.TrimSpace(app.Listeners[i].Protocol) == "" {
+            app.Listeners[i].Protocol = "raw"
+        }
+    }
 }
 
 // ValidateAppDefinition validates an AppDefinition struct
 func ValidateAppDefinition(app *api.AppDefinition) error {
-	// Validate name
-	if err := validateName(app.Name); err != nil {
-		return err
-	}
-	
-	// Validate image/build requirement
-	if err := validateImageOrBuild(app); err != nil {
-		return err
-	}
+    // Validate name
+    if err := validateName(app.Name); err != nil {
+        return err
+    }
+
+    // Validate image/build requirement
+    if err := validateImageOrBuild(app); err != nil {
+        return err
+    }
 	
 	// Validate type
 	if err := validateType(app.Type); err != nil {
 		return err
 	}
 	
-	// Validate ports
-	if err := validatePorts(app.Ports); err != nil {
-		return err
-	}
+    // Validate listeners (service-oriented)
+    if err := validateListeners(app.Listeners); err != nil {
+        return err
+    }
 	
 	// Validate storage
 	if err := validateStorage(app.Storage); err != nil {
@@ -94,7 +106,7 @@ func ValidateAppDefinition(app *api.AppDefinition) error {
 		return err
 	}
 	
-	return nil
+    return nil
 }
 
 // validateName validates app name follows naming conventions
@@ -155,37 +167,59 @@ func validateType(appType string) error {
 }
 
 // validatePorts validates port mappings
-func validatePorts(ports map[string]api.AppPort) error {
-	if ports == nil {
-		return nil // Ports are optional
-	}
-	
-	usedHostPorts := make(map[int]string)
-	
-	for name, port := range ports {
-		// Validate port name
-		if name == "" {
-			return fmt.Errorf("port name cannot be empty")
-		}
-		
-		// Validate container port
-		if port.Container < 1 || port.Container > 65535 {
-			return fmt.Errorf("container port must be between 1 and 65535 for port '%s'", name)
-		}
-		
-		// Validate host port
-		if port.Host < 1 || port.Host > 65535 {
-			return fmt.Errorf("host port must be between 1 and 65535 for port '%s'", name)
-		}
-		
-		// Check for host port conflicts
-		if existingName, exists := usedHostPorts[port.Host]; exists {
-			return fmt.Errorf("host port %d is used by both '%s' and '%s'", port.Host, existingName, name)
-		}
-		usedHostPorts[port.Host] = name
-	}
-	
-	return nil
+func validateListeners(listeners []api.AppListener) error {
+    if len(listeners) == 0 {
+        return fmt.Errorf("listeners are required; legacy ports are no longer supported")
+    }
+
+    names := make(map[string]struct{})
+    guestPorts := make(map[int]string)
+
+    for i, l := range listeners {
+        // name required
+        if strings.TrimSpace(l.Name) == "" {
+            return fmt.Errorf("listener[%d] name is required", i)
+        }
+        // unique name per app
+        if _, ok := names[l.Name]; ok {
+            return fmt.Errorf("duplicate listener name '%s'", l.Name)
+        }
+        names[l.Name] = struct{}{}
+
+        // guest_port required and valid
+        if l.GuestPort < 1 || l.GuestPort > 65535 {
+            return fmt.Errorf("listener '%s' guest_port must be between 1 and 65535", l.Name)
+        }
+        if existing, ok := guestPorts[l.GuestPort]; ok {
+            return fmt.Errorf("guest_port %d used by both '%s' and '%s'", l.GuestPort, existing, l.Name)
+        }
+        guestPorts[l.GuestPort] = l.Name
+
+        // flow default handled in SetDefaults; ensure value is one of tcp|tls if provided
+        flow := strings.ToLower(strings.TrimSpace(l.Flow))
+        if flow != "tcp" && flow != "tls" {
+            return fmt.Errorf("listener '%s' flow must be 'tcp' or 'tls'", l.Name)
+        }
+
+        // protocol is a hint; allow empty or known values
+        prot := strings.ToLower(strings.TrimSpace(l.Protocol))
+        switch prot {
+        case "", "raw", "http", "websocket":
+            // ok; empty normalized to raw by SetDefaults
+        default:
+            // Accept arbitrary token but keep it simple for now
+            // Return error to catch typos early
+            return fmt.Errorf("listener '%s' protocol '%s' not supported in v1", l.Name, l.Protocol)
+        }
+
+        // middleware entries: ensure names present
+        for j, m := range l.Middleware {
+            if strings.TrimSpace(m.Name) == "" {
+                return fmt.Errorf("listener '%s' middleware[%d] name is required", l.Name, j)
+            }
+        }
+    }
+    return nil
 }
 
 // validateStorage validates storage configuration

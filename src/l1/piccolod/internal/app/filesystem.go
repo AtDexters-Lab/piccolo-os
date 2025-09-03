@@ -20,10 +20,10 @@ const (
 
 // FilesystemStateManager manages app state using filesystem as source of truth
 type FilesystemStateManager struct {
-	stateDir string
-	appsDir  string
-	enabledDir string
-	cacheDir string
+    stateDir string
+    appsDir  string
+    enabledDir string
+    cacheDir string
 	
 	// In-memory cache for performance
 	cache   map[string]*AppInstance
@@ -153,13 +153,28 @@ func (fsm *FilesystemStateManager) loadAppFromDisk(appName string) (*AppInstance
 		Type:        appDef.Type,
 		Status:      metadata.Status,
 		ContainerID: metadata.ContainerID,
-		Ports:       appDef.Ports,
+		// Ports removed in listeners model
 		Environment: appDef.Environment,
 		CreatedAt:   metadata.CreatedAt,
 		UpdatedAt:   metadata.UpdatedAt,
 	}
 	
 	return app, nil
+}
+
+// GetAppDefinition reads and parses app.yaml for a given app name
+func (fsm *FilesystemStateManager) GetAppDefinition(name string) (*api.AppDefinition, error) {
+    appDir := filepath.Join(fsm.appsDir, name)
+    appDefPath := filepath.Join(appDir, "app.yaml")
+    data, err := os.ReadFile(appDefPath)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read app.yaml: %w", err)
+    }
+    appDef, err := ParseAppDefinition(data)
+    if err != nil {
+        return nil, fmt.Errorf("failed to parse app.yaml: %w", err)
+    }
+    return appDef, nil
 }
 
 // StoreApp saves app definition and metadata to filesystem

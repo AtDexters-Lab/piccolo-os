@@ -1,6 +1,9 @@
 name: alpine-env-test
 image: docker.io/library/alpine:latest
 type: user
+listeners:
+  - name: web
+    guest_port: 80
 environment:
   TEST_MODE: integration
   DEBUG_LEVEL: "3"

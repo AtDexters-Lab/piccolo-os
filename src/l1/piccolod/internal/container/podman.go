@@ -1,11 +1,11 @@
 package container
 
 import (
-	"context"
-	"fmt"
-	"os/exec"
-	"regexp"
-	"strings"
+    "context"
+    "fmt"
+    "os/exec"
+    "regexp"
+    "strings"
 )
 
 // ErrContainerNotFound returns an error for when a container is not found
@@ -258,6 +258,34 @@ func (p *PodmanCLI) RemoveContainer(ctx context.Context, containerID string) err
 	}
 	
 	return nil
+}
+
+// UpdatePublishAdd adds a port publish mapping to a running container
+func (p *PodmanCLI) UpdatePublishAdd(ctx context.Context, containerID string, hostBind, guestPort int) error {
+    if !isValidContainerID(containerID) { return fmt.Errorf("invalid container ID format: %s", containerID) }
+    if err := ValidatePort(hostBind); err != nil { return err }
+    if err := ValidatePort(guestPort); err != nil { return err }
+    mapping := fmt.Sprintf("127.0.0.1:%d:%d", hostBind, guestPort)
+    cmd := exec.CommandContext(ctx, "podman", "container", "update", "--publish-add", mapping, containerID)
+    output, err := cmd.CombinedOutput()
+    if err != nil {
+        return fmt.Errorf("podman update --publish-add failed: %w, output: %s", err, string(output))
+    }
+    return nil
+}
+
+// UpdatePublishRemove removes a port publish mapping from a running container
+func (p *PodmanCLI) UpdatePublishRemove(ctx context.Context, containerID string, hostBind, guestPort int) error {
+    if !isValidContainerID(containerID) { return fmt.Errorf("invalid container ID format: %s", containerID) }
+    if err := ValidatePort(hostBind); err != nil { return err }
+    if err := ValidatePort(guestPort); err != nil { return err }
+    mapping := fmt.Sprintf("127.0.0.1:%d:%d", hostBind, guestPort)
+    cmd := exec.CommandContext(ctx, "podman", "container", "update", "--publish-rm", mapping, containerID)
+    output, err := cmd.CombinedOutput()
+    if err != nil {
+        return fmt.Errorf("podman update --publish-rm failed: %w, output: %s", err, string(output))
+    }
+    return nil
 }
 
 // isValidContainerID validates container ID format

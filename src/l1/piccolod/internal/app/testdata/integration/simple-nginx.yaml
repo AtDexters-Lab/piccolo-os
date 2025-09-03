@@ -2,10 +2,11 @@ name: simple-nginx-integration
 image: docker.io/library/nginx:alpine
 type: user
 subdomain: nginx-test
-ports:
-  web:
-    container: 80
-    host: 8090
+listeners:
+  - name: web
+    guest_port: 80
+    flow: tcp
+    protocol: http
 environment:
   NGINX_HOST: localhost
   NGINX_PORT: "80"

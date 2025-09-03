@@ -14,6 +14,7 @@ import (
 	"piccolod/internal/api"
 	"piccolod/internal/app"
 	"piccolod/internal/container"
+    "piccolod/internal/services"
 )
 
 // TestGinAppAPI_Install tests POST /api/v1/apps endpoint with Gin
@@ -46,10 +47,11 @@ func TestGinAppAPI_Install(t *testing.T) {
 image: docker.io/library/nginx:alpine
 type: user
 subdomain: test-nginx
-ports:
-  web:
-    container: 80
-    host: 8080
+listeners:
+  - name: web
+    guest_port: 80
+    flow: tcp
+    protocol: http
 environment:
   NGINX_HOST: localhost
   NGINX_PORT: "80"`,
@@ -170,11 +172,12 @@ func TestGinAppAPI_List(t *testing.T) {
 	}
 	
 	// Install an app via the app manager directly
-	appDef := &api.AppDefinition{
-		Name:  "test-app",
-		Image: "nginx:alpine",
-		Type:  "user",
-	}
+    appDef := &api.AppDefinition{
+        Name:  "test-app",
+        Image: "nginx:alpine",
+        Type:  "user",
+        Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+    }
 	
 	_, err = server.appManager.Install(context.Background(), appDef)
 	if err != nil {
@@ -217,12 +220,13 @@ func TestGinAppAPI_GetApp(t *testing.T) {
 	// Create test server and install an app
 	server := createGinTestServer(t, tempDir)
 	
-	appDef := &api.AppDefinition{
-		Name:      "test-app",
-		Image:     "nginx:alpine",
-		Type:      "user",
-		Subdomain: "test",
-	}
+    appDef := &api.AppDefinition{
+        Name:      "test-app",
+        Image:     "nginx:alpine",
+        Type:      "user",
+        Subdomain: "test",
+        Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+    }
 	
 	_, err = server.appManager.Install(context.Background(), appDef)
 	if err != nil {
@@ -289,11 +293,12 @@ func TestGinAppAPI_AppActions(t *testing.T) {
 	// Create test server and install an app
 	server := createGinTestServer(t, tempDir)
 	
-	appDef := &api.AppDefinition{
-		Name:  "test-app",
-		Image: "alpine:latest",
-		Type:  "user",
-	}
+    appDef := &api.AppDefinition{
+        Name:  "test-app",
+        Image: "alpine:latest",
+        Type:  "user",
+        Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+    }
 	
 	_, err = server.appManager.Install(context.Background(), appDef)
 	if err != nil {
@@ -395,14 +400,15 @@ func TestGinAppAPI_FullLifecycle(t *testing.T) {
 	// Create test server
 	server := createGinTestServer(t, tempDir)
 	
-	appYAML := `name: lifecycle-test
+appYAML := `name: lifecycle-test
 image: docker.io/library/nginx:alpine
 type: user
 subdomain: lifecycle-test
-ports:
-  web:
-    container: 80
-    host: 8090
+listeners:
+  - name: web
+    guest_port: 80
+    flow: tcp
+    protocol: http
 environment:
   TEST_ENV: "lifecycle"`
 	
@@ -517,11 +523,12 @@ func TestGinAppAPI_Uninstall(t *testing.T) {
 	// Create test server and install an app
 	server := createGinTestServer(t, tempDir)
 
-	appDef := &api.AppDefinition{
-		Name:  "test-app",
-		Image: "alpine:latest",
-		Type:  "user",
-	}
+    appDef := &api.AppDefinition{
+        Name:  "test-app",
+        Image: "alpine:latest",
+        Type:  "user",
+        Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+    }
 
 	_, err = server.appManager.Install(context.Background(), appDef)
 	if err != nil {
@@ -621,17 +628,15 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 		nextID:     1,
 	}
 	
-	// Create filesystem app manager
-	appMgr, err := app.NewFSManager(mockContainer, tempDir)
-	if err != nil {
-		t.Fatalf("Failed to create app manager: %v", err)
-	}
+    // Create filesystem app manager with service manager
+    svcMgr := services.NewServiceManager()
+    appMgr, err := app.NewFSManagerWithServices(mockContainer, tempDir, svcMgr)
+    if err != nil {
+        t.Fatalf("Failed to create app manager: %v", err)
+    }
 	
 	// Create minimal server instance for testing
-	server := &GinServer{
-		appManager: appMgr,
-		version:    "test-gin",
-	}
+    server := &GinServer{appManager: appMgr, serviceManager: svcMgr, version: "test-gin"}
 	
 	// Setup Gin routes
 	server.setupGinRoutes()

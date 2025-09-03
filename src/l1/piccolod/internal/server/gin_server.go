@@ -1,14 +1,15 @@
 package server
 
 import (
-	"fmt"
-	"log"
-	"net/http"
+    "fmt"
+    "log"
+    "net/http"
 
-	"piccolod/internal/app"
-	"piccolod/internal/backup"
-	"piccolod/internal/container"
-	"piccolod/internal/ecosystem"
+    "piccolod/internal/app"
+    "piccolod/internal/services"
+    "piccolod/internal/backup"
+    "piccolod/internal/container"
+    "piccolod/internal/ecosystem"
 	"piccolod/internal/federation"
 	"piccolod/internal/installer"
 	"piccolod/internal/mdns"
@@ -23,11 +24,12 @@ import (
 
 // GinServer holds all the core components for our application using Gin framework.
 type GinServer struct {
-	containerManager  *container.Manager
-	appManager        *app.FSManager
-	storageManager    *storage.Manager
-	trustAgent        *trust.Agent
-	installer         *installer.Installer
+    containerManager  *container.Manager
+    appManager        *app.FSManager
+    serviceManager    *services.ServiceManager
+    storageManager    *storage.Manager
+    trustAgent        *trust.Agent
+    installer         *installer.Installer
 	updateManager     *update.Manager
 	networkManager    *network.Manager
 	backupManager     *backup.Manager
@@ -50,29 +52,31 @@ func WithGinVersion(version string) GinServerOption {
 
 // NewGinServer creates the main server application using Gin and initializes all its components.
 func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
-	cm, err := container.NewManager()
-	if err != nil {
-		return nil, fmt.Errorf("failed to init container manager: %w", err)
-	}
+    cm, err := container.NewManager()
+    if err != nil {
+        return nil, fmt.Errorf("failed to init container manager: %w", err)
+    }
 
-	// Create Podman CLI for app management
-	podmanCLI := &container.PodmanCLI{}
+    // Create Podman CLI for app management
+    podmanCLI := &container.PodmanCLI{}
 
-	// Initialize app manager with filesystem state management
-	appMgr, err := app.NewFSManager(podmanCLI, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to init app manager: %w", err)
-	}
+    // Initialize app manager with filesystem state management
+    svcMgr := services.NewServiceManager()
+    appMgr, err := app.NewFSManagerWithServices(podmanCLI, "", svcMgr)
+    if err != nil {
+        return nil, fmt.Errorf("failed to init app manager: %w", err)
+    }
 
 	// Set Gin to release mode for production (can be overridden by GIN_MODE env var)
 	gin.SetMode(gin.ReleaseMode)
 
-	s := &GinServer{
-		containerManager:  cm,
-		appManager:        appMgr,
-		storageManager:    storage.NewManager(),
-		trustAgent:        trust.NewAgent(),
-		installer:         installer.NewInstaller(),
+    s := &GinServer{
+        containerManager:  cm,
+        appManager:        appMgr,
+        serviceManager:    svcMgr,
+        storageManager:    storage.NewManager(),
+        trustAgent:        trust.NewAgent(),
+        installer:         installer.NewInstaller(),
 		updateManager:     update.NewManager(),
 		networkManager:    network.NewManager(),
 		backupManager:     backup.NewManager(),
@@ -96,18 +100,21 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		opt(s)
 	}
 
-	s.setupGinRoutes()
-	return s, nil
+    s.setupGinRoutes()
+    return s, nil
 }
 
 // Start runs the Gin HTTP server and starts mDNS advertising.
 func (s *GinServer) Start() error {
-	const port = "80"
+    const port = "80"
 
-	// Start mDNS advertising - this must succeed
-	if err := s.mdnsManager.Start(); err != nil {
-		return fmt.Errorf("FATAL: mDNS server failed to start: %w", err)
-	}
+    // Start mDNS advertising - this must succeed
+    if err := s.mdnsManager.Start(); err != nil {
+        return fmt.Errorf("FATAL: mDNS server failed to start: %w", err)
+    }
+
+    // Start background service watcher and proxies
+    s.serviceManager.StartBackground()
 
 	log.Printf("INFO: Starting piccolod server with Gin on http://localhost:%s", port)
 
@@ -124,10 +131,11 @@ func (s *GinServer) Start() error {
 
 // Stop gracefully shuts down the server and all its components.
 func (s *GinServer) Stop() error {
-	if err := s.mdnsManager.Stop(); err != nil {
-		log.Printf("WARN: Failed to stop mDNS server: %v", err)
-	}
-	return nil
+    if err := s.mdnsManager.Stop(); err != nil {
+        log.Printf("WARN: Failed to stop mDNS server: %v", err)
+    }
+    s.serviceManager.Stop()
+    return nil
 }
 
 // setupGinRoutes defines all API endpoints using Gin router.
@@ -169,6 +177,10 @@ func (s *GinServer) setupGinRoutes() {
 		v1.GET("/health", s.handleGinEcosystemTest)        // Full ecosystem details
 		v1.GET("/health/ready", s.handleGinReadinessCheck) // Simple boolean health
 		v1.GET("/ecosystem", s.handleGinEcosystemTest)     // Full ecosystem details
+
+		// Service discovery endpoints (v1)
+		v1.GET("/services", s.handleGinServicesAll)
+		v1.GET("/apps/:name/services", s.handleGinServicesByApp)
 	}
 
 	// Admin routes
@@ -199,6 +211,23 @@ func (s *GinServer) handleGinRoot(c *gin.Context) {
 func (s *GinServer) handleGinContainers(c *gin.Context) {
 	// TODO: Implement container management (existing functionality)
 	c.JSON(http.StatusOK, gin.H{"message": "Container management (placeholder)"})
+}
+
+// handleGinServicesAll returns all service endpoints across apps
+func (s *GinServer) handleGinServicesAll(c *gin.Context) {
+    eps := s.serviceManager.GetAll()
+    c.JSON(http.StatusOK, gin.H{"services": eps})
+}
+
+// handleGinServicesByApp returns services for a single app
+func (s *GinServer) handleGinServicesByApp(c *gin.Context) {
+    name := c.Param("name")
+    eps, err := s.serviceManager.GetByApp(name)
+    if err != nil {
+        writeGinError(c, http.StatusNotFound, err.Error())
+        return
+    }
+    c.JSON(http.StatusOK, gin.H{"app": name, "services": eps})
 }
 
 func (s *GinServer) handleGinVersion(c *gin.Context) {

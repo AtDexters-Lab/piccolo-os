@@ -28,18 +28,16 @@ func TestFSManager_Install(t *testing.T) {
 	ctx := context.Background()
 	
 	// Test app definition
-	appDef := &api.AppDefinition{
-		Name:      "test-app",
-		Image:     "nginx:alpine",
-		Subdomain: "test",
-		Type:      "user",
-		Ports: map[string]api.AppPort{
-			"web": {Host: 8080, Container: 80},
-		},
-		Environment: map[string]string{
-			"ENV_VAR": "test-value",
-		},
-	}
+    appDef := &api.AppDefinition{
+        Name:      "test-app",
+        Image:     "nginx:alpine",
+        Subdomain: "test",
+        Type:      "user",
+        Listeners: []api.AppListener{{Name:"web", GuestPort:80, Flow:"tcp", Protocol:"http"}},
+        Environment: map[string]string{
+            "ENV_VAR": "test-value",
+        },
+    }
 	
 	// Install the app
 	app, err := manager.Install(ctx, appDef)
@@ -115,8 +113,8 @@ func TestFSManager_List(t *testing.T) {
 	}
 	
 	// Install two apps
-	appDef1 := &api.AppDefinition{Name: "app1", Image: "nginx:alpine", Type: "user"}
-	appDef2 := &api.AppDefinition{Name: "app2", Image: "alpine:latest", Type: "user"}
+    appDef1 := &api.AppDefinition{Name: "app1", Image: "nginx:alpine", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
+    appDef2 := &api.AppDefinition{Name: "app2", Image: "alpine:latest", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
 	
 	_, err = manager.Install(ctx, appDef1)
 	if err != nil {
@@ -174,7 +172,7 @@ func TestFSManager_Get(t *testing.T) {
 	}
 	
 	// Install an app
-	appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:alpine", Type: "user"}
+    appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:alpine", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
 	installedApp, err := manager.Install(ctx, appDef)
 	if err != nil {
 		t.Fatalf("Failed to install app: %v", err)
@@ -215,7 +213,7 @@ func TestFSManager_StartStop(t *testing.T) {
 	ctx := context.Background()
 	
 	// Install an app
-	appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:alpine", Type: "user"}
+    appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:alpine", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
 	_, err = manager.Install(ctx, appDef)
 	if err != nil {
 		t.Fatalf("Failed to install app: %v", err)
@@ -306,7 +304,7 @@ func TestFSManager_Uninstall(t *testing.T) {
 	ctx := context.Background()
 	
 	// Install an app
-	appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:alpine", Type: "user"}
+    appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:alpine", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
 	_, err = manager.Install(ctx, appDef)
 	if err != nil {
 		t.Fatalf("Failed to install app: %v", err)
@@ -370,7 +368,7 @@ func TestFSManager_EnableDisable(t *testing.T) {
 	ctx := context.Background()
 	
 	// Install an app
-	appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:alpine", Type: "user"}
+    appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:alpine", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
 	_, err = manager.Install(ctx, appDef)
 	if err != nil {
 		t.Fatalf("Failed to install app: %v", err)
@@ -470,15 +468,16 @@ func TestFSManager_PersistenceAcrossRestarts(t *testing.T) {
 	ctx := context.Background()
 	
 	// Install an app and enable it
-	appDef := &api.AppDefinition{
-		Name:      "persistent-app",
-		Image:     "nginx:alpine",
-		Type:      "user",
-		Subdomain: "persistent",
-		Environment: map[string]string{
-			"TEST_VAR": "persistent-value",
-		},
-	}
+    appDef := &api.AppDefinition{
+        Name:      "persistent-app",
+        Image:     "nginx:alpine",
+        Type:      "user",
+        Subdomain: "persistent",
+        Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+        Environment: map[string]string{
+            "TEST_VAR": "persistent-value",
+        },
+    }
 	
 	_, err = manager1.Install(ctx, appDef)
 	if err != nil {

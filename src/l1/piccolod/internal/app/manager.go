@@ -30,9 +30,8 @@ type AppInstance struct {
 	// Container information
 	ContainerID string            `json:"container_id"`
 	
-	// Configuration
-	Ports       map[string]api.AppPort `json:"ports,omitempty"`
-	Environment map[string]string `json:"environment,omitempty"`
+    // Configuration
+    Environment map[string]string `json:"environment,omitempty"`
 	
 	// Metadata
 	CreatedAt   time.Time         `json:"created_at"`
@@ -56,16 +55,14 @@ func NewManager(containerManager ContainerManager) *Manager {
 
 // Install installs a new application from its definition
 func (m *Manager) Install(ctx context.Context, appDef *api.AppDefinition) (*AppInstance, error) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	
-	// Validate app definition
-	if err := ValidateAppDefinition(appDef); err != nil {
-		return nil, fmt.Errorf("invalid app definition: %w", err)
-	}
-	
-	// Set defaults
-	SetDefaults(appDef)
+    m.mutex.Lock()
+    defer m.mutex.Unlock()
+    
+    // Set defaults then validate
+    SetDefaults(appDef)
+    if err := ValidateAppDefinition(appDef); err != nil {
+        return nil, fmt.Errorf("invalid app definition: %w", err)
+    }
 	
 	// Check if app already exists
 	if _, exists := m.apps[appDef.Name]; exists {
@@ -86,18 +83,17 @@ func (m *Manager) Install(ctx context.Context, appDef *api.AppDefinition) (*AppI
 	
 	// Create app instance
 	now := time.Now()
-	app := &AppInstance{
-		Name:        appDef.Name,
-		Image:       appDef.Image,
-		Subdomain:   appDef.Subdomain,
-		Type:        appDef.Type,
-		Status:      "created",
-		ContainerID: containerID,
-		Ports:       appDef.Ports,
-		Environment: appDef.Environment,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
+    app := &AppInstance{
+        Name:        appDef.Name,
+        Image:       appDef.Image,
+        Subdomain:   appDef.Subdomain,
+        Type:        appDef.Type,
+        Status:      "created",
+        ContainerID: containerID,
+        Environment: appDef.Environment,
+        CreatedAt:   now,
+        UpdatedAt:   now,
+    }
 	
 	// Store app instance
 	m.apps[appDef.Name] = app
@@ -205,21 +201,16 @@ func (m *Manager) Uninstall(ctx context.Context, name string) error {
 
 // appDefToContainerSpec converts an AppDefinition to a ContainerCreateSpec
 func (m *Manager) appDefToContainerSpec(appDef *api.AppDefinition) (container.ContainerCreateSpec, error) {
-	spec := container.ContainerCreateSpec{
-		Name:  appDef.Name,
-		Image: appDef.Image,
-		Environment: appDef.Environment,
-	}
-	
-	// Convert ports
-	if appDef.Ports != nil {
-		for _, port := range appDef.Ports {
-			spec.Ports = append(spec.Ports, container.PortMapping{
-				Host:      port.Host,
-				Container: port.Container,
-			})
-		}
-	}
+    spec := container.ContainerCreateSpec{
+        Name:  appDef.Name,
+        Image: appDef.Image,
+        Environment: appDef.Environment,
+    }
+    
+    // Convert listeners: map guest_port to equal host port for this simple manager
+    for _, l := range appDef.Listeners {
+        spec.Ports = append(spec.Ports, container.PortMapping{Host: l.GuestPort, Container: l.GuestPort})
+    }
 	
 	// Convert resources if present
 	if appDef.Resources != nil && appDef.Resources.Limits != nil {

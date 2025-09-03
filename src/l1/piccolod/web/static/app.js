@@ -176,12 +176,7 @@ class PiccoloApp {
                             </div>
                         ` : ''}
                         
-                        ${app.ports && app.ports.length > 0 ? `
-                            <div class="flex items-center justify-between text-sm">
-                                <span class="text-gray-500">Ports:</span>
-                                <span class="font-mono text-xs">${app.ports.map(p => `${p.host}→${p.container}`).join(', ')}</span>
-                            </div>
-                        ` : ''}
+                        
                         
                         <div class="flex items-center justify-between text-sm">
                             <span class="text-gray-500">Type:</span>

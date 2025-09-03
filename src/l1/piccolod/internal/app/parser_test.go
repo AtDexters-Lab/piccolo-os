@@ -44,19 +44,16 @@ func TestParseAppDefinition(t *testing.T) {
 				if app.Subdomain != "test" {
 					t.Errorf("Expected subdomain 'test', got %s", app.Subdomain)
 				}
-				if app.Ports == nil {
-					t.Error("Expected ports to be defined")
-				}
-				if webPort, ok := app.Ports["web"]; !ok {
-					t.Error("Expected 'web' port to be defined")
-				} else {
-					if webPort.Container != 80 {
-						t.Errorf("Expected container port 80, got %d", webPort.Container)
-					}
-					if webPort.Host != 8080 {
-						t.Errorf("Expected host port 8080, got %d", webPort.Host)
-					}
-				}
+            if len(app.Listeners) == 0 {
+                t.Error("Expected listeners to be defined")
+            }
+            found := false
+            for _, l := range app.Listeners {
+                if l.Name == "web" && l.GuestPort == 80 {
+                    found = true
+                }
+            }
+            if !found { t.Error("Expected web listener with guest_port 80") }
 				if app.Storage == nil || app.Storage.Persistent == nil {
 					t.Error("Expected persistent storage to be defined")
 				}
@@ -168,14 +165,15 @@ func TestValidateAppDefinition(t *testing.T) {
 		expectError bool
 		expectedErr string
 	}{
-		{
-			name: "valid minimal app",
-			app: &api.AppDefinition{
-				Name:  "test-app",
-				Image: "nginx:latest",
-			},
-			expectError: false,
-		},
+        {
+            name: "valid minimal app",
+            app: &api.AppDefinition{
+                Name:  "test-app",
+                Image: "nginx:latest",
+                Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+            },
+            expectError: false,
+        },
 		{
 			name:        "empty name",
 			app:         &api.AppDefinition{Image: "nginx:latest"},
@@ -210,18 +208,16 @@ func TestValidateAppDefinition(t *testing.T) {
 			expectError: true,
 			expectedErr: "cannot specify both image and build",
 		},
-		{
-			name: "invalid port mapping",
-			app: &api.AppDefinition{
-				Name:  "test-app",
-				Image: "nginx:latest",
-				Ports: map[string]api.AppPort{
-					"web": {Container: 0, Host: 8080}, // Invalid container port
-				},
-			},
-			expectError: true,
-			expectedErr: "container port must be between 1 and 65535",
-		},
+        {
+            name: "invalid listener port",
+            app: &api.AppDefinition{
+                Name:  "test-app",
+                Image: "nginx:latest",
+                Listeners: []api.AppListener{{Name:"web", GuestPort:0}},
+            },
+            expectError: true,
+            expectedErr: "guest_port must be between 1 and 65535",
+        },
 	}
 
 	for _, tt := range tests {
@@ -365,12 +361,11 @@ func TestReservedNames(t *testing.T) {
 
 // TestMalformedYAML tests handling of malformed YAML
 func TestMalformedYAML(t *testing.T) {
-	malformedYAML := `name: test
+malformedYAML := `name: test
 image: nginx
-ports:
-  web:
-    container: 80
-    host: [invalid yaml structure`
+listeners:
+  - name: web
+    guest_port: [invalid yaml structure`
 
 	_, err := ParseAppDefinition([]byte(malformedYAML))
 	if err == nil {

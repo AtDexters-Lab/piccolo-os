@@ -269,15 +269,15 @@ func TestPodmanCLI_CreateContainer(t *testing.T) {
 		t.Fatalf("Spec validation failed: %v", err)
 	}
 
-	// Create container
-	containerID, err := podman.CreateContainer(ctx, spec)
-	if err != nil {
-		// If podman is not available, skip the test
-		if containsString(err.Error(), "executable file not found") {
-			t.Skip("Podman not available, skipping integration test")
-		}
-		t.Fatalf("Failed to create container: %v", err)
-	}
+    // Create container
+    containerID, err := podman.CreateContainer(ctx, spec)
+    if err != nil {
+        // If podman is not available, skip the test
+        if containsString(err.Error(), "executable file not found") {
+            t.Skip("Podman not available, skipping integration test")
+        }
+        t.Fatalf("Failed to create container: %v", err)
+    }
 
 	// Cleanup: remove container
 	defer func() {

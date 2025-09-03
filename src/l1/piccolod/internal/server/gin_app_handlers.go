@@ -72,22 +72,18 @@ func (s *GinServer) handleGinAppInstall(c *gin.Context) {
 		return
 	}
 	
-	// Install the app
-	appInstance, err := s.appManager.Install(c.Request.Context(), appDef)
-	if err != nil {
-		if strings.Contains(err.Error(), "already exists") {
-			writeGinError(c, http.StatusConflict, err.Error())
-		} else {
-			writeGinError(c, http.StatusInternalServerError, "Failed to install app: "+err.Error())
-		}
-		return
-	}
+    // Install or update (upsert) the app
+    appInstance, err := s.appManager.Upsert(c.Request.Context(), appDef)
+    if err != nil {
+        writeGinError(c, http.StatusInternalServerError, "Failed to install app: "+err.Error())
+        return
+    }
 	
 	response := GinAppResponse{
 		Data:    appInstance,
 		Message: "App '" + appInstance.Name + "' installed successfully",
 	}
-	c.JSON(http.StatusCreated, response)
+    c.JSON(http.StatusCreated, response)
 }
 
 // handleGinAppList handles GET /api/v1/apps - List all apps with status
@@ -103,36 +99,48 @@ func (s *GinServer) handleGinAppList(c *gin.Context) {
 
 // handleGinAppGet handles GET /api/v1/apps/:name - Get specific app details
 func (s *GinServer) handleGinAppGet(c *gin.Context) {
-	appName := c.Param("name")
-	
-	appInstance, err := s.appManager.Get(c.Request.Context(), appName)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			writeGinError(c, http.StatusNotFound, err.Error())
-		} else {
-			writeGinError(c, http.StatusInternalServerError, "Failed to get app: "+err.Error())
-		}
-		return
-	}
-	
-	writeGinSuccess(c, appInstance, "")
+    appName := c.Param("name")
+    
+    appInstance, err := s.appManager.Get(c.Request.Context(), appName)
+    if err != nil {
+        if strings.Contains(err.Error(), "not found") {
+            writeGinError(c, http.StatusNotFound, err.Error())
+        } else {
+            writeGinError(c, http.StatusInternalServerError, "Failed to get app: "+err.Error())
+        }
+        return
+    }
+
+    // Include services inline
+    services, _ := s.serviceManager.GetByApp(appName)
+    writeGinSuccess(c, gin.H{"app": appInstance, "services": services}, "")
 }
 
 // handleGinAppUninstall handles DELETE /api/v1/apps/:name - Uninstall app completely
 func (s *GinServer) handleGinAppUninstall(c *gin.Context) {
-	appName := c.Param("name")
-	
-	err := s.appManager.Uninstall(c.Request.Context(), appName)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			writeGinError(c, http.StatusNotFound, err.Error())
-		} else {
-			writeGinError(c, http.StatusInternalServerError, "Failed to uninstall app: "+err.Error())
-		}
-		return
-	}
-	
-	writeGinSuccess(c, nil, "App '"+appName+"' uninstalled successfully")
+    appName := c.Param("name")
+    // Optional purge=true to delete app data
+    purge := false
+    switch c.Query("purge") {
+    case "1", "true", "yes", "on":
+        purge = true
+    }
+
+    err := s.appManager.UninstallWithOptions(c.Request.Context(), appName, purge)
+    if err != nil {
+        if strings.Contains(err.Error(), "not found") {
+            writeGinError(c, http.StatusNotFound, err.Error())
+        } else {
+            writeGinError(c, http.StatusInternalServerError, "Failed to uninstall app: "+err.Error())
+        }
+        return
+    }
+    
+    if purge {
+        writeGinSuccess(c, nil, "App '"+appName+"' uninstalled and data purged successfully")
+    } else {
+        writeGinSuccess(c, nil, "App '"+appName+"' uninstalled successfully")
+    }
 }
 
 // handleGinAppStart handles POST /api/v1/apps/:name/start - Start app container

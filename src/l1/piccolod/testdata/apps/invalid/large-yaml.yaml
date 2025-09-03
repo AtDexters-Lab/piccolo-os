@@ -1,6 +1,9 @@
 # Security test: extremely large YAML content
 name: large-app
 image: nginx:latest
+listeners:
+  - name: web
+    guest_port: 80
 
 # Simulate large content that could cause DoS
 app_config:

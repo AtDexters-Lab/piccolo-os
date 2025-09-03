@@ -3,10 +3,11 @@ image: nginx:alpine
 subdomain: test
 type: user
 
-ports:
-  web:
-    container: 80
-    host: 8080
+listeners:
+  - name: web
+    guest_port: 80
+    flow: tcp
+    protocol: http
 
 storage:
   persistent:

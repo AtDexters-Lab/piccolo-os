@@ -112,11 +112,12 @@ func TestAppManager_Install(t *testing.T) {
 	}{
 		{
 			name: "install simple app",
-			appDef: &api.AppDefinition{
-				Name:  "test-app",
-				Image: "nginx:latest",
-				Type:  "user",
-			},
+            appDef: &api.AppDefinition{
+                Name:  "test-app",
+                Image: "nginx:latest",
+                Type:  "user",
+                Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+            },
 			expectError: false,
 			validateResult: func(t *testing.T, app *AppInstance) {
 				if app.Name != "test-app" {
@@ -133,41 +134,31 @@ func TestAppManager_Install(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "install app with ports",
-			appDef: &api.AppDefinition{
-				Name:  "web-app",
-				Image: "nginx:alpine",
-				Type:  "user",
-				Ports: map[string]api.AppPort{
-					"web": {Container: 80, Host: 8080},
-				},
-			},
-			expectError: false,
-			validateResult: func(t *testing.T, app *AppInstance) {
-				if len(app.Ports) != 1 {
-					t.Errorf("Expected 1 port mapping, got %d", len(app.Ports))
-				}
-				if webPort, ok := app.Ports["web"]; !ok {
-					t.Error("Expected 'web' port mapping")
-				} else {
-					if webPort.Container != 80 || webPort.Host != 8080 {
-						t.Errorf("Expected web port 80:8080, got %d:%d", webPort.Container, webPort.Host)
-					}
-				}
-			},
-		},
-		{
-			name: "install app with environment",
-			appDef: &api.AppDefinition{
-				Name:  "env-app",
-				Image: "alpine:latest",
-				Type:  "user",
-				Environment: map[string]string{
-					"NODE_ENV": "production",
-					"DEBUG":    "false",
-				},
-			},
+        {
+            name: "install app with listeners",
+            appDef: &api.AppDefinition{
+                Name:  "web-app",
+                Image: "nginx:alpine",
+                Type:  "user",
+                Listeners: []api.AppListener{{Name:"web", GuestPort:80, Flow:"tcp", Protocol:"http"}},
+            },
+            expectError: false,
+            validateResult: func(t *testing.T, app *AppInstance) {
+                if app.Name == "" { t.Errorf("app name should be set") }
+            },
+        },
+        {
+            name: "install app with environment",
+            appDef: &api.AppDefinition{
+                Name:  "env-app",
+                Image: "alpine:latest",
+                Type:  "user",
+                Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+                Environment: map[string]string{
+                    "NODE_ENV": "production",
+                    "DEBUG":    "false",
+                },
+            },
 			expectError: false,
 			validateResult: func(t *testing.T, app *AppInstance) {
 				if len(app.Environment) != 2 {
@@ -178,16 +169,17 @@ func TestAppManager_Install(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "duplicate app name",
-			appDef: &api.AppDefinition{
-				Name:  "test-app", // Same as first test
-				Image: "alpine:latest",
-				Type:  "user",
-			},
-			expectError: true,
-			errorContains: "app already exists",
-		},
+        {
+            name: "duplicate app name",
+            appDef: &api.AppDefinition{
+                Name:  "test-app", // Same as first test
+                Image: "alpine:latest",
+                Type:  "user",
+                Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+            },
+            expectError: true,
+            errorContains: "app already exists",
+        },
 		{
 			name: "invalid app definition",
 			appDef: &api.AppDefinition{
@@ -204,15 +196,16 @@ func TestAppManager_Install(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create fresh manager for each test
 			containerManager := NewMockContainerManager()
-			manager := NewManager(containerManager)
+    manager := NewManager(containerManager)
 
 			// Pre-install the first app for duplicate test
-			if tt.name == "duplicate app name" {
-				firstApp := &api.AppDefinition{
-					Name:  "test-app",
-					Image: "nginx:latest",
-					Type:  "user",
-				}
+            if tt.name == "duplicate app name" {
+                firstApp := &api.AppDefinition{
+                    Name:  "test-app",
+                    Image: "nginx:latest",
+                    Type:  "user",
+                    Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+                }
 				_, err := manager.Install(context.Background(), firstApp)
 				if err != nil {
 					t.Fatalf("Failed to install first app: %v", err)
@@ -265,8 +258,8 @@ func TestAppManager_List(t *testing.T) {
 	}
 
 	// Install a few apps
-	app1 := &api.AppDefinition{Name: "app1", Image: "nginx:latest", Type: "user"}
-	app2 := &api.AppDefinition{Name: "app2", Image: "alpine:latest", Type: "user"}
+    app1 := &api.AppDefinition{Name: "app1", Image: "nginx:latest", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
+    app2 := &api.AppDefinition{Name: "app2", Image: "alpine:latest", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
 
 	_, err = manager.Install(ctx, app1)
 	if err != nil {
@@ -315,7 +308,7 @@ func TestAppManager_Get(t *testing.T) {
 	}
 
 	// Install an app
-	appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:latest", Type: "user"}
+    appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:latest", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
 	_, err = manager.Install(ctx, appDef)
 	if err != nil {
 		t.Fatalf("Failed to install app: %v", err)
@@ -349,7 +342,7 @@ func TestAppManager_Start(t *testing.T) {
 	}
 
 	// Install and start app
-	appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:latest", Type: "user"}
+    appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:latest", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
 	_, err = manager.Install(ctx, appDef)
 	if err != nil {
 		t.Fatalf("Failed to install app: %v", err)
@@ -380,7 +373,7 @@ func TestAppManager_Stop(t *testing.T) {
 	ctx := context.Background()
 
 	// Install, start, then stop app
-	appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:latest", Type: "user"}
+    appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:latest", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
 	_, err := manager.Install(ctx, appDef)
 	if err != nil {
 		t.Fatalf("Failed to install app: %v", err)
@@ -421,7 +414,7 @@ func TestAppManager_Uninstall(t *testing.T) {
 	}
 
 	// Install and uninstall app
-	appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:latest", Type: "user"}
+    appDef := &api.AppDefinition{Name: "test-app", Image: "nginx:latest", Type: "user", Listeners: []api.AppListener{{Name:"web", GuestPort:80}}}
 	_, err = manager.Install(ctx, appDef)
 	if err != nil {
 		t.Fatalf("Failed to install app: %v", err)
@@ -450,4 +443,3 @@ func TestAppManager_Uninstall(t *testing.T) {
 		t.Errorf("Expected 0 containers after uninstall, got %d", len(containerManager.containers))
 	}
 }
-

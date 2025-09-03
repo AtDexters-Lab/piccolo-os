@@ -23,8 +23,8 @@ type Resources struct {
 
 // DiskInfo provides detailed, human-readable information about a physical disk.
 type DiskInfo struct {
-	Path      string `json:"path"`      // e.g., /dev/sda
-	Model     string `json:"model"`     // e.g., "Samsung SSD 970 EVO"
+	Path      string `json:"path"`  // e.g., /dev/sda
+	Model     string `json:"model"` // e.g., "Samsung SSD 970 EVO"
 	SizeBytes int64  `json:"size_bytes"`
 	IsSSD     bool   `json:"is_ssd"`
 }
@@ -39,27 +39,43 @@ type StoragePoolInfo struct {
 
 // BackupTarget defines a destination for a backup.
 type BackupTarget struct {
-	Type string `json:"type"`         // e.g., "local_drive", "google_drive", "piccolo_central"
+	Type string `json:"type"`           // e.g., "local_drive", "google_drive", "piccolo_central"
 	Path string `json:"path,omitempty"` // For local_drive, e.g., "/media/my-usb"
 }
 
 // AppDefinition represents an app.yaml definition file
 type AppDefinition struct {
-	Name        string            `yaml:"name" json:"name"`
-	Image       string            `yaml:"image,omitempty" json:"image,omitempty"`
-	Build       *AppBuild         `yaml:"build,omitempty" json:"build,omitempty"`
-	Subdomain   string            `yaml:"subdomain,omitempty" json:"subdomain,omitempty"`
-	Type        string            `yaml:"type,omitempty" json:"type,omitempty"` // "system" or "user"
-	Ports       map[string]AppPort `yaml:"ports,omitempty" json:"ports,omitempty"`
-	Storage     *AppStorage       `yaml:"storage,omitempty" json:"storage,omitempty"`
-	Filesystem  *AppFilesystem    `yaml:"filesystem,omitempty" json:"filesystem,omitempty"`
-	Permissions *AppPermissions   `yaml:"permissions,omitempty" json:"permissions,omitempty"`
-	Environment map[string]string `yaml:"environment,omitempty" json:"environment,omitempty"`
-	Resources   *AppResources     `yaml:"resources,omitempty" json:"resources,omitempty"`
-	HealthCheck *AppHealthCheck   `yaml:"healthcheck,omitempty" json:"healthcheck,omitempty"`
-	DependsOn   []string          `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
-	AppConfig   interface{}       `yaml:"app_config,omitempty" json:"app_config,omitempty"`
+	Name      string    `yaml:"name" json:"name"`
+	Image     string    `yaml:"image,omitempty" json:"image,omitempty"`
+	Build     *AppBuild `yaml:"build,omitempty" json:"build,omitempty"`
+	Subdomain string    `yaml:"subdomain,omitempty" json:"subdomain,omitempty"`
+	Type      string    `yaml:"type,omitempty" json:"type,omitempty"` // "system" or "user"
+	// Service-oriented listener configuration (v1)
+	Listeners   []AppListener          `yaml:"listeners,omitempty" json:"listeners,omitempty"`
+	Storage     *AppStorage            `yaml:"storage,omitempty" json:"storage,omitempty"`
+	Filesystem  *AppFilesystem         `yaml:"filesystem,omitempty" json:"filesystem,omitempty"`
+	Permissions *AppPermissions        `yaml:"permissions,omitempty" json:"permissions,omitempty"`
+	Environment map[string]string      `yaml:"environment,omitempty" json:"environment,omitempty"`
+	Resources   *AppResources          `yaml:"resources,omitempty" json:"resources,omitempty"`
+	HealthCheck *AppHealthCheck        `yaml:"healthcheck,omitempty" json:"healthcheck,omitempty"`
+	DependsOn   []string               `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+	AppConfig   interface{}            `yaml:"app_config,omitempty" json:"app_config,omitempty"`
 	Extensions  map[string]interface{} `yaml:"x-piccolo,omitempty" json:"x-piccolo,omitempty"`
+}
+
+// AppListener defines a named service exposed by the app (service-oriented model)
+type AppListener struct {
+	Name       string                  `yaml:"name" json:"name"`
+	GuestPort  int                     `yaml:"guest_port" json:"guest_port"`
+	Flow       string                  `yaml:"flow,omitempty" json:"flow,omitempty"`         // "tcp" | "tls" (default: tcp)
+	Protocol   string                  `yaml:"protocol,omitempty" json:"protocol,omitempty"` // hint: "http" | "websocket" | "raw" | etc.
+	Middleware []AppProtocolMiddleware `yaml:"protocol_middleware,omitempty" json:"protocol_middleware,omitempty"`
+}
+
+// AppProtocolMiddleware defines protocol-specific middleware entry
+type AppProtocolMiddleware struct {
+	Name   string                 `yaml:"name" json:"name"`
+	Params map[string]interface{} `yaml:"params,omitempty" json:"params,omitempty"`
 }
 
 // AppBuild defines container build configuration
@@ -101,9 +117,9 @@ type AppNetworkPermissions struct {
 }
 
 type AppResourcePermissions struct {
-	MaxProcesses  int  `yaml:"max_processes,omitempty" json:"max_processes,omitempty"`
-	MaxOpenFiles  int  `yaml:"max_open_files,omitempty" json:"max_open_files,omitempty"`
-	Privileged    bool `yaml:"privileged,omitempty" json:"privileged,omitempty"`
+	MaxProcesses int  `yaml:"max_processes,omitempty" json:"max_processes,omitempty"`
+	MaxOpenFiles int  `yaml:"max_open_files,omitempty" json:"max_open_files,omitempty"`
+	Privileged   bool `yaml:"privileged,omitempty" json:"privileged,omitempty"`
 }
 
 type AppFilesystemPermissions struct {
@@ -134,11 +150,7 @@ type AppHTTPHealthCheck struct {
 	Retries int    `yaml:"retries,omitempty" json:"retries,omitempty"`
 }
 
-// AppPort defines port mapping for an application
-type AppPort struct {
-	Container int `yaml:"container" json:"container"`
-	Host      int `yaml:"host" json:"host"`
-}
+// (legacy AppPort removed)
 
 // AppVolume defines volume mapping for an application
 type AppVolume struct {
@@ -149,14 +161,14 @@ type AppVolume struct {
 
 // App represents an installed application
 type App struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Image       string            `json:"image"`
-	Subdomain   string            `json:"subdomain"`
-	Type        string            `json:"type"`
-	Status      string            `json:"status"` // "running", "stopped", "error"
-	ContainerID string            `json:"container_id,omitempty"`
-	Ports       []AppPort         `json:"ports,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Image       string `json:"image"`
+	Subdomain   string `json:"subdomain"`
+	Type        string `json:"type"`
+	Status      string `json:"status"` // "running", "stopped", "error"
+	ContainerID string `json:"container_id,omitempty"`
+	// Legacy Ports removed
 	Volumes     []AppVolume       `json:"volumes,omitempty"`
 	Environment map[string]string `json:"environment,omitempty"`
 }

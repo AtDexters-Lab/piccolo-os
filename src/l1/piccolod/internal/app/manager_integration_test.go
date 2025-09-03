@@ -33,14 +33,12 @@ func TestAppManager_InstallIntegration(t *testing.T) {
 	}{
 		{
 			name: "install nginx app",
-			appDef: &api.AppDefinition{
-				Name:  "test-nginx-integration",
-				Image: "docker.io/library/nginx:alpine",
-				Type:  "user",
-				Ports: map[string]api.AppPort{
-					"web": {Container: 80, Host: 8081},
-				},
-			},
+            appDef: &api.AppDefinition{
+                Name:  "test-nginx-integration",
+                Image: "docker.io/library/nginx:alpine",
+                Type:  "user",
+                Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+            },
 			validate: func(t *testing.T, app *AppInstance, containerID string) {
 				// Verify container exists
 				if !containerExists(t, containerID) {
@@ -116,14 +114,12 @@ func TestAppManager_StartStopIntegration(t *testing.T) {
 
 	// Install nginx app with unique name
 	uniqueName := fmt.Sprintf("test-nginx-startstop-%d", time.Now().UnixNano())
-	appDef := &api.AppDefinition{
-		Name:  uniqueName,
-		Image: "docker.io/library/nginx:alpine",
-		Type:  "user",
-		Ports: map[string]api.AppPort{
-			"web": {Container: 80, Host: 8082},
-		},
-	}
+    appDef := &api.AppDefinition{
+        Name:  uniqueName,
+        Image: "docker.io/library/nginx:alpine",
+        Type:  "user",
+        Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+    }
 
 	app, err := manager.Install(ctx, appDef)
 	if err != nil {
@@ -146,9 +142,9 @@ func TestAppManager_StartStopIntegration(t *testing.T) {
 	}
 
 	// Test HTTP connectivity
-	if err := waitForHTTPResponse("http://localhost:8082", 10*time.Second); err != nil {
-		t.Errorf("Failed to connect to nginx: %v", err)
-	}
+    if err := waitForHTTPResponse("http://localhost:80", 10*time.Second); err != nil {
+        t.Errorf("Failed to connect to nginx: %v", err)
+    }
 
 	// Test stopping the app
 	err = manager.Stop(ctx, uniqueName)
@@ -176,17 +172,15 @@ func TestAppManager_FullLifecycleIntegration(t *testing.T) {
 	defer cancel()
 
 	appName := "test-full-lifecycle"
-	appDef := &api.AppDefinition{
-		Name:  appName,
-		Image: "docker.io/library/nginx:alpine",
-		Type:  "user",
-		Ports: map[string]api.AppPort{
-			"web": {Container: 80, Host: 8083},
-		},
-		Environment: map[string]string{
-			"NGINX_PORT": "80",
-		},
-	}
+    appDef := &api.AppDefinition{
+        Name:  appName,
+        Image: "docker.io/library/nginx:alpine",
+        Type:  "user",
+        Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+        Environment: map[string]string{
+            "NGINX_PORT": "80",
+        },
+    }
 
 	// 1. Install
 	t.Log("Installing app...")
@@ -249,9 +243,9 @@ func TestAppManager_FullLifecycleIntegration(t *testing.T) {
 
 	// Test connectivity
 	t.Log("Testing HTTP connectivity...")
-	if err := waitForHTTPResponse("http://localhost:8083", 15*time.Second); err != nil {
-		t.Errorf("HTTP connectivity test failed: %v", err)
-	}
+    if err := waitForHTTPResponse("http://localhost:80", 15*time.Second); err != nil {
+        t.Errorf("HTTP connectivity test failed: %v", err)
+    }
 
 	// 5. Stop
 	t.Log("Stopping app...")
@@ -324,14 +318,12 @@ func TestAppManager_ErrorScenariosIntegration(t *testing.T) {
 		// First app on port 8084 with unique name
 		timestamp := time.Now().UnixNano()
 		app1Name := fmt.Sprintf("test-port-conflict-1-%d", timestamp)
-		app1 := &api.AppDefinition{
-			Name:  app1Name,
-			Image: "docker.io/library/nginx:alpine",
-			Type:  "user",
-			Ports: map[string]api.AppPort{
-				"web": {Container: 80, Host: 8084},
-			},
-		}
+        app1 := &api.AppDefinition{
+            Name:  app1Name,
+            Image: "docker.io/library/nginx:alpine",
+            Type:  "user",
+            Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+        }
 
 		_, err := manager.Install(ctx, app1)
 		if err != nil {
@@ -345,16 +337,14 @@ func TestAppManager_ErrorScenariosIntegration(t *testing.T) {
 			t.Fatalf("Failed to start first app: %v", err)
 		}
 
-		// Second app on same port 8084 with unique name
-		app2Name := fmt.Sprintf("test-port-conflict-2-%d", timestamp+1)
-		app2 := &api.AppDefinition{
-			Name:  app2Name,
-			Image: "docker.io/library/nginx:alpine",
-			Type:  "user",
-			Ports: map[string]api.AppPort{
-				"web": {Container: 80, Host: 8084},
-			},
-		}
+        // Second app on same host bind (80) with unique name
+        app2Name := fmt.Sprintf("test-port-conflict-2-%d", timestamp+1)
+        app2 := &api.AppDefinition{
+            Name:  app2Name,
+            Image: "docker.io/library/nginx:alpine",
+            Type:  "user",
+            Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
+        }
 
 		// Installing second app should fail due to port conflict
 		_, err = manager.Install(ctx, app2)
@@ -474,16 +464,16 @@ func TestAppManager_FromYAMLIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	tests := []struct {
-		name     string
-		yamlFile string
-		testPort string
-	}{
-		{
-			name:     "nginx from yaml",
-			yamlFile: "testdata/integration/simple-nginx.yaml",
-			testPort: "8090",
-		},
+    tests := []struct {
+        name     string
+        yamlFile string
+        testPort string
+    }{
+        {
+            name:     "nginx from yaml",
+            yamlFile: "testdata/integration/simple-nginx.yaml",
+            testPort: "80",
+        },
 		{
 			name:     "alpine with env from yaml",
 			yamlFile: "testdata/integration/alpine-with-env.yaml",
@@ -519,23 +509,23 @@ func TestAppManager_FromYAMLIntegration(t *testing.T) {
 			}
 
 			// Start the app if it has ports (like nginx)
-			if len(appDef.Ports) > 0 {
-				err = manager.Start(ctx, appDef.Name)
-				if err != nil {
-					t.Fatalf("Failed to start app: %v", err)
-				}
+            if len(appDef.Listeners) > 0 {
+                err = manager.Start(ctx, appDef.Name)
+                if err != nil {
+                    t.Fatalf("Failed to start app: %v", err)
+                }
 
 				// Wait for startup
 				time.Sleep(3 * time.Second)
 
 				// Test HTTP connectivity if port specified
-				if tt.testPort != "" {
-					url := fmt.Sprintf("http://localhost:%s", tt.testPort)
-					if err := waitForHTTPResponse(url, 10*time.Second); err != nil {
-						t.Errorf("Failed to connect to app: %v", err)
-					}
-				}
-			}
+                if tt.testPort != "" {
+                    url := fmt.Sprintf("http://localhost:%s", tt.testPort)
+                    if err := waitForHTTPResponse(url, 10*time.Second); err != nil {
+                        t.Errorf("Failed to connect to app: %v", err)
+                    }
+                }
+            }
 
 			// Verify container has expected environment variables
 			if len(appDef.Environment) > 0 {
