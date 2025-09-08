@@ -1,0 +1,2 @@
+{ "error": "Bad Request", "code": 400, "message": "CAA policy prevents issuance for the chosen hostname. Update your DNS CAA records to allow Let’s Encrypt." }
+

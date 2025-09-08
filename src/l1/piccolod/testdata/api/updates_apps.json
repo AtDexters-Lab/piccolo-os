@@ -1,0 +1,7 @@
+{
+  "apps": [
+    { "name": "vaultwarden", "current_tag": "1.30.5", "available_tag": "1.30.6", "update_available": true },
+    { "name": "gitea", "current_tag": "1.21", "available_tag": null, "update_available": false }
+  ]
+}
+

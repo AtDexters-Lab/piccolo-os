@@ -1,0 +1,2 @@
+{ "error": "Conflict", "code": 409, "message": "Update failed: image pull denied or digest mismatch. The app remains on the previous version." }
+

@@ -1,0 +1,30 @@
+{
+  "data": {
+    "app": {
+      "id": "vaultwarden",
+      "name": "vaultwarden",
+      "image": "vaultwarden/server:1.30.5",
+      "subdomain": "vault",
+      "type": "container",
+      "status": "running",
+      "volumes": [
+        { "container": "/data", "host": "/var/piccolo/storage/vaultwarden/data" }
+      ],
+      "environment": { "ADMIN_TOKEN": "<redacted>" }
+    },
+    "services": [
+      {
+        "app": "vaultwarden",
+        "subdomain": "vault",
+        "name": "http",
+        "guest_port": 80,
+        "host_port": 30001,
+        "public_port": 0,
+        "flow": "tcp",
+        "protocol": "http",
+        "middleware": [],
+        "local_url": "http://127.0.0.1:30001/"
+      }
+    ]
+  }
+}

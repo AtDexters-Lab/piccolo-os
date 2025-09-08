@@ -1,0 +1,25 @@
+{
+  "disks": [
+    {
+      "id": "/dev/disk/by-id/nvme-SAMSUNG_MZVL21T0HCLR-00B00_ABC123",
+      "model": "Samsung 980 Pro 1TB",
+      "size_bytes": 1000204886016,
+      "health": "OK",
+      "status": "mounted",
+      "mountpoint": "/var/lib/piccolo/disks/data",
+      "encrypted": false,
+      "label": "data"
+    },
+    {
+      "id": "/dev/disk/by-id/usb-SanDisk_3.2Gen1_64GB_1234567890-0:0",
+      "model": "SanDisk USB 64GB",
+      "size_bytes": 64000000000,
+      "health": "OK",
+      "status": "new",
+      "mountpoint": null,
+      "encrypted": false,
+      "label": null
+    }
+  ]
+}
+

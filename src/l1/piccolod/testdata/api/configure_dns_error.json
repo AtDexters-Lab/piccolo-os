@@ -1,0 +1,2 @@
+{ "error": "Bad Request", "code": 400, "message": "DNS A/AAAA record for hostname not found. Point your hostname to the Nexus public IP and retry." }
+

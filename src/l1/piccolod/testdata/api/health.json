@@ -1,0 +1,16 @@
+{
+  "overall": "healthy",
+  "summary": "All ecosystem checks passed - piccolod is fully operational",
+  "checks": [
+    { "name": "Process Identity", "status": "pass", "description": "Running as root with proper privileges" },
+    { "name": "File System Access", "status": "pass", "description": "All required and optional paths accessible" },
+    { "name": "Device Access", "status": "pass", "description": "Required device nodes accessible" },
+    { "name": "Container Runtime", "status": "pass", "description": "Podman reachable and functional" },
+    { "name": "Network", "status": "pass", "description": "Outbound 80/443 reachable" }
+  ],
+  "permissions": {
+    "cap_sys_admin": "allowed",
+    "cgroup": "available"
+  }
+}
+

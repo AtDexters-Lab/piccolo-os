@@ -1,0 +1,8 @@
+{
+  "apps": [
+    { "name": "vaultwarden", "image": "vaultwarden/server:1.30.5", "description": "Lightweight Bitwarden-compatible password manager" },
+    { "name": "gitea", "image": "gitea/gitea:1.21", "description": "Self-hosted Git service" },
+    { "name": "wordpress", "image": "wordpress:6", "description": "Popular CMS" }
+  ]
+}
+

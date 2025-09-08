@@ -1,0 +1,15 @@
+{
+  "overall": "degraded",
+  "summary": "Minor issues detected - some advanced features may be limited",
+  "checks": [
+    { "name": "Process Identity", "status": "pass", "description": "Running as root with proper privileges" },
+    { "name": "File System Access", "status": "pass", "description": "All required and optional paths accessible" },
+    { "name": "Container Runtime", "status": "warn", "description": "Podman reachable but delayed responses" },
+    { "name": "Network", "status": "warn", "description": "Outbound 80 reachable, 443 blocked by proxy" }
+  ],
+  "permissions": {
+    "cap_sys_admin": "allowed",
+    "cgroup": "available"
+  }
+}
+

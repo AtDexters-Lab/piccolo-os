@@ -1,0 +1,7 @@
+{
+  "events": [
+    { "ts": "2025-09-08T10:00:00Z", "level": "info", "source": "updates", "message": "OS update 1.0.1 available", "next_step": "Apply on Updates page" },
+    { "ts": "2025-09-08T10:05:00Z", "level": "warn", "source": "remote", "message": "Remote access disabled", "next_step": "Configure Nexus to enable" }
+  ]
+}
+

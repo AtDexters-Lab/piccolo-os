@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "public_url": null,
+  "issuer": null,
+  "expires_at": null,
+  "next_renewal": null,
+  "warnings": ["Remote access is disabled. Configure Nexus to enable publishing."]
+}
+

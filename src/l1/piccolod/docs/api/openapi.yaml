@@ -1,0 +1,730 @@
+openapi: 3.0.3
+info:
+  title: Piccolo OS Admin API (Draft)
+  version: 0.1.0
+security:
+  - cookieAuth: []
+servers:
+  - url: /api/v1
+paths:
+  /apps:
+    get:
+      summary: List installed apps
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseApps'
+    post:
+      summary: Install or update an app from app.yaml
+      requestBody:
+        required: true
+        content:
+          application/x-yaml:
+            schema:
+              type: string
+          application/json:
+            schema:
+              type: object
+              properties:
+                app_definition:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseApp'
+        '400': { description: Bad Request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /apps/{name}:
+    get:
+      summary: Get app details (with services)
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseAppWithServices'
+    delete:
+      summary: Uninstall app
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+        - in: query
+          name: purge
+          schema: { type: boolean }
+      responses:
+        '200': { description: OK }
+  /apps/{name}/start:
+    post: { summary: Start app, responses: { '200': { description: OK } } }
+  /apps/{name}/stop:
+    post: { summary: Stop app, responses: { '200': { description: OK } } }
+  /apps/{name}/update:
+    post:
+      summary: Update an app to a newer tag
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tag: { type: string, nullable: true }
+      responses:
+        '200': { description: OK }
+        '409': { description: Conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /apps/{name}/revert:
+    post:
+      summary: Revert an app to previous version
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /apps/{name}/logs:
+    get:
+      summary: Get recent logs for an app
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+        - in: query
+          name: since
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppLogs' }
+        '404': { description: Not Found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /services:
+    get:
+      summary: List all service endpoints
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  services:
+                    type: array
+                    items: { $ref: '#/components/schemas/ServiceEndpoint' }
+  /services/{name}:
+    get:
+      summary: Get a single service endpoint by name
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service: { $ref: '#/components/schemas/ServiceEndpoint' }
+  /storage/disks:
+    get:
+      summary: List disks
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageDisks' }
+  /storage/disks/{id}/init:
+    post:
+      summary: Initialize (partition/format) and mount disk
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /storage/disks/{id}/use:
+    post:
+      summary: Use existing disk as-is (mount)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /storage/mounts:
+    get:
+      summary: List mounts
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageMounts' }
+  /storage/default-root:
+    post:
+      summary: Set default data root
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path: { type: string }
+      responses:
+        '200': { description: OK }
+  /storage/recovery-key:
+    get:
+      summary: Show recovery key status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecoveryKey' }
+  /storage/recovery-key/generate:
+    post:
+      summary: Generate a new recovery key
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecoveryKey' }
+  /storage/unlock:
+    post:
+      summary: Unlock encrypted volumes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password: { type: string, nullable: true }
+                recovery_key: { type: string, nullable: true }
+      responses:
+        '200': { description: OK }
+  /updates/os:
+    get:
+      summary: OS update status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OSUpdate' }
+  /updates/os/apply:
+    post:
+      summary: Apply OS update
+      responses:
+        '200': { description: OK }
+        '429': { description: Too Many Requests, headers: { Retry-After: { schema: { type: integer } } } }
+  /updates/os/rollback:
+    post:
+      summary: Roll back OS to previous version
+      responses:
+        '200': { description: OK }
+  /updates/apps:
+    get:
+      summary: App update status
+      responses:
+        '200': { description: OK }
+  /remote/status:
+    get:
+      summary: Remote access status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteStatus' }
+  /remote/configure:
+    post:
+      summary: Configure Nexus remote access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                endpoint: { type: string }
+                device_id: { type: string }
+                device_secret: { type: string }
+                hostname: { type: string }
+                acme_directory: { type: string, description: ACME directory URL for staging/tests }
+      responses:
+        '200': { description: OK }
+        '400': { description: Bad Request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '429': { description: Too Many Requests }
+  /remote/disable:
+    post:
+      summary: Disable remote access
+      responses:
+        '200': { description: OK }
+
+  /backup/list:
+    get:
+      summary: List backups
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupList' }
+  /backup/export:
+    post:
+      summary: Export configuration
+    responses:
+      '200':
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message: { type: string }
+                download_url: { type: string }
+  /backup/import:
+    post:
+      summary: Import configuration bundle
+    responses:
+      '200': { description: OK }
+  /backup/app/{name}:
+    post:
+      summary: Create per-app backup
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /restore/app/{name}:
+    post:
+      summary: Restore per-app backup (latest)
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /install/targets:
+    get:
+      summary: List install targets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallTargets' }
+  /install/plan:
+    post:
+      summary: Generate install plan (simulate)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallPlan' }
+  /install/run:
+    post:
+      summary: Run install to disk
+      responses:
+        '200': { description: OK }
+        '429': { description: Too Many Requests }
+  /install/fetch-latest:
+    post:
+      summary: Fetch latest signed image
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FetchLatest' }
+
+  /events:
+    get:
+      summary: Recent events
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Events' }
+
+  /logs/bundle:
+    get:
+      summary: Downloadable log bundle metadata
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bundle_id: { type: string }
+                  size_bytes: { type: integer }
+                  download_url: { type: string }
+  /logs/bundle/download:
+    get:
+      summary: Download logs bundle (zip)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /health:
+    get:
+      summary: Ecosystem health
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  /catalog:
+    get:
+      summary: Curated app catalog
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  apps:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        image: { type: string }
+                        description: { type: string }
+
+  /auth/setup:
+    post:
+      summary: First-run admin setup
+      responses:
+        '200': { description: OK }
+  /auth/login:
+    post:
+      summary: Login
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '429': { description: Too Many Requests, headers: { Retry-After: { schema: { type: integer } } } }
+  /auth/logout:
+    post:
+      summary: Logout
+      responses:
+        '200': { description: OK }
+  /auth/session:
+    get:
+      summary: Session status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+  /auth/password:
+    post:
+      summary: Change admin password (rewrap keys)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                old_password: { type: string }
+                new_password: { type: string }
+      responses:
+        '200': { description: OK }
+  /auth/csrf:
+    get:
+      summary: Get CSRF token
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        code: { type: integer }
+        message: { type: string }
+        details: { type: string, nullable: true }
+        next_step: { type: string, nullable: true }
+    ResponseApps:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/App' }
+        message: { type: string }
+    ResponseApp:
+      type: object
+      properties:
+        data: { $ref: '#/components/schemas/App' }
+        message: { type: string }
+    ResponseAppWithServices:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            app: { $ref: '#/components/schemas/App' }
+            services:
+              type: array
+              items: { $ref: '#/components/schemas/ServiceEndpoint' }
+    App:
+      type: object
+      properties:
+  /storage/encrypt-in-place:
+    post:
+      summary: Encrypt existing data in place
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path: { type: string }
+                dry_run: { type: boolean, default: true }
+                confirm: { type: boolean, default: false }
+      responses:
+        '200': { description: OK }
+        '400': { description: Bad Request }
+        id: { type: string }
+        name: { type: string }
+        image: { type: string }
+        subdomain: { type: string }
+  /remote/rotate:
+    post:
+      summary: Rotate device credentials for remote access
+      responses:
+        '200': { description: OK }
+        type: { type: string }
+        status: { type: string, enum: [running, stopped, error] }
+        volumes: { type: array, items: { $ref: '#/components/schemas/AppVolume' } }
+        environment: { type: object, additionalProperties: { type: string } }
+    AppVolume:
+      type: object
+      properties:
+        container: { type: string }
+        host: { type: string }
+        size_limit: { type: string }
+    ServiceEndpoint:
+      type: object
+      properties:
+        app: { type: string }
+        subdomain: { type: string }
+        name: { type: string }
+        guest_port: { type: integer }
+        host_port: { type: integer, description: Port bound on 127.0.0.1 for LAN }
+        public_port: { type: integer }
+        flow: { type: string }
+        protocol: { type: string }
+        middleware: { type: array, items: { type: object } }
+        local_url: { type: string, nullable: true }
+    StorageDisks:
+      type: object
+      properties:
+        disks:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              model: { type: string }
+              size_bytes: { type: integer }
+              health: { type: string }
+              status: { type: string }
+              mountpoint: { type: string, nullable: true }
+              encrypted: { type: boolean }
+              label: { type: string, nullable: true }
+    OSUpdate:
+      type: object
+      properties:
+        current_version: { type: string }
+        available_version: { type: string }
+        pending: { type: boolean }
+        requires_reboot: { type: boolean }
+        last_checked: { type: string, format: date-time }
+    RemoteStatus:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        public_url: { type: string, nullable: true }
+        issuer: { type: string, nullable: true }
+        expires_at: { type: string, format: date-time, nullable: true }
+        next_renewal: { type: string, format: date-time, nullable: true }
+        warnings:
+          type: array
+          items: { type: string }
+    StorageMounts:
+      type: object
+      properties:
+        mounts:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              device: { type: string }
+              type: { type: string }
+              options: { type: string }
+    RecoveryKey:
+      type: object
+      properties:
+        present: { type: boolean }
+        mnemonic: { type: string, nullable: true }
+    AppLogs:
+      type: object
+      properties:
+        app: { type: string }
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              ts: { type: string, format: date-time }
+              level: { type: string }
+              message: { type: string }
+    Events:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            type: object
+            properties:
+              ts: { type: string, format: date-time }
+              level: { type: string }
+              source: { type: string }
+              message: { type: string }
+              next_step: { type: string, nullable: true }
+    Health:
+      type: object
+      properties:
+        overall: { type: string, enum: [healthy, degraded, unhealthy] }
+        summary: { type: string }
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              status: { type: string, enum: [pass, fail, warn, info] }
+              description: { type: string }
+              details: { type: string }
+        permissions:
+          type: object
+          additionalProperties: { type: string }
+    BackupItem:
+      type: object
+      properties:
+        id: { type: string }
+        created_at: { type: string, format: date-time }
+        size_bytes: { type: integer }
+    BackupList:
+      type: object
+      properties:
+        backups:
+          type: array
+          items: { $ref: '#/components/schemas/BackupItem' }
+    InstallTarget:
+      type: object
+      properties:
+        id: { type: string }
+        model: { type: string }
+        size_bytes: { type: integer }
+        contents:
+          type: array
+          items: { type: string }
+        erase_warning: { type: boolean }
+    InstallTargets:
+      type: object
+      properties:
+        targets:
+          type: array
+          items: { $ref: '#/components/schemas/InstallTarget' }
+    InstallPlan:
+      type: object
+      properties:
+        plan:
+          type: object
+          properties:
+            target: { type: string }
+            actions:
+              type: array
+              items: { type: string }
+            simulate: { type: boolean }
+    FetchLatest:
+      type: object
+      properties:
+        version: { type: string }
+        verified: { type: boolean }
+        size_bytes: { type: integer }
+    Session:
+      type: object
+      properties:
+        authenticated: { type: boolean }
+        user: { type: string }
+        expires_at: { type: string, format: date-time }
+        volumes_locked: { type: boolean }
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: piccolo_session
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token

@@ -1,0 +1,6 @@
+{
+  "targets": [
+    { "id": "/dev/disk/by-id/nvme-SAMSUNG_1TB_ABC123", "model": "Samsung 980 Pro 1TB", "size_bytes": 1000204886016, "contents": ["EFI System", "btrfs root"], "erase_warning": true }
+  ]
+}
+

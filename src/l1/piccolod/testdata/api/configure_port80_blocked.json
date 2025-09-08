@@ -1,0 +1,2 @@
+{ "error": "Bad Request", "code": 400, "message": "Nexus is not reachable on TCP/80 from the internet. Open port 80 and try again." }
+

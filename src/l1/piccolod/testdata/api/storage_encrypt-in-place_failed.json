@@ -1,0 +1,2 @@
+{ "error": "Internal Server Error", "code": 500, "message": "Encryption migration failed due to insufficient space. Free up space and retry." }
+

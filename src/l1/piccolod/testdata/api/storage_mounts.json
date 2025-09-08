@@ -1,0 +1,6 @@
+{
+  "mounts": [
+    { "path": "/var/lib/piccolo/disks/data", "device": "/dev/nvme0n1p3", "type": "btrfs", "options": "rw,relatime,ssd,space_cache" }
+  ]
+}
+

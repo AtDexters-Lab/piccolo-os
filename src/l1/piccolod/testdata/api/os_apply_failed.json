@@ -1,0 +1,2 @@
+{ "error": "Internal Server Error", "code": 500, "message": "Transactional update failed during apply. See events for details and retry after checking disk space and network." }
+

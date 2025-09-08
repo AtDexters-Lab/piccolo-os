@@ -4,6 +4,10 @@ import (
     "fmt"
     "log"
     "net/http"
+    "os"
+    "path/filepath"
+    "io"
+    "strings"
 
     "piccolod/internal/app"
     "piccolod/internal/services"
@@ -181,6 +185,11 @@ func (s *GinServer) setupGinRoutes() {
 		// Service discovery endpoints (v1)
 		v1.GET("/services", s.handleGinServicesAll)
 		v1.GET("/apps/:name/services", s.handleGinServicesByApp)
+
+		// Demo mode: serve JSON fixtures under /api/v1/demo/* from ./testdata/api
+		if os.Getenv("PICCOLO_DEMO") != "" {
+			v1.GET("/demo/*path", s.handleDemoJSON)
+		}
 	}
 
 	// Admin routes
@@ -190,6 +199,58 @@ func (s *GinServer) setupGinRoutes() {
 	s.setupStaticRoutes(r)
 
 	s.router = r
+}
+
+// handleDemoJSON serves JSON fixtures from ./testdata/api when PICCOLO_DEMO is set.
+// Example: GET /api/v1/demo/services -> ./testdata/api/services.json
+// Example: GET /api/v1/demo/apps/vaultwarden -> ./testdata/api/app_vaultwarden.json
+func (s *GinServer) handleDemoJSON(c *gin.Context) {
+    raw := c.Param("path") // begins with '/'
+    clean := filepath.Clean(raw)
+    if clean == "/" || clean == "." {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "missing fixture path"})
+        return
+    }
+
+    // Map to fixture path under testdata/api with special handling for nested resources
+    rel := filepath.ToSlash(clean[1:])
+    parts := strings.Split(rel, "/")
+    var fixturePath string
+    if len(parts) >= 2 && parts[0] == "apps" {
+        app := parts[1]
+        if len(parts) == 2 {
+            fixturePath = filepath.Join("testdata", "api", "app_"+app+".json")
+        } else {
+            sub := strings.Join(parts[2:], "/")
+            fixturePath = filepath.Join("testdata", "api", "app_"+app, sub+".json")
+        }
+    } else if len(parts) >= 3 && parts[0] == "backup" && parts[1] == "app" {
+        fixturePath = filepath.Join("testdata", "api", "backup_app_"+parts[2]+".json")
+    } else if len(parts) >= 3 && parts[0] == "restore" && parts[1] == "app" {
+        fixturePath = filepath.Join("testdata", "api", "restore_app_"+parts[2]+".json")
+    } else {
+        dir := filepath.Dir(rel)
+        base := filepath.Base(rel)
+        var fname string
+        if dir == "." || dir == "" {
+            fname = base + ".json"
+        } else {
+            fname = filepath.Base(dir) + "_" + base + ".json"
+        }
+        fixturePath = filepath.Join("testdata", "api", fname)
+    }
+    f, err := os.Open(fixturePath)
+    if err != nil {
+        c.JSON(http.StatusNotFound, gin.H{"error": "fixture not found", "path": rel})
+        return
+    }
+    defer f.Close()
+
+    c.Header("Content-Type", "application/json; charset=utf-8")
+    if _, err := io.Copy(c.Writer, f); err != nil {
+        c.Status(http.StatusInternalServerError)
+        return
+    }
 }
 
 // Root handler - serve web UI or API info based on Accept header

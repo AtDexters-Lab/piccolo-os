@@ -1,0 +1,2 @@
+{ "error": "Bad Request", "code": 400, "message": "Cannot initialize disk: target is busy or has unsupported partitions. Unmount or choose a different disk." }
+

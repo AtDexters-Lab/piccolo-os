@@ -1,0 +1,8 @@
+{
+  "plan": {
+    "target": "/dev/disk/by-id/nvme-SAMSUNG_1TB_ABC123",
+    "actions": ["write image", "expand filesystem", "create data subvolumes"],
+    "simulate": true
+  }
+}
+
