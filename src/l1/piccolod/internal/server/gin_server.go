@@ -8,6 +8,7 @@ import (
     "path/filepath"
     "io"
     "strings"
+    stdfs "io/fs"
 
     "piccolod/internal/app"
     "piccolod/internal/services"
@@ -24,6 +25,8 @@ import (
 
 	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/gin-gonic/gin"
+
+    webassets "piccolod"
 )
 
 // GinServer holds all the core components for our application using Gin framework.
@@ -348,28 +351,44 @@ func (s *GinServer) handleGinReadinessCheck(c *gin.Context) {
 
 // setupStaticRoutes configures static file serving for web UI
 func (s *GinServer) setupStaticRoutes(r *gin.Engine) {
-	// TODO: Make these paths configurable
-	const webDir = "./web"
-	const staticDir = webDir + "/static"
+	// Development override: serve from disk when PICCOLO_UI_DIR is set
+	if uiDir := os.Getenv("PICCOLO_UI_DIR"); uiDir != "" {
+		staticDir := filepath.Join(uiDir, "static")
+		r.Static("/static", staticDir)
+		r.StaticFile("/favicon.ico", filepath.Join(staticDir, "favicon.ico"))
+		r.StaticFile("/robots.txt", filepath.Join(staticDir, "robots.txt"))
+		// SPA index
+		r.GET("/", func(c *gin.Context) { c.File(filepath.Join(uiDir, "index.html")) })
+		// Fallback for client-side routes
+		r.NoRoute(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+				return
+			}
+			c.File(filepath.Join(uiDir, "index.html"))
+		})
+		return
+	}
 
-	// Serve static assets (CSS, JS, images, etc.)
-	r.Static("/static", staticDir)
-
-	// Serve common static files
-	r.StaticFile("/favicon.ico", staticDir+"/favicon.ico")
-	r.StaticFile("/robots.txt", staticDir+"/robots.txt")
-
-	// Web UI routes (when implemented)
-	// For now, these will return 404, but routes are ready
-	r.GET("/admin", s.handleWebUI)
-	r.GET("/admin/*path", s.handleWebUI)
-	r.GET("/apps", s.handleWebUI)
-	r.GET("/apps/*path", s.handleWebUI)
+	// Default: serve embedded UI from go:embed FS
+	uiFS := webassets.FS()
+	staticFS, _ := stdfs.Sub(uiFS, "static")
+	r.StaticFS("/static", http.FS(staticFS))
+	r.GET("/favicon.ico", func(c *gin.Context) { c.FileFromFS("static/favicon.ico", http.FS(uiFS)) })
+	r.GET("/robots.txt", func(c *gin.Context) { c.FileFromFS("static/robots.txt", http.FS(uiFS)) })
+	r.GET("/", func(c *gin.Context) { c.FileFromFS("index.html", http.FS(uiFS)) })
+	r.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.FileFromFS("index.html", http.FS(uiFS))
+	})
 }
 
 // handleWebUI serves the web UI
 func (s *GinServer) handleWebUI(c *gin.Context) {
-	// Serve the main HTML file for all web UI routes
-	// This enables client-side routing for the SPA
-	c.File("./web/index.html")
+	// Legacy route: serve SPA index from embedded FS
+	uiFS := webassets.FS()
+	c.FileFromFS("index.html", http.FS(uiFS))
 }
