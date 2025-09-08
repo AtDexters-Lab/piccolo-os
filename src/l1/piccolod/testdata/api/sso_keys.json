@@ -1,0 +1,2 @@
+{ "keys": [ { "kty": "OKP", "crv": "Ed25519", "x": "dGVzdC1wdWJrZXk", "kid": "demo-1" } ] }
+

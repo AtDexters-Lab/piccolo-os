@@ -1,0 +1,2 @@
+{ "message": "Redirecting to gate callback with one-time code", "location": "/api/v1/demo/apps/vaultwarden/sso/callback?code=demo-code-123&return=%2F" }
+

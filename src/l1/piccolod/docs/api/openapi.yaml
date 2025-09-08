@@ -67,9 +67,25 @@ paths:
       responses:
         '200': { description: OK }
   /apps/{name}/start:
-    post: { summary: Start app, responses: { '200': { description: OK } } }
+    post:
+      summary: Start app
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
   /apps/{name}/stop:
-    post: { summary: Stop app, responses: { '200': { description: OK } } }
+    post:
+      summary: Stop app
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
   /apps/{name}/update:
     post:
       summary: Update an app to a newer tag
@@ -302,21 +318,21 @@ paths:
   /backup/export:
     post:
       summary: Export configuration
-    responses:
-      '200':
-        description: OK
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                message: { type: string }
-                download_url: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  download_url: { type: string }
   /backup/import:
     post:
       summary: Import configuration bundle
-    responses:
-      '200': { description: OK }
+      responses:
+        '200': { description: OK }
   /backup/app/{name}:
     post:
       summary: Create per-app backup
@@ -491,6 +507,74 @@ paths:
                 properties:
                   token: { type: string }
 
+  /sso/start:
+    get:
+      summary: Begin app SSO (portal issues one-time ticket and redirects)
+      parameters:
+        - in: query
+          name: app
+          required: true
+          schema: { type: string }
+        - in: query
+          name: return
+          required: true
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect to gate callback with code
+          headers:
+            Location:
+              schema: { type: string }
+              description: Redirect URI including one-time code
+  /sso/consume:
+    post:
+      summary: Exchange one-time code for app session (gate back-channel)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  app: { type: string }
+                  token: { type: string, description: Signed app session (JWT or opaque) }
+                  expires_at: { type: string, format: date-time }
+        '400': { description: Bad Request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /sso/keys:
+    get:
+      summary: Public keys for verifying SSO tokens (JWKS)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kty: { type: string }
+                        crv: { type: string }
+                        x: { type: string }
+                        kid: { type: string }
+  /sso/logout:
+    post:
+      summary: Invalidate current portal session and optionally broadcast to gates
+      responses:
+        '200': { description: OK }
+
 components:
   schemas:
     ErrorResponse:
@@ -525,31 +609,10 @@ components:
     App:
       type: object
       properties:
-  /storage/encrypt-in-place:
-    post:
-      summary: Encrypt existing data in place
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                path: { type: string }
-                dry_run: { type: boolean, default: true }
-                confirm: { type: boolean, default: false }
-      responses:
-        '200': { description: OK }
-        '400': { description: Bad Request }
         id: { type: string }
         name: { type: string }
         image: { type: string }
         subdomain: { type: string }
-  /remote/rotate:
-    post:
-      summary: Rotate device credentials for remote access
-      responses:
-        '200': { description: OK }
         type: { type: string }
         status: { type: string, enum: [running, stopped, error] }
         volumes: { type: array, items: { $ref: '#/components/schemas/AppVolume' } }

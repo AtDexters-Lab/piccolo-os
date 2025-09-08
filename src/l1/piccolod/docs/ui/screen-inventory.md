@@ -65,3 +65,11 @@ Purpose: Freeze the initial UI based on the PRD and acceptance features, mapping
 - All routes have mock equivalents under `/api/v1/demo/*` to support UI development without live backends.
 - JSON shapes are mirrored in `docs/api/openapi.yaml` and fixtures in `testdata/api/`.
 - See also: [Demo Fixture Index](./demo-fixture-index.md) for quick QA endpoints.
+
+## SSO & App Access
+
+- Gate in front of every app: reverse proxy enforces auth, performs SSO, and strips sensitive headers before forwarding to containers.
+- Portal cookie isolation: portal session cookie is scoped to the portal origin only; apps never receive or read it.
+- Ticket SSO flow: gate → 302 to portal `/sso/start?app=<id>&return=<url>` → portal issues one‑time code → gate calls `/sso/consume` → mint app‑scoped cookie (`app_<name>_session`).
+- Endpoints: `/sso/start`, `/sso/consume`, `/sso/keys`, `/sso/logout` (see OpenAPI + Demo Index).
+- Local vs remote: works for HTTP (local) and HTTPS (remote). Gate always strips Cookie/Authorization when proxying to apps. Per‑app `.local` subdomains can be added later for stricter origin isolation.

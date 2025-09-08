@@ -12,6 +12,12 @@ Purpose: Quickly exercise success and error states for each acceptance scenario 
 - Change password (ok): `/auth/password`
 - Change password (fail): `/auth/password_failed`
 
+## SSO (Portal ↔ App Gate)
+- Start SSO (redirect metadata): `/sso/start`
+- Consume ticket (gate back‑channel): `/sso/consume`
+- Public keys (JWKS): `/sso/keys`
+- Logout: `/sso/logout`
+
 ## Dashboard, Health, Events
 - Health (ok): `/health`
 - Health (degraded): `/health_degraded`
