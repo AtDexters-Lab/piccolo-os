@@ -113,7 +113,10 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 
 // Start runs the Gin HTTP server and starts mDNS advertising.
 func (s *GinServer) Start() error {
-    const port = "80"
+    port := os.Getenv("PORT")
+    if port == "" {
+        port = "80"
+    }
 
     // Start mDNS advertising - this must succeed
     if err := s.mdnsManager.Start(); err != nil {
@@ -133,7 +136,7 @@ func (s *GinServer) Start() error {
 		log.Printf("INFO: Notified systemd that service is ready")
 	}
 
-	return s.router.Run(":" + port)
+    return s.router.Run(":" + port)
 }
 
 // Stop gracefully shuts down the server and all its components.
@@ -148,6 +151,11 @@ func (s *GinServer) Stop() error {
 // setupGinRoutes defines all API endpoints using Gin router.
 func (s *GinServer) setupGinRoutes() {
 	r := gin.New()
+
+	// Avoid implicit redirects that can cause loops during SPA routing
+	r.RedirectTrailingSlash = false
+	r.RedirectFixedPath = false
+	r.RemoveExtraSlash = false
 
 	// Add basic middleware
 	r.Use(gin.Logger())
@@ -267,9 +275,20 @@ func (s *GinServer) handleGinRoot(c *gin.Context) {
 		})
 		return
 	}
-	
-	// Otherwise serve the web UI
-	c.File("./web/index.html")
+
+	// Otherwise serve the web UI (dev override or embedded) without triggering file-server redirects
+	if uiDir := os.Getenv("PICCOLO_UI_DIR"); uiDir != "" {
+		if b, err := os.ReadFile(filepath.Join(uiDir, "index.html")); err == nil {
+			c.Data(http.StatusOK, "text/html; charset=utf-8", b)
+			return
+		}
+	}
+	uiFS := webassets.FS()
+	if b, err := stdfs.ReadFile(uiFS, "index.html"); err == nil {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", b)
+		return
+	}
+	c.String(http.StatusInternalServerError, "index.html not found")
 }
 
 func (s *GinServer) handleGinContainers(c *gin.Context) {
@@ -352,13 +371,27 @@ func (s *GinServer) handleGinReadinessCheck(c *gin.Context) {
 // setupStaticRoutes configures static file serving for web UI
 func (s *GinServer) setupStaticRoutes(r *gin.Engine) {
 	// Development override: serve from disk when PICCOLO_UI_DIR is set
-	if uiDir := os.Getenv("PICCOLO_UI_DIR"); uiDir != "" {
-		staticDir := filepath.Join(uiDir, "static")
-		r.Static("/static", staticDir)
-		r.StaticFile("/favicon.ico", filepath.Join(staticDir, "favicon.ico"))
-		r.StaticFile("/robots.txt", filepath.Join(staticDir, "robots.txt"))
-		// SPA index
-		r.GET("/", func(c *gin.Context) { c.File(filepath.Join(uiDir, "index.html")) })
+    if uiDir := os.Getenv("PICCOLO_UI_DIR"); uiDir != "" {
+        assetsDir := filepath.Join(uiDir, "assets")
+        r.Static("/assets", assetsDir)
+        // Favicon and robots from root if present; otherwise 204
+        r.GET("/favicon.ico", func(c *gin.Context) {
+            fp := filepath.Join(uiDir, "favicon.ico")
+            if _, err := os.Stat(fp); err == nil {
+                c.File(fp)
+                return
+            }
+            c.Status(http.StatusNoContent)
+        })
+        r.GET("/robots.txt", func(c *gin.Context) {
+            fp := filepath.Join(uiDir, "robots.txt")
+            if _, err := os.Stat(fp); err == nil {
+                c.File(fp)
+                return
+            }
+            c.Status(http.StatusNoContent)
+        })
+		// Root is handled by handleGinRoot; don't register here
 		// Fallback for client-side routes
 		r.NoRoute(func(c *gin.Context) {
 			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
@@ -371,12 +404,25 @@ func (s *GinServer) setupStaticRoutes(r *gin.Engine) {
 	}
 
 	// Default: serve embedded UI from go:embed FS
-	uiFS := webassets.FS()
-	staticFS, _ := stdfs.Sub(uiFS, "static")
-	r.StaticFS("/static", http.FS(staticFS))
-	r.GET("/favicon.ico", func(c *gin.Context) { c.FileFromFS("static/favicon.ico", http.FS(uiFS)) })
-	r.GET("/robots.txt", func(c *gin.Context) { c.FileFromFS("static/robots.txt", http.FS(uiFS)) })
-	r.GET("/", func(c *gin.Context) { c.FileFromFS("index.html", http.FS(uiFS)) })
+    uiFS := webassets.FS()
+    if assetsFS, err := stdfs.Sub(uiFS, "assets"); err == nil {
+        r.StaticFS("/assets", http.FS(assetsFS))
+    }
+    r.GET("/favicon.ico", func(c *gin.Context) {
+        if _, err := stdfs.Stat(uiFS, "favicon.ico"); err == nil {
+            c.FileFromFS("favicon.ico", http.FS(uiFS))
+            return
+        }
+        c.Status(http.StatusNoContent)
+    })
+    r.GET("/robots.txt", func(c *gin.Context) {
+        if _, err := stdfs.Stat(uiFS, "robots.txt"); err == nil {
+            c.FileFromFS("robots.txt", http.FS(uiFS))
+            return
+        }
+        c.Status(http.StatusNoContent)
+    })
+	// Root is handled by handleGinRoot; don't register here
 	r.NoRoute(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})

@@ -6,6 +6,7 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "baseUrl": ".",
+    "verbatimModuleSyntax": true,
     "paths": {
       "@api/*": ["src/api/*"],
       "@components/*": ["src/components/*"],
@@ -16,4 +17,3 @@
   },
   "include": ["src"]
 }
-

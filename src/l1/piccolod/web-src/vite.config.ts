@@ -1,12 +1,13 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import sveltePreprocess from 'svelte-preprocess';
 import path from 'node:path';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const demo = process.env.VITE_API_DEMO === '1' || mode === 'demo';
   return {
-    plugins: [svelte()],
+    plugins: [svelte({ preprocess: sveltePreprocess() })],
     build: {
       outDir: path.resolve(__dirname, '../web'),
       emptyOutDir: true,

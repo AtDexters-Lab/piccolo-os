@@ -28,17 +28,21 @@ func (s *GinServer) corsMiddleware() gin.HandlerFunc {
 
 // securityHeadersMiddleware adds security headers
 func (s *GinServer) securityHeadersMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Security headers
-		c.Header("X-Content-Type-Options", "nosniff")
-		c.Header("X-Frame-Options", "DENY")
-		c.Header("X-XSS-Protection", "1; mode=block")
-		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
-		
-		// API identification
-		c.Header("X-Powered-By", "Piccolo OS")
-		c.Header("X-Service-Version", s.version)
+    return func(c *gin.Context) {
+        // Security headers
+        c.Header("X-Content-Type-Options", "nosniff")
+        c.Header("X-Frame-Options", "DENY")
+        c.Header("X-XSS-Protection", "1; mode=block")
+        // Only set HSTS when request is HTTPS (or forwarded as HTTPS)
+        host := c.Request.Host
+        if (c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https") && host != "localhost" && host != "127.0.0.1" {
+            c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        }
+        c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+        
+        // API identification
+        c.Header("X-Powered-By", "Piccolo OS")
+        c.Header("X-Service-Version", s.version)
 
 		c.Next()
 	}
