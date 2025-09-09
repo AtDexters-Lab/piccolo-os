@@ -1,9 +1,10 @@
 package server
 
 import (
-	"fmt"
-	"net/http"
-	"strings"
+    "fmt"
+    "net/http"
+    "strings"
+    "os"
 
 	"github.com/gin-gonic/gin"
 	"piccolod/internal/app"
@@ -145,36 +146,46 @@ func (s *GinServer) handleGinAppUninstall(c *gin.Context) {
 
 // handleGinAppStart handles POST /api/v1/apps/:name/start - Start app container
 func (s *GinServer) handleGinAppStart(c *gin.Context) {
-	appName := c.Param("name")
-	
-	err := s.appManager.Start(c.Request.Context(), appName)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			writeGinError(c, http.StatusNotFound, err.Error())
-		} else {
-			writeGinError(c, http.StatusInternalServerError, "Failed to start app: "+err.Error())
-		}
-		return
-	}
-	
-	writeGinSuccess(c, nil, "App '"+appName+"' started successfully")
+    appName := c.Param("name")
+    // Demo mode: simulate success without backend
+    if os.Getenv("PICCOLO_DEMO") != "" {
+        writeGinSuccess(c, nil, "App '"+appName+"' started successfully")
+        return
+    }
+
+    err := s.appManager.Start(c.Request.Context(), appName)
+    if err != nil {
+        if strings.Contains(err.Error(), "not found") {
+            writeGinError(c, http.StatusNotFound, err.Error())
+        } else {
+            writeGinError(c, http.StatusInternalServerError, "Failed to start app: "+err.Error())
+        }
+        return
+    }
+    
+    writeGinSuccess(c, nil, "App '"+appName+"' started successfully")
 }
 
 // handleGinAppStop handles POST /api/v1/apps/:name/stop - Stop app container
 func (s *GinServer) handleGinAppStop(c *gin.Context) {
-	appName := c.Param("name")
-	
-	err := s.appManager.Stop(c.Request.Context(), appName)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			writeGinError(c, http.StatusNotFound, err.Error())
-		} else {
-			writeGinError(c, http.StatusInternalServerError, "Failed to stop app: "+err.Error())
-		}
-		return
-	}
-	
-	writeGinSuccess(c, nil, "App '"+appName+"' stopped successfully")
+    appName := c.Param("name")
+    // Demo mode: simulate success without backend
+    if os.Getenv("PICCOLO_DEMO") != "" {
+        writeGinSuccess(c, nil, "App '"+appName+"' stopped successfully")
+        return
+    }
+
+    err := s.appManager.Stop(c.Request.Context(), appName)
+    if err != nil {
+        if strings.Contains(err.Error(), "not found") {
+            writeGinError(c, http.StatusNotFound, err.Error())
+        } else {
+            writeGinError(c, http.StatusInternalServerError, "Failed to stop app: "+err.Error())
+        }
+        return
+    }
+    
+    writeGinSuccess(c, nil, "App '"+appName+"' stopped successfully")
 }
 
 // handleGinAppEnable handles POST /api/v1/apps/:name/enable - Enable app (start on boot)

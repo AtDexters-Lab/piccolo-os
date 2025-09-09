@@ -199,7 +199,7 @@ func (s *GinServer) setupGinRoutes() {
 
 		// Demo mode: serve JSON fixtures under /api/v1/demo/* from ./testdata/api
 		if os.Getenv("PICCOLO_DEMO") != "" {
-			v1.GET("/demo/*path", s.handleDemoJSON)
+			v1.Any("/demo/*path", s.handleDemoJSON)
 		}
 	}
 
@@ -252,7 +252,8 @@ func (s *GinServer) handleDemoJSON(c *gin.Context) {
     }
     f, err := os.Open(fixturePath)
     if err != nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "fixture not found", "path": rel})
+        // For demo actions without explicit fixtures, return a generic success to avoid UI breakage
+        c.JSON(http.StatusOK, gin.H{"message": "demo"})
         return
     }
     defer f.Close()
@@ -374,6 +375,7 @@ func (s *GinServer) setupStaticRoutes(r *gin.Engine) {
     if uiDir := os.Getenv("PICCOLO_UI_DIR"); uiDir != "" {
         assetsDir := filepath.Join(uiDir, "assets")
         r.Static("/assets", assetsDir)
+        r.GET("/assets", func(c *gin.Context) { c.Status(http.StatusNoContent) })
         // Favicon and robots from root if present; otherwise 204
         r.GET("/favicon.ico", func(c *gin.Context) {
             fp := filepath.Join(uiDir, "favicon.ico")
@@ -408,6 +410,7 @@ func (s *GinServer) setupStaticRoutes(r *gin.Engine) {
     if assetsFS, err := stdfs.Sub(uiFS, "assets"); err == nil {
         r.StaticFS("/assets", http.FS(assetsFS))
     }
+    r.GET("/assets", func(c *gin.Context) { c.Status(http.StatusNoContent) })
     r.GET("/favicon.ico", func(c *gin.Context) {
         if _, err := stdfs.Stat(uiFS, "favicon.ico"); err == nil {
             c.FileFromFS("favicon.ico", http.FS(uiFS))

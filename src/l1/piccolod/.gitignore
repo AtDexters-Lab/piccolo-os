@@ -1,3 +1,8 @@
 build
 .gocache
 node_modules
+
+# Piccolod artifacts
+src/l1/piccolod/piccolod
+src/l1/piccolod/web/assets/
+src/l1/piccolod/web-src/test-results/

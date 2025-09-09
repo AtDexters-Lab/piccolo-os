@@ -53,3 +53,25 @@
 ## Local Dev Notes
 - Run daemon: `go run -ldflags "-X main.version=dev" ./cmd/piccolod`.
 - Lint/format quickly: `go vet ./... && go fmt ./...`.
+
+## UI Development Cadence (Piccolo Web)
+
+Must-read docs when starting a UI session:
+
+- `docs/ui/screen-inventory.md` — screens and routes.
+- `docs/ui/traceability.md` — acceptance scenarios mapped to screens/APIs.
+- `docs/ui/ui-implementation-plan.md` — architecture, milestones, workflow.
+- `docs/ui/demo-fixture-index.md` — demo endpoints for happy/error paths.
+- `docs/api/openapi.yaml` — API contract and source of generated types.
+ - Quickstart commands: see `docs/ui/dev.md` (one‑liners, workflow, notes).
+
+Commands:
+
+- First-time setup: `make deps` (UI deps), `make e2e-deps` (Playwright browsers).
+- Dev loop: `make ui DEMO=1 && make server && make demo-serve`.
+- Full validation: `make e2e` (builds and runs Playwright against demo server).
+
+Notes:
+
+- Playwright tests are configured to fail on any browser console error to catch regressions early.
+- UI builds to `web/` and is embedded via go:embed; override via `PICCOLO_UI_DIR` for local serving.

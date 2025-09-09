@@ -1,5 +1,14 @@
 import { test, expect } from '@playwright/test';
 
+// Fail tests on any browser console error
+test.beforeEach(async ({ page }) => {
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') {
+      throw new Error(`Console error: ${msg.text()}`);
+    }
+  });
+});
+
 test('dashboard loads and shows header', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveTitle(/Piccolo OS/);
@@ -13,4 +22,3 @@ test('services API responds (demo)', async ({ request }) => {
   const json = await res.json();
   expect(json).toHaveProperty('services');
 });
-
