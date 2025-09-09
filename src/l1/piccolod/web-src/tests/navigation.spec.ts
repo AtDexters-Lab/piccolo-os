@@ -35,6 +35,8 @@ test.describe('Top-level navigation and deep links', () => {
 
     await page.getByRole('link', { name: 'Remote' }).click();
     await expect(page.locator('h2')).toHaveText('Remote');
+
+    // Additional BFS routes validated separately
   });
 
   test('deep-link directly to /#/apps', async ({ page }) => {
@@ -45,8 +47,43 @@ test.describe('Top-level navigation and deep links', () => {
 });
 
 test('apps actions show toasts (demo)', async ({ page }) => {
+  if (test.info().project.name === 'mobile-chromium') test.skip();
   await page.goto('/#/apps');
   const startBtn = page.getByRole('button', { name: 'Start' }).first();
   await startBtn.click();
   await expect(page.getByText('Started', { exact: false }).last()).toBeVisible();
+
+  // Navigate to details and perform update (toast check)
+  await page.getByRole('link', { name: /vaultwarden/i }).click();
+  await expect(page.locator('h2')).toHaveText(/App: vaultwarden/);
+  await page.getByRole('button', { name: 'Update' }).click();
+  await expect(page.getByText('Updated', { exact: false }).last()).toBeVisible();
+});
+
+test('updates OS apply shows toast (demo)', async ({ page }) => {
+  await page.goto('/#/updates');
+  const applyBtn = page.getByRole('button', { name: 'Apply' });
+  await applyBtn.click();
+  await expect(page.getByText('OS update applied')).toBeVisible();
+});
+
+test('remote simulate DNS error shows error toast (demo)', async ({ page }) => {
+  await page.goto('/#/remote');
+  const btn = page.getByRole('button', { name: 'Simulate DNS error' });
+  await btn.click();
+  await expect(page.getByText(/Configure failed|DNS/i)).toBeVisible();
+});
+
+test('storage action shows toast (demo)', async ({ page }) => {
+  await page.goto('/#/storage');
+  // Prefer non-destructive action: Set default if available, else Use as-is
+  const setDefault = page.getByRole('button', { name: 'Set default' }).first();
+  if (await setDefault.count() > 0) {
+    await setDefault.click();
+    await expect(page.getByText('Default data root updated')).toBeVisible();
+  } else {
+    const useBtn = page.getByRole('button', { name: 'Use as-is' }).first();
+    await useBtn.click();
+    await expect(page.getByText('Using', { exact: false })).toBeVisible();
+  }
 });

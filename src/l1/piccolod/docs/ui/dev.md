@@ -37,6 +37,7 @@ Notes
 - Full validation: `make e2e` (builds and runs Playwright tests).
 - Tests fail on any browser console error (caught via Playwright hooks).
 - First time only: `make deps` (UI deps) and `make e2e-deps` (Playwright browsers).
+- Mobile‑first: Playwright runs on Desktop and Pixel 5; mobile tests assert no horizontal scroll and working nav menu.
 
 ## Must-read Docs for UI Sessions
 - `docs/ui/screen-inventory.md` — screens/routes and API mapping.

@@ -11,7 +11,15 @@ export default defineConfig({
     baseURL: process.env.BASE_URL || 'http://localhost:8080',
     headless: true,
     viewport: { width: 1280, height: 800 },
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+    trace: 'retain-on-failure',
   },
+  reporter: [
+    ['list'],
+    ['json', { outputFile: 'test-results/report.json' }],
+    ['html', { open: 'never', outputFolder: 'test-results/html' }],
+  ],
   webServer: {
     command: 'PORT=8080 PICCOLO_DEMO=1 ./piccolod',
     port: 8080,
@@ -20,6 +28,7 @@ export default defineConfig({
     cwd: path.resolve(__dirname, '..'),
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', testMatch: ['tests/**/*.spec.ts', '!tests/mobile.spec.ts'], use: { ...devices['Desktop Chrome'] } },
+    { name: 'mobile-chromium', testMatch: ['tests/mobile.spec.ts'], use: { ...devices['Pixel 5'] } },
   ],
 });

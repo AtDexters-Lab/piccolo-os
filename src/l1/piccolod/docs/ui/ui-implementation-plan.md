@@ -7,6 +7,7 @@ Purpose: Build a small, fast SPA that fulfills all acceptance scenarios using th
 - Contract‑first: generate types from `docs/api/openapi.yaml`; no ad‑hoc shapes.
 - Mock‑first: develop against `/api/v1/demo/*`; flip to `/api/v1` for prod.
 - Security: cookie‑based auth (HttpOnly, SameSite=Lax) + CSRF; portal cookie never reaches apps; SSO handshake via gate.
+- Mobile‑first: primary target is mobile; design and tests prioritize small viewports.
 - Performance: <100KB gzipped initial JS; route code‑splitting.
 
 ## Architecture
@@ -15,6 +16,7 @@ Purpose: Build a small, fast SPA that fulfills all acceptance scenarios using th
 - Data: TanStack Query (svelte-query) for fetching, cache, retries, polling.
 - API types: generated from OpenAPI; centralized fetch wrapper with CSRF and error normalization.
 - Routing: file/folder routes with code‑split chunks per screen.
+- Mobile foundation: responsive header with menu toggle; card‑first layouts; overflow handled locally (see `docs/ui/mobile-first.md`).
 
 Related docs
 - Screen inventory: `docs/ui/screen-inventory.md`
@@ -58,6 +60,7 @@ Related docs
 - Unit (Vitest): component logic (LogsViewer, Wizard, Tables).
 - Contract: kin‑openapi validation (added) + openapi‑typescript type gen check in CI.
 - Performance: bundle size check and optional Lighthouse CI.
+- Mobile‑first: run suites on Desktop Chrome and Pixel 5; fail tests on any console error; assert no page‑level horizontal scroll on key routes.
 
 ## Milestones
 - M0 Scaffold (Day 1): Vite+Svelte, Tailwind, routing, query client, session store, API client, demo toggle.
@@ -80,4 +83,3 @@ Related docs
 - API/UI drift → type gen + spec validation in CI.
 - Long‑running ops complexity → unified progress/polling helpers + clear cancel/retry.
 - Security regressions → HttpOnly cookies, CSRF on all mutations, CSP, strict CORS, gate stripping.
-

@@ -61,9 +61,11 @@ Must-read docs when starting a UI session:
 - `docs/ui/screen-inventory.md` — screens and routes.
 - `docs/ui/traceability.md` — acceptance scenarios mapped to screens/APIs.
 - `docs/ui/ui-implementation-plan.md` — architecture, milestones, workflow.
+- `docs/ui/bfs-tree.md` — breadth-first plan (levels, status, mapping).
 - `docs/ui/demo-fixture-index.md` — demo endpoints for happy/error paths.
 - `docs/api/openapi.yaml` — API contract and source of generated types.
- - Quickstart commands: see `docs/ui/dev.md` (one‑liners, workflow, notes).
+- Quickstart commands: see `docs/ui/dev.md` (one‑liners, workflow, notes).
+- Mobile-first guidelines: see `docs/ui/mobile-first.md` (layout, overflow, touch, testing).
 
 Commands:
 

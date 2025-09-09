@@ -4,4 +4,39 @@
 
 /* Light layout defaults */
 html, body, #app { height: 100%; }
+/* Avoid accidental horizontal overflow by constraining elements */
+/* Do not hide overflows globally; fix offenders explicitly */
 
+/* Fluid media and code blocks */
+img, video { max-width: 100%; height: auto; }
+pre { overflow-x: auto; }
+table { display: block; width: 100%; overflow-x: auto; }
+code, pre, td, th { word-break: break-word; }
+
+
+/* Stacked table pattern for mobile-first, reflows rows as cards */
+@media (max-width: 767px) {
+  .stacked-table { display: block; width: 100%; }
+  .stacked-table thead { display: none; }
+  .stacked-table tbody { display: block; }
+  .stacked-table tr {
+    display: block;
+    background: #ffffff;
+    border: 1px solid #e5e7eb; /* gray-200 */
+    border-radius: 0.5rem; /* rounded */
+    margin-bottom: 0.75rem; /* space between cards */
+  }
+  .stacked-table td {
+    display: grid;
+    grid-template-columns: 7rem 1fr;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #f3f4f6; /* gray-100 */
+  }
+  .stacked-table td:last-child { border-bottom: 0; }
+  .stacked-table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: #374151; /* gray-700 */
+  }
+}

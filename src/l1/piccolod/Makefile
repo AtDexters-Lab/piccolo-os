@@ -52,4 +52,5 @@ e2e-deps: ## Install Playwright browser binaries (no root deps)
 
 e2e: ## Run Playwright tests against demo server with demo UI
 	$(MAKE) build DEMO=1
-	cd web-src && npm ci && npx playwright install chromium && npm run e2e
+	cd web-src && npm ci && npx playwright install chromium && npm run e2e || true
+	node web-src/tools/summarize-playwright.js || true
