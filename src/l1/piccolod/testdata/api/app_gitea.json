@@ -1,0 +1,31 @@
+{
+  "data": {
+    "app": {
+      "id": "gitea",
+      "name": "gitea",
+      "image": "gitea/gitea:1.21.11-rootless",
+      "subdomain": "gitea",
+      "type": "container",
+      "status": "running",
+      "volumes": [
+        { "container": "/data", "host": "/var/piccolo/storage/gitea/data" }
+      ],
+      "environment": { "ROOT_URL": "http://127.0.0.1:30002/" }
+    },
+    "services": [
+      {
+        "app": "gitea",
+        "subdomain": "gitea",
+        "name": "http",
+        "guest_port": 3000,
+        "host_port": 30002,
+        "public_port": 0,
+        "flow": "tcp",
+        "protocol": "http",
+        "middleware": [],
+        "local_url": "http://127.0.0.1:30002/"
+      }
+    ]
+  }
+}
+

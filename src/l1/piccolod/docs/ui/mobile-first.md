@@ -7,6 +7,11 @@ This UI targets mobile devices as a first‑class environment. The design and te
 - Content: single column on small screens; expand to grid at `md`/`lg`.
 - Avoid fixed widths; prefer fluid widths and responsive spacing.
 
+Notes
+- Mobile nav is rendered conditionally (Svelte `{#if}`) to avoid class conflicts; desktop nav is a separate element visible at `md+`.
+- Menu button tap target is >= 44px and exposes `aria-label`, `aria-controls`, and `aria-expanded`.
+- E2E asserts that toggling the menu shows/hides the nav and that the page has no horizontal scroll.
+
 ## Overflow & Scrolling
 - Do not hide overflows globally. Fix offenders explicitly:
   - `pre` and `table` use `overflow-x: auto`.
@@ -46,4 +51,3 @@ This UI targets mobile devices as a first‑class environment. The design and te
 - Apps list: ensure buttons are accessible on mobile; switch to card list if needed.
 - App details: services links visible; logs scrollable (done).
 - Storage/Updates/Remote/Install/Backup/Events/Settings: shallow mobile pages (done); deepen iteratively.
-

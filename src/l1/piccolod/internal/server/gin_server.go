@@ -376,6 +376,10 @@ func (s *GinServer) setupStaticRoutes(r *gin.Engine) {
         assetsDir := filepath.Join(uiDir, "assets")
         r.Static("/assets", assetsDir)
         r.GET("/assets", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+        // Serve branding and other public files
+        if _, err := os.Stat(filepath.Join(uiDir, "branding")); err == nil {
+            r.Static("/branding", filepath.Join(uiDir, "branding"))
+        }
         // Favicon and robots from root if present; otherwise 204
         r.GET("/favicon.ico", func(c *gin.Context) {
             fp := filepath.Join(uiDir, "favicon.ico")
@@ -409,6 +413,9 @@ func (s *GinServer) setupStaticRoutes(r *gin.Engine) {
     uiFS := webassets.FS()
     if assetsFS, err := stdfs.Sub(uiFS, "assets"); err == nil {
         r.StaticFS("/assets", http.FS(assetsFS))
+    }
+    if brandingFS, err := stdfs.Sub(uiFS, "branding"); err == nil {
+        r.StaticFS("/branding", http.FS(brandingFS))
     }
     r.GET("/assets", func(c *gin.Context) { c.Status(http.StatusNoContent) })
     r.GET("/favicon.ico", func(c *gin.Context) {

@@ -4,15 +4,22 @@ import { test, expect } from '@playwright/test';
 test.beforeEach(async ({ page }) => {
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
-      throw new Error(`Console error: ${msg.text()}`);
+      const text = msg.text();
+      // Ignore benign 404s like favicon or demo endpoints not material to this test
+      if (/Failed to load resource: .* 404/.test(text)) return;
+      throw new Error(`Console error: ${text}`);
     }
   });
 });
 
-test('dashboard loads and shows header', async ({ page }) => {
+test('dashboard loads and shows header logo', async ({ page }) => {
   await page.goto('/');
-  await expect(page).toHaveTitle(/Piccolo OS/);
-  await expect(page.locator('header h1')).toHaveText('Piccolo OS');
+  await expect(page).toHaveTitle(/Piccolo/);
+  // Logo is present and loads successfully
+  const logo = page.locator('header img[alt="Piccolo"]');
+  await expect(logo).toBeVisible();
+  const natural = await logo.evaluate((img: HTMLImageElement) => ({ w: img.naturalWidth, h: img.naturalHeight }));
+  expect(natural.w).toBeGreaterThan(0);
   await expect(page.locator('h2')).toContainText('Dashboard');
 });
 

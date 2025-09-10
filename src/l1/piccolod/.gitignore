@@ -7,3 +7,4 @@ piccolod
 web/assets/
 web-src/test-results/
 web-src/web-src/test-results/
+web-src/playwright-report/

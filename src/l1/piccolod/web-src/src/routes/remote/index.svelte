@@ -18,13 +18,17 @@
       const path = simulate === 'dns' ? '/remote/configure/dns_error' : simulate === 'port80' ? '/remote/configure/port80_blocked' : simulate === 'caa' ? '/remote/configure/caa_error' : '/remote/configure';
       await api(path, { method: demo ? 'GET' : 'POST', body: demo ? undefined : JSON.stringify(form) });
       toast('Remote configured', 'success');
-      await load();
+      if (demo) {
+        status = { ...(status || {}), enabled: true, public_url: status?.public_url || 'https://demo.piccolo.example', issuer: status?.issuer || 'Let\'s Encrypt', expires_at: status?.expires_at || new Date(Date.now() + 86_400_000).toISOString() };
+      } else {
+        await load();
+      }
     } catch (e: any) { toast(e?.message || 'Configure failed', 'error'); }
     finally { working = false; }
   }
   async function disable() {
     working = true;
-    try { await api('/remote/disable', { method: demo ? 'GET' : 'POST' }); toast('Remote disabled', 'success'); await load(); }
+    try { await api('/remote/disable', { method: demo ? 'GET' : 'POST' }); toast('Remote disabled', 'success'); if (demo) { status = { ...(status || {}), enabled: false }; } else { await load(); } }
     catch (e: any) { toast(e?.message || 'Disable failed', 'error'); }
     finally { working = false; }
   }
@@ -73,4 +77,3 @@
     </div>
   </div>
 {/if}
-

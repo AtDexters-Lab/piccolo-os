@@ -26,14 +26,28 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   const resp = await fetch(url, { credentials: 'same-origin', ...init, headers });
   const text = await resp.text();
-  const json = text ? JSON.parse(text) : {};
+  let json: any = {};
+  try { json = text ? JSON.parse(text) : {}; } catch { json = {}; }
 
-  if (!resp.ok || json?.error) {
-    const err: ErrorResponse = json?.error ? { code: json.error.code, message: json.error.message } : { message: resp.statusText, code: resp.status };
+  // Normalize demo errors that return 200 with an error body
+  const hasErrorBody = json && (typeof json.error !== 'undefined' || typeof json.message === 'string' && !resp.ok);
+  if (!resp.ok || hasErrorBody) {
+    let code: number | undefined = resp.status || json.code;
+    let message = resp.statusText || '';
+    if (typeof json.error === 'string') {
+      // Demo fixtures: { error: "Too Many Requests", code: 429, message: "Try again later" }
+      message = json.message || json.error || message;
+      code = json.code ?? code;
+    } else if (json && typeof json.error === 'object') {
+      message = json.error?.message || json.message || message;
+      code = json.error?.code ?? json.code ?? code;
+    } else if (json && typeof json.message === 'string') {
+      message = json.message || message;
+    }
+    const err: ErrorResponse = { code, message: message || 'Request failed' };
     throw err;
   }
   return json as T;
 }
 
 export const demo = __DEMO__;
-

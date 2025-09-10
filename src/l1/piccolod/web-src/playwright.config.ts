@@ -18,7 +18,8 @@ export default defineConfig({
   reporter: [
     ['list'],
     ['json', { outputFile: 'test-results/report.json' }],
-    ['html', { open: 'never', outputFolder: 'test-results/html' }],
+    // HTML report must not live inside the tests output folder to avoid clashes
+    ['html', { open: 'never', outputFolder: 'playwright-report' }],
   ],
   webServer: {
     command: 'PORT=8080 PICCOLO_DEMO=1 ./piccolod',

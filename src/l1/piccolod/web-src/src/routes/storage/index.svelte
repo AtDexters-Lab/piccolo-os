@@ -2,8 +2,15 @@
   import { onMount } from 'svelte';
   import { api, demo } from '@api/client';
   import { toast } from '@stores/ui';
+  import { sessionStore } from '@stores/session';
   let disks: any = null; let mounts: any = null; let loading = true; let error = '';
   let working = false;
+  let recovery: any = null; let loadingRecovery = false;
+  // Encrypt-in-place state
+  let eipPath = '';
+  let eipPlan: any = null;
+  let eipWorking = false;
+  $: session = $sessionStore;
   async function load() {
     loading = true; error = '';
     try { [disks, mounts] = await Promise.all([api('/storage/disks'), api('/storage/mounts')]); }
@@ -11,6 +18,10 @@
     finally { loading = false; }
   }
   onMount(load);
+  async function loadRecovery() {
+    loadingRecovery = true; try { recovery = await api('/storage/recovery-key'); } finally { loadingRecovery = false; }
+  }
+  onMount(loadRecovery);
   async function initDisk(id: string) {
     if (!confirm(`Initialize disk ${id}? This may erase data.`)) return;
     working = true;
@@ -39,9 +50,118 @@
     } catch (e: any) { toast(e?.message || 'Update default root failed', 'error'); }
     finally { working = false; }
   }
+  async function unlock(ok: boolean) {
+    working = true;
+    try {
+      const path = ok ? '/storage/unlock' : '/storage/unlock_failed';
+      await api(path, { method: demo ? 'GET' : 'POST' });
+      toast(ok ? 'Volumes unlocked' : 'Unlock failed', ok ? 'success' : 'error');
+      // Refresh session and mounts after unlock attempt
+      try { const s = await api('/auth/session'); sessionStore.set(s as any); } catch {}
+      await load();
+    } catch (e: any) {
+      toast(e?.message || 'Unlock failed', 'error');
+    } finally {
+      working = false;
+    }
+  }
+  async function generateRecovery() {
+    working = true;
+    try {
+      await api('/storage/recovery-key/generate', { method: demo ? 'GET' : 'POST' });
+      toast('Recovery key generated', 'success');
+      await loadRecovery();
+    } catch (e: any) { toast(e?.message || 'Generate failed', 'error'); }
+    finally { working = false; }
+  }
+
+  async function eipDryRun() {
+    eipWorking = true; eipPlan = null;
+    try {
+      const res = await api('/storage/encrypt-in-place_dry-run', { method: demo ? 'GET' : 'POST', body: demo ? undefined : JSON.stringify({ path: eipPath, dry_run: true }) });
+      eipPlan = res;
+      toast('Dry run plan generated', 'success');
+    } catch (e: any) {
+      toast(e?.message || 'Dry run failed', 'error');
+    } finally {
+      eipWorking = false;
+    }
+  }
+  async function eipConfirm() {
+    eipWorking = true;
+    try {
+      await api('/storage/encrypt-in-place_confirm', { method: demo ? 'GET' : 'POST', body: demo ? undefined : JSON.stringify({ path: eipPath, confirm: true }) });
+      toast('Encryption completed', 'success');
+      eipPlan = null;
+      await load();
+    } catch (e: any) {
+      toast(e?.message || 'Encryption failed', 'error');
+    } finally {
+      eipWorking = false;
+    }
+  }
+  async function eipSimulateFail() {
+    eipWorking = true;
+    try {
+      await api('/storage/encrypt-in-place_failed', { method: demo ? 'GET' : 'POST', body: demo ? undefined : JSON.stringify({ path: eipPath }) });
+      toast('Encryption failed', 'error');
+    } catch (e: any) {
+      toast(e?.message || 'Encryption failed', 'error');
+    } finally {
+      eipWorking = false;
+    }
+  }
 </script>
 
 <h2 class="text-xl font-semibold mb-4">Storage</h2>
+<!-- Encryption & Unlock Panel -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+  <div class="bg-white rounded border p-4">
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="font-medium">Encryption & Unlock</h3>
+      <span class="text-xs px-2 py-0.5 rounded"
+        class:bg-yellow-100={session?.volumes_locked}
+        class:text-yellow-800={session?.volumes_locked}
+        class:bg-green-100={!session?.volumes_locked}
+        class:text-green-800={!session?.volumes_locked}
+      >{session?.volumes_locked ? 'Locked' : 'Unlocked'}</span>
+    </div>
+    <p class="text-sm text-gray-700">{session?.volumes_locked ? 'Volumes are locked until you unlock.' : 'Volumes are available.'}</p>
+    <div class="mt-2 space-x-2">
+      <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => unlock(true)} disabled={working}>Unlock volumes</button>
+      {#if demo}
+        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => unlock(false)} disabled={working}>Simulate unlock failure</button>
+      {/if}
+    </div>
+  </div>
+  <div class="bg-white rounded border p-4">
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="font-medium">Recovery Key</h3>
+    </div>
+    {#if loadingRecovery}
+      <p class="text-sm text-gray-500">Loading…</p>
+    {:else if recovery}
+      {#if recovery.present === false}
+        <p class="text-sm text-gray-700">No recovery key set.</p>
+        <button class="mt-2 px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={generateRecovery} disabled={working}>Generate Recovery Key</button>
+      {:else}
+        {#if recovery.words}
+          <p class="text-sm text-gray-700 mb-2">Write these 24 words down and store securely:</p>
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-1 text-xs">
+            {#each recovery.words as w, i}
+              <div class="px-2 py-1 bg-gray-50 border rounded"><span class="text-gray-500 mr-1">{i+1}.</span>{w}</div>
+            {/each}
+          </div>
+        {:else}
+          <pre class="text-xs bg-gray-50 border rounded p-2 max-h-40 overflow-auto">{JSON.stringify(recovery, null, 2)}</pre>
+        {/if}
+      {/if}
+    {:else}
+      <p class="text-sm text-gray-500">No recovery info.</p>
+    {/if}
+  </div>
+</div>
+
 {#if loading}
   <p>Loading…</p>
 {:else if error}
@@ -89,5 +209,21 @@
       </ul>
     </div>
   </div>
+  <div class="mt-4 bg-white rounded border p-4">
+    <h3 class="font-medium mb-2">Encrypt Existing Data In Place</h3>
+    <label class="block text-sm">Path to encrypt
+      <input class="mt-1 w-full border rounded p-1 text-sm" bind:value={eipPath} placeholder="/var/piccolo/storage/app/data" />
+    </label>
+    <div class="mt-2 space-x-2">
+      <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={eipDryRun} disabled={eipWorking}>Dry-run</button>
+      <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={eipConfirm} disabled={eipWorking}>Confirm</button>
+      {#if demo}
+        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={eipSimulateFail} disabled={eipWorking}>Simulate failure</button>
+      {/if}
+    </div>
+    {#if eipPlan}
+      <h4 class="font-medium mt-3 mb-1">Plan</h4>
+      <pre class="text-xs bg-gray-50 border rounded p-2 max-h-64 overflow-auto">{JSON.stringify(eipPlan, null, 2)}</pre>
+    {/if}
+  </div>
 {/if}
-

@@ -54,3 +54,13 @@ e2e: ## Run Playwright tests against demo server with demo UI
 	$(MAKE) build DEMO=1
 	cd web-src && npm ci && npx playwright install chromium && npm run e2e || true
 	node web-src/tools/summarize-playwright.js || true
+
+# Run only a subset of tests by passing ARGS, e.g.:
+#   make e2e-one ARGS="tests/mobile.spec.ts --project=mobile-chromium --grep 'menu button'"
+e2e-one: ## Run Playwright with custom args (ARGS="...")
+	$(MAKE) build DEMO=1
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test $(ARGS)
+
+e2e-mobile: ## Run only mobile project tests
+	$(MAKE) build DEMO=1
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test --project=mobile-chromium
