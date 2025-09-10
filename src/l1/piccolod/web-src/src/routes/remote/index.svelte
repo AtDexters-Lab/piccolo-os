@@ -32,6 +32,19 @@
     catch (e: any) { toast(e?.message || 'Disable failed', 'error'); }
     finally { working = false; }
   }
+
+  async function rotate() {
+    working = true;
+    try {
+      const res: any = await api('/remote/rotate', { method: demo ? 'GET' : 'POST' });
+      toast(res?.message || 'Credentials rotated', 'success');
+      if (!demo) { await load(); }
+    } catch (e: any) {
+      toast(e?.message || 'Rotate failed', 'error');
+    } finally {
+      working = false;
+    }
+  }
 </script>
 
 <h2 class="text-xl font-semibold mb-4">Remote</h2>
@@ -46,7 +59,10 @@
       {#if status.enabled}
         <p class="text-sm">Enabled: <a class="text-blue-600 underline" href={status.public_url} target="_blank" rel="noopener">{status.public_url}</a></p>
         <p class="text-xs text-gray-600">Issuer: {status.issuer} — Expires: {status.expires_at}</p>
-        <button class="mt-2 px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={disable} disabled={working}>Disable</button>
+        <div class="mt-2 space-x-2">
+          <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={disable} disabled={working}>Disable</button>
+          <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={rotate} disabled={working}>Rotate credentials</button>
+        </div>
       {:else}
         <p class="text-sm">Disabled</p>
       {/if}

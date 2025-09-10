@@ -31,4 +31,16 @@ test.describe('Auth flows (demo)', () => {
     await expect(page.locator('h2')).toHaveText('Dashboard');
     await expect(page.getByText(/"authenticated":true/)).toBeVisible();
   });
+
+  test('session timeout shows banner and redirects to login', async ({ page }) => {
+    await page.goto('/#/apps');
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('piccolo-session-expired'));
+    });
+    await expect(page.locator('h2')).toHaveText('Sign in');
+    await expect(page.getByText('Session expired')).toBeVisible();
+    // Click Sign in button on banner should keep us on login route
+    await page.getByRole('alert').getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.locator('h2')).toHaveText('Sign in');
+  });
 });

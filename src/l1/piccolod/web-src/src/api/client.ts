@@ -22,7 +22,9 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.method && init.method !== 'GET' && init.method !== 'HEAD') {
     const token = await ensureCsrf();
     if (token) headers.set('X-CSRF-Token', token);
-    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    // If sending JSON, default content type; if body is FormData, let the browser set boundary
+    const isFormData = typeof FormData !== 'undefined' && (init as any).body instanceof FormData;
+    if (!headers.has('Content-Type') && !isFormData) headers.set('Content-Type', 'application/json');
   }
   const resp = await fetch(url, { credentials: 'same-origin', ...init, headers });
   const text = await resp.text();
@@ -45,6 +47,9 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       message = json.message || message;
     }
     const err: ErrorResponse = { code, message: message || 'Request failed' };
+    if (code === 401 || code === 403) {
+      try { window.dispatchEvent(new Event('piccolo-session-expired')); } catch {}
+    }
     throw err;
   }
   return json as T;

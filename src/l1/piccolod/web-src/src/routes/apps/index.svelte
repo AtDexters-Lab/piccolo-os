@@ -22,8 +22,11 @@
   }
 </script>
 
-<h2 class="text-xl font-semibold mb-4">Apps</h2>
-{#if loading}
+  <h2 class="text-xl font-semibold mb-4">Apps</h2>
+  <div class="mb-3 text-sm">
+    <a class="text-blue-600 underline" href="/#/apps/catalog">Browse Catalog</a>
+  </div>
+  {#if loading}
   <p>Loading…</p>
 {:else if error}
   <p class="text-red-600">{error}</p>

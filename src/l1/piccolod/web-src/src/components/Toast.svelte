@@ -8,9 +8,9 @@
   }
 </script>
 
-<div class="fixed bottom-4 right-4 space-y-2 z-50">
+<div class="fixed bottom-4 right-4 space-y-2 z-50" aria-live="polite" aria-atomic="false">
   {#each $toasts as t (t.id)}
-    <div class="px-3 py-2 rounded shadow text-white text-sm"
+    <div role="status" class="px-3 py-2 rounded shadow text-white text-sm"
          class:bg-green-600={t.type === 'success'}
          class:bg-red-600={t.type === 'error'}
          class:bg-slate-800={t.type === 'info'}>
@@ -22,4 +22,3 @@
   {/if}
   
 </div>
-

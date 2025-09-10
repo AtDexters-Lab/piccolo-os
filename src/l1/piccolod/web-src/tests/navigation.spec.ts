@@ -125,6 +125,21 @@ test('remote enable and disable show toasts (demo)', async ({ page }) => {
   await expect(page.getByText('Remote disabled')).toBeVisible();
 });
 
+test('remote warnings are visible (demo)', async ({ page }) => {
+  await page.goto('/#/remote');
+  await expect(page.getByText(/Remote access is disabled/i)).toBeVisible();
+});
+
+test('remote rotate credentials shows toast (demo)', async ({ page }) => {
+  await page.goto('/#/remote');
+  // Enable first (demo)
+  await page.getByRole('button', { name: 'Enable Remote' }).click();
+  await expect(page.getByText('Remote configured')).toBeVisible();
+  // Rotate credentials
+  await page.getByRole('button', { name: 'Rotate credentials' }).click();
+  await expect(page.getByText(/Device credentials rotated|Credentials rotated/)).toBeVisible();
+});
+
 test('storage action shows toast (demo)', async ({ page }) => {
   await page.goto('/#/storage');
   // Prefer non-destructive action: Set default if available, else Use as-is

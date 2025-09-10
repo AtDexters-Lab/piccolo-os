@@ -6,6 +6,7 @@
   let resp: any = null; let error = ''; let loading = true;
   let logs: any = null; let loadingLogs = false;
   let showUninstall = false; let purgeData = false;
+  let working = false;
   onMount(async () => {
     await load();
     await loadLogs();
@@ -35,6 +36,26 @@
       showUninstall = false; purgeData = false;
     } catch (e: any) { toast(e?.message || 'Uninstall failed', 'error'); }
   }
+
+  async function backupApp() {
+    working = true;
+    try {
+      const r: any = await api(`/backup/app/${params.name}`, { method: demo ? 'GET' : 'POST' });
+      toast(r?.message || `Backup created for ${params.name}`, 'success');
+    } catch (e: any) {
+      toast(e?.message || 'Backup failed', 'error');
+    } finally { working = false; }
+  }
+  async function restoreApp() {
+    if (!confirm(`Restore app '${params.name}' from latest backup?`)) return;
+    working = true;
+    try {
+      const r: any = await api(`/restore/app/${params.name}`, { method: demo ? 'GET' : 'POST' });
+      toast(r?.message || `Restore started for ${params.name}`, 'success');
+    } catch (e: any) {
+      toast(e?.message || 'Restore failed', 'error');
+    } finally { working = false; }
+  }
 </script>
 
 <h2 class="text-xl font-semibold mb-4">App: {params.name}</h2>
@@ -52,6 +73,8 @@
         <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={doUpdate}>Update</button>
         <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={doRevert}>Revert</button>
         <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => showUninstall = !showUninstall}>Uninstall</button>
+        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={backupApp} disabled={working}>Backup app</button>
+        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={restoreApp} disabled={working}>Restore app</button>
       </div>
       {#if showUninstall}
         <div class="mt-3 border rounded p-3 bg-red-50 border-red-200">
