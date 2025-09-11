@@ -23,6 +23,22 @@ test.describe('Mobile layout', () => {
     await expect(page.getByText('Started', { exact: false }).last()).toBeVisible();
   });
 
+  test('visual tour (mobile screenshots)', async ({ page }) => {
+    if (test.info().project.name !== 'mobile-chromium') test.skip();
+    const shots: Array<{ url: string; waitFor: string; name: string }> = [
+      { url: '/', waitFor: 'h2:text("Dashboard")', name: 'm00_dashboard' },
+      { url: '/#/apps', waitFor: 'h2:text("Apps")', name: 'm10_apps' },
+      { url: '/#/storage', waitFor: 'h2:text("Storage")', name: 'm20_storage' },
+      { url: '/#/updates', waitFor: 'h2:text("Updates")', name: 'm30_updates' },
+      { url: '/#/remote', waitFor: 'h2:text("Remote")', name: 'm40_remote' },
+    ];
+    for (const s of shots) {
+      await page.goto(s.url);
+      await page.locator(s.waitFor).first().waitFor({ state: 'visible' });
+      const out = test.info().outputPath(`${s.name}.png`);
+      await page.screenshot({ path: out, fullPage: true });
+    }
+  });
   test('menu button is clearly tappable on mobile', async ({ page }) => {
     if (test.info().project.name !== 'mobile-chromium') test.skip();
     await page.goto('/');

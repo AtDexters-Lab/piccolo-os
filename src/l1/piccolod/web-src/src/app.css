@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Mobile touch targets: ensure minimum 44px button height on small screens */
+@media (max-width: 767px) {
+  button {
+    min-height: 44px;
+  }
+}
+
 /* Global focus styles for accessibility */
 :focus-visible {
   outline: 2px solid #2563eb; /* blue-600 */

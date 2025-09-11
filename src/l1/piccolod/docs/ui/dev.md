@@ -35,9 +35,11 @@ Notes
 ## Cadence & Testing
 - Local loop: implement → `make ui DEMO=1` → `make server` → `make demo-serve`.
 - Full validation: `make e2e` (builds and runs Playwright tests).
+- Visual tour (screenshots only): `make e2e-visual` (captures full-page screenshots for key routes to `web-src/test-results/...`).
 - Tests fail on any browser console error (caught via Playwright hooks).
 - First time only: `make deps` (UI deps) and `make e2e-deps` (Playwright browsers).
 - Mobile‑first: Playwright runs on Desktop and Pixel 5; mobile tests assert no horizontal scroll and working nav menu.
+  - Mobile screenshots are also captured under `web-src/test-results/mobile-*/m*.png`.
 
 ### Running a single test (focused loop)
 - By file: `cd web-src && npx playwright test tests/mobile.spec.ts --project=mobile-chromium`

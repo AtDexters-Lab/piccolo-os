@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: all ui server build demo demo-serve clean typegen deps e2e e2e-deps
+.PHONY: all ui server build demo demo-serve clean typegen deps e2e e2e-deps e2e-visual e2e-visual-one
 
 all: build
 
@@ -64,3 +64,13 @@ e2e-one: ## Run Playwright with custom args (ARGS="...")
 e2e-mobile: ## Run only mobile project tests
 	$(MAKE) build DEMO=1
 	cd web-src && npm ci && npx playwright install chromium && npx playwright test --project=mobile-chromium
+
+# Visual tour: capture screenshots across key routes (no reinstall)
+e2e-visual: ## Generate visual screenshots (desktop+mobile) for demo UI
+	$(MAKE) build DEMO=1
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test tests/visual.spec.ts --project=chromium --project=mobile-chromium || true
+
+# Visual tour for a single project or with custom args
+e2e-visual-one: ## Run visual tour with ARGS (e.g., --project=chromium)
+	$(MAKE) build DEMO=1
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test tests/visual.spec.ts $(ARGS)

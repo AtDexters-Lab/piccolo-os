@@ -197,8 +197,15 @@
       </div>
       <ul class="text-sm list-disc ml-5">
         {#each mounts.mounts ?? [] as m}
-          <li>
-            <span class="font-mono">{m.path}</span> — {m.label}
+          <li class="flex items-center gap-2">
+            <span class="font-mono text-xs">{m.path}</span>
+            {#if m.label}
+              <span class="text-gray-700">— {m.label}</span>
+            {:else if m.device}
+              <span class="text-gray-500">— {m.device}</span>
+            {:else if m.type}
+              <span class="text-gray-500">— {m.type}</span>
+            {/if}
             {#if m.default}
               <span class="ml-2 text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800">default</span>
             {:else}

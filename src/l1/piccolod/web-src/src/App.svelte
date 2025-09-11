@@ -20,6 +20,7 @@
   import Login from '@routes/login/index.svelte';
   import Setup from '@routes/setup/index.svelte';
   const DEMO = __DEMO__;
+  const DEBUG = (import.meta.env.VITE_UI_DEBUG === '1');
   const authGuard = async () => {
     if (DEMO) return true;
     if (get(sessionStore).authenticated) return true;
@@ -133,7 +134,6 @@
       <button class="md:hidden px-3 py-2 text-sm border rounded inline-flex items-center justify-center cursor-pointer min-h-[44px]" aria-controls="main-nav" aria-expanded={menuOpen} aria-label="Toggle menu" on:click={toggleMenu}>Menu</button>
       {#if menuOpen}
         <nav
-          role="navigation"
           aria-label="Primary"
           id="main-nav"
           class="text-sm flex fixed right-4 top-12 z-40 bg-white border rounded p-3 flex-col gap-2"
@@ -175,14 +175,14 @@
           </ul>
         </div>
         <div>
-          <div class="text-xs uppercase text-gray-500 mb-2">Apps</div>
+          <div class="text-xs uppercase tracking-tight text-gray-500 mb-2">Apps</div>
           <ul class="space-y-1">
             <li><a href="/#/apps" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/apps') ? 'page' : undefined}>Installed</a></li>
             <li><a href="/#/apps/catalog" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/apps/catalog') ? 'page' : undefined}>Catalog</a></li>
           </ul>
         </div>
         <div>
-          <div class="text-xs uppercase text-gray-500 mb-2">System</div>
+          <div class="text-xs uppercase tracking-tight text-gray-500 mb-2">System</div>
           <ul class="space-y-1">
             <li><a href="/#/storage" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/storage') ? 'page' : undefined}>Storage</a></li>
             <li><a href="/#/updates" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/updates') ? 'page' : undefined}>Updates</a></li>
@@ -190,7 +190,7 @@
           </ul>
         </div>
         <div>
-          <div class="text-xs uppercase text-gray-500 mb-2">Admin</div>
+          <div class="text-xs uppercase tracking-tight text-gray-500 mb-2">Admin</div>
           <ul class="space-y-1">
             <li><a href="/#/install" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/install') ? 'page' : undefined}>Install</a></li>
             <li><a href="/#/backup" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/backup') ? 'page' : undefined}>Backup</a></li>
@@ -220,7 +220,9 @@
       </div>
     {/if}
     <Router {routes} useHash={true} />
-    <p class="text-sm text-gray-500 mt-6">Session: {JSON.stringify($sessionStore)}</p>
+    {#if DEBUG}
+      <p class="text-sm text-gray-500 mt-6">Session: {JSON.stringify($sessionStore)}</p>
+    {/if}
     </section>
   </div>
   <Toast />
