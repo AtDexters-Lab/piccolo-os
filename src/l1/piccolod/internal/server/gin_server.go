@@ -11,6 +11,7 @@ import (
     stdfs "io/fs"
 
     "piccolod/internal/app"
+    "piccolod/internal/apidocs"
     "piccolod/internal/services"
     "piccolod/internal/backup"
     "piccolod/internal/container"
@@ -45,6 +46,9 @@ type GinServer struct {
 	ecosystemManager  *ecosystem.Manager
 	router            *gin.Engine
 	version           string
+
+	// Optional OpenAPI request validation (Phase 0)
+	apiValidator *openAPIValidator
 }
 
 // GinServerOption is a function that configures a GinServer.
@@ -150,28 +154,48 @@ func (s *GinServer) Stop() error {
 
 // setupGinRoutes defines all API endpoints using Gin router.
 func (s *GinServer) setupGinRoutes() {
-	r := gin.New()
+    r := gin.New()
 
 	// Avoid implicit redirects that can cause loops during SPA routing
 	r.RedirectTrailingSlash = false
 	r.RedirectFixedPath = false
 	r.RemoveExtraSlash = false
 
-	// Add basic middleware
-	r.Use(gin.Logger())
-	r.Use(gin.Recovery())
-	r.Use(s.corsMiddleware())
-	r.Use(s.securityHeadersMiddleware())
+    // Add basic middleware
+    r.Use(gin.Logger())
+    r.Use(gin.Recovery())
+    r.Use(s.corsMiddleware())
+    r.Use(s.securityHeadersMiddleware())
+
+    // Optional: OpenAPI request validation (enabled when validator is initialized)
+    if s.apiValidator == nil {
+        // Try lazy init based on env var
+        if os.Getenv("PICCOLO_API_VALIDATE") == "1" {
+            if v, err := newOpenAPIValidator(); err == nil {
+                s.apiValidator = v
+            } else {
+                log.Printf("OpenAPI validation disabled: %v", err)
+            }
+        }
+    }
+    if s.apiValidator != nil {
+        r.Use(s.apiValidator.Middleware())
+    }
 
 	// Root endpoint
 	r.GET("/", s.handleGinRoot)
 
-	// API v1 group
-	v1 := r.Group("/api/v1")
-	{
-		// Container management endpoints (existing)
-		v1.GET("/containers", s.handleGinContainers)
-		v1.POST("/containers", s.handleGinContainers)
+    // API v1 group
+    v1 := r.Group("/api/v1")
+    {
+        // Serve embedded OpenAPI document for tooling/debug
+        v1.GET("/openapi.yaml", func(c *gin.Context) {
+            c.Data(http.StatusOK, "application/yaml; charset=utf-8", apidocs.OpenAPISpec)
+        })
+
+        // Container management endpoints (existing)
+        v1.GET("/containers", s.handleGinContainers)
+        v1.POST("/containers", s.handleGinContainers)
 
 		// App management endpoints
 		apps := v1.Group("/apps")

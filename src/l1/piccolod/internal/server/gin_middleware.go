@@ -43,6 +43,11 @@ func (s *GinServer) securityHeadersMiddleware() gin.HandlerFunc {
         // API identification
         c.Header("X-Powered-By", "Piccolo OS")
         c.Header("X-Service-Version", s.version)
+        if s != nil && s.apiValidator != nil {
+            c.Header("X-API-Validation", "enabled")
+        } else {
+            c.Header("X-API-Validation", "disabled")
+        }
 
 		c.Next()
 	}

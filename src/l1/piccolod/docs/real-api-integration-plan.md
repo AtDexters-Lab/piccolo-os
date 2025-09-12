@@ -15,6 +15,10 @@ Purpose: Phase the demo UI over to the production backend (`/api/v1`) with stron
 - UI feature flags: runtime check to prefer prod endpoints when server advertises support.
 - CI: contract test job (start server; run a minimal Playwright smoke against real `/api/v1`).
 
+Implementation notes
+- Server exposes optional request validation against the embedded spec; enable with `PICCOLO_API_VALIDATE=1`.
+- The server serves the embedded spec at `GET /api/v1/openapi.yaml` to aid tooling.
+
 Gate: Spec linting + server validation in place; CI green.
 
 ## Phase 1 — Auth & Sessions
@@ -103,4 +107,3 @@ Gate: Local SSO verified; staged for remote domains.
 ## Immediate Next Steps
 1) Implement Phase 0 (spec lint + server validation + CI job).
 2) Start Phase 1 (Auth endpoints) and flip UI auth to production.
-
