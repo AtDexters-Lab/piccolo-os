@@ -7,6 +7,8 @@ let csrfToken: string | null = null;
 
 export async function ensureCsrf(): Promise<string> {
   if (csrfToken) return csrfToken;
+  // In demo mode, skip CSRF entirely to avoid 401 noise in console
+  if (base.endsWith('/demo')) return '';
   try {
     const res = await fetch(`${base.replace(/\/demo$/, '')}/auth/csrf`);
     if (res.ok) {

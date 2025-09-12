@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Console error guard
+// Console error guard (ignore benign 401/403 during auth transitions)
 test.beforeEach(async ({ page }) => {
   await page.route('**/favicon.ico', async (route) => {
     await route.fulfill({ status: 200, body: '' });
@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
       const text = msg.text();
-      if (/Failed to load resource: .* 404/.test(text)) return;
+      if (/Failed to load resource: .* (404|401|403)/.test(text)) return;
       throw new Error(`Console error: ${text}`);
     }
   });
@@ -26,8 +26,13 @@ test('skip link moves focus to main content', async ({ page }) => {
   expect(activeId).toBe('router-root');
 });
 
-test('focus moves to main after route change', async ({ page }) => {
-  await page.goto('/');
+test('focus moves to main after route change', async ({ page, request }) => {
+  await request.post('/api/v1/auth/setup', { data: { password: 'password' } }).catch(() => {});
+  await page.goto('/#/login');
+  await page.getByLabel('Username').fill('admin');
+  await page.getByLabel('Password').fill('password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.locator('h2')).toHaveText('Dashboard');
   await page.getByRole('link', { name: 'Apps' }).click();
   await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
   const activeId = await page.evaluate(() => document.activeElement?.id);

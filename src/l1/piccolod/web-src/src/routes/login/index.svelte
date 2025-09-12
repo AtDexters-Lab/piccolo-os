@@ -10,8 +10,13 @@
     error = '';
     working = true;
     try {
-      // Always hit real API for login to exercise real session flow
-      await apiProd(path, { method: 'POST', body: JSON.stringify({ username, password }) });
+      if (demo && path !== '/auth/login') {
+        // Demo-simulated errors (401/429) remain on demo endpoints
+        await api(path, { method: 'GET' });
+      } else {
+        // Real login path
+        await apiProd('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+      }
       await bootstrapSession();
       toast('Signed in', 'success');
       // Redirect to dashboard

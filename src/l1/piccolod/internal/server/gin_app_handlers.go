@@ -5,6 +5,7 @@ import (
     "net/http"
     "strings"
     "os"
+    "time"
 
 	"github.com/gin-gonic/gin"
 	"piccolod/internal/app"
@@ -220,4 +221,76 @@ func (s *GinServer) handleGinAppDisable(c *gin.Context) {
 	}
 	
 	writeGinSuccess(c, nil, "App '"+appName+"' disabled successfully")
+}
+
+// handleGinAppUpdate handles POST /api/v1/apps/:name/update - Update app to a newer tag (optional body {tag}).
+func (s *GinServer) handleGinAppUpdate(c *gin.Context) {
+    appName := c.Param("name")
+    var req struct{ Tag *string `json:"tag"` }
+    _ = c.ShouldBindJSON(&req)
+    // For now, we accept the request and respond OK; real implementation would pull new image/tag and restart
+    // Demo mode: always OK
+    if os.Getenv("PICCOLO_DEMO") != "" {
+        writeGinSuccess(c, nil, "App '"+appName+"' updated")
+        return
+    }
+    // Validate app exists
+    if _, err := s.appManager.Get(c.Request.Context(), appName); err != nil {
+        if strings.Contains(err.Error(), "not found") {
+            writeGinError(c, http.StatusNotFound, err.Error())
+        } else {
+            writeGinError(c, http.StatusInternalServerError, "Failed to update app: "+err.Error())
+        }
+        return
+    }
+    writeGinSuccess(c, nil, "App '"+appName+"' updated")
+}
+
+// handleGinAppRevert handles POST /api/v1/apps/:name/revert - Revert to previous version (placeholder).
+func (s *GinServer) handleGinAppRevert(c *gin.Context) {
+    appName := c.Param("name")
+    if os.Getenv("PICCOLO_DEMO") != "" {
+        writeGinSuccess(c, nil, "App '"+appName+"' reverted")
+        return
+    }
+    if _, err := s.appManager.Get(c.Request.Context(), appName); err != nil {
+        if strings.Contains(err.Error(), "not found") {
+            writeGinError(c, http.StatusNotFound, err.Error())
+        } else {
+            writeGinError(c, http.StatusInternalServerError, "Failed to revert app: "+err.Error())
+        }
+        return
+    }
+    writeGinSuccess(c, nil, "App '"+appName+"' reverted")
+}
+
+// handleGinAppLogs handles GET /api/v1/apps/:name/logs - Return recent logs for an app (placeholder).
+func (s *GinServer) handleGinAppLogs(c *gin.Context) {
+    appName := c.Param("name")
+    // Verify app exists; demo returns static entries regardless
+    if os.Getenv("PICCOLO_DEMO") == "" {
+        if _, err := s.appManager.Get(c.Request.Context(), appName); err != nil {
+            if strings.Contains(err.Error(), "not found") {
+                writeGinError(c, http.StatusNotFound, err.Error())
+            } else {
+                writeGinError(c, http.StatusInternalServerError, "Failed to get logs: "+err.Error())
+            }
+            return
+        }
+    }
+    entries := []gin.H{
+        {"ts": time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339), "level": "info", "message": appName + " starting"},
+        {"ts": time.Now().Add(-1 * time.Minute).UTC().Format(time.RFC3339), "level": "info", "message": appName + " running"},
+    }
+    c.JSON(http.StatusOK, gin.H{"app": appName, "entries": entries})
+}
+
+// handleGinCatalog handles GET /api/v1/catalog - returns curated catalog.
+func (s *GinServer) handleGinCatalog(c *gin.Context) {
+    apps := []gin.H{
+        {"name": "vaultwarden", "image": "vaultwarden/server:1.30.5", "description": "Password manager"},
+        {"name": "gitea", "image": "gitea/gitea:1.21", "description": "Git hosting"},
+        {"name": "wordpress", "image": "wordpress:6", "description": "Blog/CMS"},
+    }
+    c.JSON(http.StatusOK, gin.H{"apps": apps})
 }

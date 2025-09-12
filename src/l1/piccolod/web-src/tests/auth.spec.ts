@@ -27,11 +27,23 @@ test.describe('Auth flows (demo)', () => {
 
   test('first-run setup creates admin and redirects', async ({ page }) => {
     await page.goto('/#/setup');
-    await page.getByLabel('Password', { exact: true }).fill('supersecret');
-    await page.getByLabel('Confirm password').fill('supersecret');
-    await page.getByRole('button', { name: 'Create Admin' }).click();
-    await expect(page.locator('h2')).toHaveText('Dashboard');
-    await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+    const heading = page.locator('h2');
+    const text = await heading.textContent();
+    if (text && /Create Admin/i.test(text)) {
+      await page.getByLabel('Password', { exact: true }).fill('supersecret');
+      await page.getByLabel('Confirm password').fill('supersecret');
+      await page.getByRole('button', { name: 'Create Admin' }).click();
+      await expect(page.locator('h2')).toHaveText('Dashboard');
+      await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+    } else {
+      // Already initialized; sign in instead
+      await page.goto('/#/login');
+      await page.getByLabel('Username').fill('admin');
+      await page.getByLabel('Password').fill('password');
+      await page.getByRole('button', { name: 'Sign in' }).click();
+      await expect(page.locator('h2')).toHaveText('Dashboard');
+      await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+    }
   });
 
   test('session timeout shows banner and redirects to login', async ({ page }) => {

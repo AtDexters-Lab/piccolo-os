@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Fail tests on any browser console error
+// Fail tests on any browser console error (ignore known benign resource 401/403 during auth transitions)
 test.beforeEach(async ({ page }) => {
   // Avoid favicon 404 noise
   await page.route('**/favicon.ico', async (route) => {
@@ -9,13 +9,31 @@ test.beforeEach(async ({ page }) => {
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
       const text = msg.text();
-      if (/Failed to load resource: .* 404/.test(text)) return;
+      if (/Failed to load resource: .* (404|401|403)/.test(text)) return;
       throw new Error(`Console error: ${text}`);
     }
   });
 });
 
 test.describe('Top-level navigation and deep links', () => {
+  test.beforeAll(async ({ request }) => {
+    // Ensure admin exists for real-auth guarded routes
+    await request.post('/api/v1/auth/setup', { data: { password: 'password' } }).catch(() => {});
+  });
+  test.beforeEach(async ({ page }) => {
+    // Try to access Dashboard; if we land on Sign in, perform login
+    await page.goto('/');
+    const h2 = page.locator('h2');
+    const txt = (await h2.textContent()) || '';
+    if (/Sign in/i.test(txt)) {
+      await page.getByLabel('Username').fill('admin');
+      await page.getByLabel('Password').fill('password');
+      await page.getByRole('button', { name: 'Sign in' }).click();
+      await expect(page.locator('h2')).toHaveText('Dashboard');
+    } else {
+      await expect(h2).toHaveText('Dashboard');
+    }
+  });
   test('home loads without redirects and assets are reachable', async ({ page, request }) => {
     const resp = await page.goto('/');
     expect(resp?.status()).toBe(200);

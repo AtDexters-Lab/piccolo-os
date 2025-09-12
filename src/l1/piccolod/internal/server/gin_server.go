@@ -222,20 +222,23 @@ func (s *GinServer) setupGinRoutes() {
         v1.GET("/containers", s.handleGinContainers)
         v1.POST("/containers", s.handleGinContainers)
 
-		// App management endpoints
-		apps := v1.Group("/apps")
-		{
-			apps.POST("", s.handleGinAppInstall)           // POST /api/v1/apps
-			apps.GET("", s.handleGinAppList)               // GET /api/v1/apps
-			apps.GET("/:name", s.handleGinAppGet)          // GET /api/v1/apps/:name
-			apps.DELETE("/:name", s.handleGinAppUninstall) // DELETE /api/v1/apps/:name
+        // App management endpoints
+        apps := v1.Group("/apps")
+        {
+            apps.POST("", s.handleGinAppInstall)           // POST /api/v1/apps
+            apps.GET("", s.handleGinAppList)               // GET /api/v1/apps
+            apps.GET("/:name", s.handleGinAppGet)          // GET /api/v1/apps/:name
+            apps.DELETE("/:name", s.handleGinAppUninstall) // DELETE /api/v1/apps/:name
 
-			// App actions
-			apps.POST("/:name/start", s.handleGinAppStart)     // POST /api/v1/apps/:name/start
-			apps.POST("/:name/stop", s.handleGinAppStop)       // POST /api/v1/apps/:name/stop
-			apps.POST("/:name/enable", s.handleGinAppEnable)   // POST /api/v1/apps/:name/enable
-			apps.POST("/:name/disable", s.handleGinAppDisable) // POST /api/v1/apps/:name/disable
-		}
+            // App actions
+            apps.POST("/:name/start", s.handleGinAppStart)     // POST /api/v1/apps/:name/start
+            apps.POST("/:name/stop", s.handleGinAppStop)       // POST /api/v1/apps/:name/stop
+            apps.POST("/:name/enable", s.handleGinAppEnable)   // POST /api/v1/apps/:name/enable
+            apps.POST("/:name/disable", s.handleGinAppDisable) // POST /api/v1/apps/:name/disable
+            apps.GET("/:name/logs", s.handleGinAppLogs)        // GET /api/v1/apps/:name/logs
+            apps.POST("/:name/update", s.handleGinAppUpdate)   // POST /api/v1/apps/:name/update
+            apps.POST("/:name/revert", s.handleGinAppRevert)   // POST /api/v1/apps/:name/revert
+        }
 
         // Health endpoints
         v1.GET("/health", s.handleGinEcosystemTest)        // Full ecosystem details
@@ -246,6 +249,9 @@ func (s *GinServer) setupGinRoutes() {
         v1.GET("/updates/os", s.handleOSUpdateStatus)
         v1.GET("/remote/status", s.handleRemoteStatus)
         v1.GET("/storage/disks", s.handleStorageDisks)
+
+        // Catalog
+        v1.GET("/catalog", s.handleGinCatalog)
 
 		// Service discovery endpoints (v1)
 		v1.GET("/services", s.handleGinServicesAll)

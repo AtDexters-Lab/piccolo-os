@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '@api/client';
+  import { api, apiProd } from '@api/client';
   let osu: any = null; let apps: any = null; let loading = true; let error = '';
   onMount(async () => {
-    try { [osu, apps] = await Promise.all([api('/updates/os'), api('/updates/apps')]); }
+    try { [osu, apps] = await Promise.all([apiProd('/updates/os'), api('/updates/apps')]); }
     catch (e: any) { error = e?.message || 'Failed to load updates'; }
     finally { loading = false; }
   });
