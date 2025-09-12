@@ -11,7 +11,7 @@ import (
     stdfs "io/fs"
 
     "piccolod/internal/app"
-    "piccolod/internal/apidocs"
+    authpkg "piccolod/internal/auth"
     "piccolod/internal/services"
     "piccolod/internal/backup"
     "piccolod/internal/container"
@@ -44,11 +44,17 @@ type GinServer struct {
 	federationManager *federation.Manager
 	mdnsManager       *mdns.Manager
 	ecosystemManager  *ecosystem.Manager
-	router            *gin.Engine
-	version           string
+    router            *gin.Engine
+    version           string
 
-	// Optional OpenAPI request validation (Phase 0)
-	apiValidator *openAPIValidator
+    // Optional OpenAPI request validation (Phase 0)
+    apiValidator *openAPIValidator
+
+    // Auth & sessions (Phase 1)
+    authManager *authpkg.Manager
+    sessions    *authpkg.SessionStore
+    // simple rate-limit counters for login failures
+    loginFailures int
 }
 
 // GinServerOption is a function that configures a GinServer.
@@ -88,12 +94,12 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
         storageManager:    storage.NewManager(),
         trustAgent:        trust.NewAgent(),
         installer:         installer.NewInstaller(),
-		updateManager:     update.NewManager(),
-		networkManager:    network.NewManager(),
-		backupManager:     backup.NewManager(),
-		federationManager: federation.NewManager(),
-		mdnsManager:       mdns.NewManager(),
-	}
+        updateManager:     update.NewManager(),
+        networkManager:    network.NewManager(),
+        backupManager:     backup.NewManager(),
+        federationManager: federation.NewManager(),
+        mdnsManager:       mdns.NewManager(),
+    }
 
 	s.ecosystemManager = ecosystem.NewManager(
 		s.containerManager,
@@ -107,9 +113,16 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		s.federationManager,
 	)
 
-	for _, opt := range opts {
-		opt(s)
-	}
+    for _, opt := range opts {
+        opt(s)
+    }
+
+    // Initialize auth & sessions
+    stateDir := os.Getenv("PICCOLO_STATE_DIR")
+    am, err := authpkg.NewManager(stateDir)
+    if err != nil { return nil, fmt.Errorf("auth manager init: %w", err) }
+    s.authManager = am
+    s.sessions = authpkg.NewSessionStore()
 
     s.setupGinRoutes()
     return s, nil
@@ -190,8 +203,20 @@ func (s *GinServer) setupGinRoutes() {
     {
         // Serve embedded OpenAPI document for tooling/debug
         v1.GET("/openapi.yaml", func(c *gin.Context) {
-            c.Data(http.StatusOK, "application/yaml; charset=utf-8", apidocs.OpenAPISpec)
+            if b, err := loadOpenAPISpec(); err == nil {
+                c.Data(http.StatusOK, "application/yaml; charset=utf-8", b)
+            } else {
+                c.JSON(http.StatusNotFound, gin.H{"error": "spec not found"})
+            }
         })
+
+        // Auth & sessions
+        v1.GET("/auth/session", s.handleAuthSession)
+        v1.POST("/auth/login", s.handleAuthLogin)
+        v1.POST("/auth/logout", s.handleAuthLogout)
+        v1.POST("/auth/password", s.handleAuthPassword)
+        v1.GET("/auth/csrf", s.handleAuthCSRF)
+        v1.POST("/auth/setup", s.handleAuthSetup)
 
         // Container management endpoints (existing)
         v1.GET("/containers", s.handleGinContainers)

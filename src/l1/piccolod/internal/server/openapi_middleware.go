@@ -3,13 +3,14 @@ package server
 import (
     "net/http"
     "strings"
+    "os"
+    "path/filepath"
 
     "github.com/gin-gonic/gin"
     "github.com/getkin/kin-openapi/openapi3"
     "github.com/getkin/kin-openapi/openapi3filter"
     "github.com/getkin/kin-openapi/routers"
     legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
-    "piccolod/internal/apidocs"
 )
 
 // openAPIValidator validates incoming API requests against the embedded OpenAPI spec.
@@ -19,8 +20,10 @@ type openAPIValidator struct {
 
 // newOpenAPIValidator loads the embedded OpenAPI doc and prepares a router for validation.
 func newOpenAPIValidator() (*openAPIValidator, error) {
+    b, err := loadOpenAPISpec()
+    if err != nil { return nil, err }
     loader := openapi3.NewLoader()
-    doc, err := loader.LoadFromData(apidocs.OpenAPISpec)
+    doc, err := loader.LoadFromData(b)
     if err != nil {
         return nil, err
     }
@@ -45,7 +48,7 @@ func (v *openAPIValidator) Middleware() gin.HandlerFunc {
             return
         }
         // Find the route in the OpenAPI router
-        route, pathParams, err := v.router.FindRoute(c.Request.Method, c.Request.URL)
+        route, pathParams, err := v.router.FindRoute(c.Request)
         if err != nil {
             // No matching route in spec -> 404/405 at router later; mark as bad request here
             c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Request not in API spec", "detail": err.Error()})
@@ -65,3 +68,15 @@ func (v *openAPIValidator) Middleware() gin.HandlerFunc {
     }
 }
 
+// loadOpenAPISpec tries to load the spec from common locations.
+func loadOpenAPISpec() ([]byte, error) {
+    if p := os.Getenv("PICCOLO_OPENAPI_PATH"); p != "" {
+        if b, err := os.ReadFile(p); err == nil { return b, nil }
+    }
+    // Relative to server binary working dir (dev tree)
+    if b, err := os.ReadFile(filepath.Join("docs", "api", "openapi.yaml")); err == nil {
+        return b, nil
+    }
+    // Optional: package data path
+    return nil, os.ErrNotExist
+}
