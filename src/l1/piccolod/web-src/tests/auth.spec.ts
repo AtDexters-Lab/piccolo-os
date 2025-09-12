@@ -1,14 +1,16 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Auth flows (demo)', () => {
-  test('login success redirects to dashboard and sets session', async ({ page }) => {
+  test('login success redirects to dashboard and sets session', async ({ page, request }) => {
+    // Ensure admin exists for real login path; ignore if already initialized
+    await request.post('/api/v1/auth/setup', { data: { password: 'password' } }).catch(() => {});
     await page.goto('/#/login');
     await page.getByLabel('Username').fill('admin');
     await page.getByLabel('Password').fill('password');
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect(page.locator('h2')).toHaveText('Dashboard');
     await expect(page.getByText('Signed in')).toBeVisible();
-    await expect(page.getByText(/"authenticated":true/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
   });
 
   test('login invalid credentials shows error (401 demo)', async ({ page }) => {
@@ -29,7 +31,7 @@ test.describe('Auth flows (demo)', () => {
     await page.getByLabel('Confirm password').fill('supersecret');
     await page.getByRole('button', { name: 'Create Admin' }).click();
     await expect(page.locator('h2')).toHaveText('Dashboard');
-    await expect(page.getByText(/"authenticated":true/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
   });
 
   test('session timeout shows banner and redirects to login', async ({ page }) => {

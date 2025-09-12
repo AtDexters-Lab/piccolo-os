@@ -151,7 +151,7 @@
           {#if !$sessionStore.authenticated}
             <a href="/#/login" class="hover:underline" on:click={() => (menuOpen = false)}>Sign in</a>
           {:else}
-            <button class="text-left hover:underline" on:click={() => { fetch((import.meta.env.VITE_API_DEMO==='1'? '/api/v1/demo':'/api/v1') + '/auth/logout').finally(()=>{ sessionStore.set({authenticated:false}); window.location.hash = '/login'; }); menuOpen=false; }}>Logout</button>
+          <button class="text-left hover:underline" on:click={() => { fetch('/api/v1/auth/logout').finally(()=>{ sessionStore.set({authenticated:false}); window.location.hash = '/login'; }); menuOpen=false; }}>Logout</button>
           {/if}
         </nav>
       {/if}
@@ -159,7 +159,7 @@
         {#if !$sessionStore.authenticated}
           <a href="/#/login" class="hover:underline">Sign in</a>
         {:else}
-          <button class="hover:underline" on:click={() => { fetch((import.meta.env.VITE_API_DEMO==='1'? '/api/v1/demo':'/api/v1') + '/auth/logout').finally(()=>{ sessionStore.set({authenticated:false}); window.location.hash = '/login'; }); }}>Logout</button>
+          <button class="hover:underline" on:click={() => { fetch('/api/v1/auth/logout').finally(()=>{ sessionStore.set({authenticated:false}); window.location.hash = '/login'; }); }}>Logout</button>
         {/if}
       </nav>
     </div>

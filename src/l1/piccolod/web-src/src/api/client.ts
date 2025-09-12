@@ -1,6 +1,7 @@
 export type ErrorResponse = { code?: number; message: string; next_step?: string };
 
 const base = (__DEMO__ ? '/api/v1/demo' : '/api/v1');
+const baseProd = '/api/v1';
 
 let csrfToken: string | null = null;
 
@@ -56,3 +57,24 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const demo = __DEMO__;
+
+// apiProd: always call the real API (/api/v1), even in demo builds.
+export async function apiProd<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const url = `${baseProd}${path}`;
+  const headers = new Headers(init.headers);
+  if (init.method && init.method !== 'GET' && init.method !== 'HEAD') {
+    const token = await ensureCsrf();
+    if (token) headers.set('X-CSRF-Token', token);
+    const isFormData = typeof FormData !== 'undefined' && (init as any).body instanceof FormData;
+    if (!headers.has('Content-Type') && !isFormData) headers.set('Content-Type', 'application/json');
+  }
+  const resp = await fetch(url, { credentials: 'same-origin', ...init, headers });
+  const text = await resp.text();
+  let json: any = {};
+  try { json = text ? JSON.parse(text) : {}; } catch { json = {}; }
+  if (!resp.ok) {
+    const message = json?.message || resp.statusText || 'Request failed';
+    throw { code: resp.status, message } as ErrorResponse;
+  }
+  return json as T;
+}

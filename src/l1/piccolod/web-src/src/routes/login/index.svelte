@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, demo } from '@api/client';
+  import { api, apiProd, demo } from '@api/client';
   import { sessionStore, bootstrapSession } from '@stores/session';
   import { toast } from '@stores/ui';
   let username = '';
@@ -10,7 +10,8 @@
     error = '';
     working = true;
     try {
-      await api(path, { method: demo ? 'GET' : 'POST', body: demo ? undefined : JSON.stringify({ username, password }) });
+      // Always hit real API for login to exercise real session flow
+      await apiProd(path, { method: 'POST', body: JSON.stringify({ username, password }) });
       await bootstrapSession();
       toast('Signed in', 'success');
       // Redirect to dashboard
@@ -42,4 +43,3 @@
     {/if}
   </div>
 </form>
-
