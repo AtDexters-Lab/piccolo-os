@@ -30,3 +30,6 @@
 ## Security & Configuration Tips
 - Do not commit secrets or signing keys; configure locally in `src/l0/piccolo.env`.
 - Prefer least privilege; avoid introducing new host capabilities in services without review.
+
+## Integration Plan (UI ↔ Backend)
+- For the `src/l1/piccolod` daemon and web UI, see `src/l1/piccolod/docs/real-api-integration-plan.md` for the phased cutover from demo UI to the real API.

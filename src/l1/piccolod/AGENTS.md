@@ -77,3 +77,8 @@ Notes:
 
 - Playwright tests are configured to fail on any browser console error to catch regressions early.
 - UI builds to `web/` and is embedded via go:embed; override via `PICCOLO_UI_DIR` for local serving.
+
+## Integration Plan (UI → Real API)
+
+- The phased plan to cut the demo UI over to the production backend is documented in `docs/real-api-integration-plan.md`.
+- Follow phase gates (D0..D9), keep `VITE_API_DEMO=1` for routes not yet implemented, and flip panels to prod only after the backend route lands with tests and CI contract checks.
