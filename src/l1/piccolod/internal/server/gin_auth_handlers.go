@@ -78,7 +78,8 @@ func (s *GinServer) handleAuthLogin(c *gin.Context) {
         c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too Many Requests"})
         return
     }
-    if !s.authManager.Verify(body.Username, body.Password) {
+    // Single local admin account; verify password only
+    if !s.authManager.Verify("admin", body.Password) {
         s.loginFailures++
         c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
         return
@@ -103,7 +104,10 @@ func (s *GinServer) handleAuthPassword(c *gin.Context) {
     id, ok := s.getSession(c)
     if !ok { c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"}); return }
     if _, ok := s.sessions.Get(id); !ok { c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"}); return }
-    var body struct{ OldPassword, NewPassword string `json:"old_password" json:"new_password"` }
+    var body struct {
+        OldPassword string `json:"old_password"`
+        NewPassword string `json:"new_password"`
+    }
     if err := c.BindJSON(&body); err != nil || body.OldPassword == "" || body.NewPassword == "" {
         c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
         return
@@ -125,4 +129,3 @@ func (s *GinServer) handleAuthCSRF(c *gin.Context) {
     }
     c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 }
-

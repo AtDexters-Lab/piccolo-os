@@ -6,6 +6,8 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "strconv"
+    "strings"
     "os"
     "path/filepath"
     "sync"
@@ -135,23 +137,29 @@ func hashArgon2id(password string) (string, error) {
 }
 
 func verifyArgon2id(encoded, password string) bool {
-    // Parse
-    // Expected: argon2id$v=19$m=...,t=...,p=...$salt$hash
-    var memory uint32
-    var time uint32
-    var threads uint8
-    var saltB64, hashB64 string
-    n, err := fmt.Sscanf(encoded, "argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", &memory, &time, &threads, &saltB64, &hashB64)
-    if n != 5 || err != nil {
+    // Expected tokens: ["argon2id", "v=19", "m=...,t=...,p=...", "saltB64", "hashB64"]
+    toks := strings.Split(encoded, "$")
+    if len(toks) < 5 || toks[0] != "argon2id" {
         return false
     }
-    salt, err := base64.RawStdEncoding.DecodeString(saltB64)
+    // Parse parameters
+    var memory, timeIters, threads uint64
+    params := strings.Split(toks[2], ",")
+    for _, p := range params {
+        if !strings.Contains(p, "=") { continue }
+        kv := strings.SplitN(p, "=", 2)
+        switch kv[0] {
+        case "m": v, _ := strconv.ParseUint(kv[1], 10, 32); memory = v
+        case "t": v, _ := strconv.ParseUint(kv[1], 10, 32); timeIters = v
+        case "p": v, _ := strconv.ParseUint(kv[1], 10, 8); threads = v
+        }
+    }
+    salt, err := base64.RawStdEncoding.DecodeString(toks[3])
     if err != nil { return false }
-    want, err := base64.RawStdEncoding.DecodeString(hashB64)
+    want, err := base64.RawStdEncoding.DecodeString(toks[4])
     if err != nil { return false }
-    calc := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
+    calc := argon2.IDKey([]byte(password), salt, uint32(timeIters), uint32(memory), uint8(threads), uint32(len(want)))
     if len(calc) != len(want) { return false }
-    // Constant time compare
     var v byte
     for i := range calc { v |= calc[i] ^ want[i] }
     return v == 0
