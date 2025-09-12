@@ -237,10 +237,15 @@ func (s *GinServer) setupGinRoutes() {
 			apps.POST("/:name/disable", s.handleGinAppDisable) // POST /api/v1/apps/:name/disable
 		}
 
-		// Health endpoints
-		v1.GET("/health", s.handleGinEcosystemTest)        // Full ecosystem details
-		v1.GET("/health/ready", s.handleGinReadinessCheck) // Simple boolean health
-		v1.GET("/ecosystem", s.handleGinEcosystemTest)     // Full ecosystem details
+        // Health endpoints
+        v1.GET("/health", s.handleGinEcosystemTest)        // Full ecosystem details
+        v1.GET("/health/ready", s.handleGinReadinessCheck) // Simple boolean health
+        v1.GET("/ecosystem", s.handleGinEcosystemTest)     // Full ecosystem details
+
+        // Phase 2: read-only status endpoints
+        v1.GET("/updates/os", s.handleOSUpdateStatus)
+        v1.GET("/remote/status", s.handleRemoteStatus)
+        v1.GET("/storage/disks", s.handleStorageDisks)
 
 		// Service discovery endpoints (v1)
 		v1.GET("/services", s.handleGinServicesAll)
