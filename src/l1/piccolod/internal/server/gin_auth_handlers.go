@@ -141,6 +141,14 @@ func (s *GinServer) handleAuthPassword(c *gin.Context) {
         c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
         return
     }
+    // Rewrap crypto SDEK if initialized
+    if s.cryptoManager != nil && s.cryptoManager.IsInitialized() {
+        if err := s.cryptoManager.Rewrap(body.OldPassword, body.NewPassword); err != nil {
+            // Surface as 400 but keep auth changed; user can recover via recovery key
+            c.JSON(http.StatusBadRequest, gin.H{"error": "crypto rewrap failed: "+err.Error()})
+            return
+        }
+    }
     c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }
 

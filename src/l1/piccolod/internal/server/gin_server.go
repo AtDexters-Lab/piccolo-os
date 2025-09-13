@@ -251,6 +251,8 @@ func (s *GinServer) setupGinRoutes() {
         authed.POST("/crypto/setup", s.handleCryptoSetup)
         authed.POST("/crypto/unlock", s.handleCryptoUnlock)
         authed.POST("/crypto/lock", s.handleCryptoLock)
+        authed.GET("/crypto/recovery-key", s.handleCryptoRecoveryStatus)
+        authed.POST("/crypto/recovery-key/generate", s.handleCryptoRecoveryGenerate)
 
         // Container management endpoints (existing)
         authed.GET("/containers", s.handleGinContainers)

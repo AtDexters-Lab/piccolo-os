@@ -309,6 +309,7 @@ paths:
               type: object
               properties:
                 password: { type: string }
+                recovery_key: { type: string, description: Space-separated 24-word mnemonic }
       responses:
         '200': { description: OK }
         '401': { description: Unauthorized }
@@ -317,6 +318,32 @@ paths:
       summary: Lock crypto (forget SDEK)
       responses:
         '200': { description: OK }
+  /crypto/recovery-key:
+    get:
+      summary: Recovery key status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  present: { type: boolean }
+  /crypto/recovery-key/generate:
+    post:
+      summary: Generate recovery key (requires unlocked)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  words:
+                    type: array
+                    items: { type: string }
   /updates/os:
     get:
       summary: OS update status

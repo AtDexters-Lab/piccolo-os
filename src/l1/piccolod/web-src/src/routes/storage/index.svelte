@@ -19,7 +19,7 @@
   }
   onMount(load);
   async function loadRecovery() {
-    loadingRecovery = true; try { recovery = await api('/storage/recovery-key'); } finally { loadingRecovery = false; }
+    loadingRecovery = true; try { recovery = await api('/crypto/recovery-key'); } finally { loadingRecovery = false; }
   }
   onMount(loadRecovery);
   async function initDisk(id: string) {
@@ -73,9 +73,9 @@
   async function generateRecovery() {
     working = true;
     try {
-      await api('/storage/recovery-key/generate', { method: demo ? 'GET' : 'POST' });
+      const res = await api('/crypto/recovery-key/generate', { method: 'POST' });
       toast('Recovery key generated', 'success');
-      await loadRecovery();
+      recovery = { words: (res as any).words, present: true };
     } catch (e: any) { toast(e?.message || 'Generate failed', 'error'); }
     finally { working = false; }
   }
