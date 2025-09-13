@@ -21,15 +21,8 @@ func (s *GinServer) handleOSUpdateStatus(c *gin.Context) {
 
 // handleRemoteStatus returns basic remote access status (device-terminated TLS).
 func (s *GinServer) handleRemoteStatus(c *gin.Context) {
-    // Placeholder: remote disabled by default
-    c.JSON(http.StatusOK, gin.H{
-        "enabled":       false,
-        "public_url":    nil,
-        "issuer":        nil,
-        "expires_at":    nil,
-        "next_renewal":  nil,
-        "warnings":      []string{},
-    })
+    st := s.remoteManager.Status()
+    c.JSON(http.StatusOK, st)
 }
 
 // handleStorageDisks lists physical disks (read-only); returns an empty list if unknown.
@@ -53,4 +46,3 @@ func (s *GinServer) handleStorageDisks(c *gin.Context) {
     }
     c.JSON(http.StatusOK, gin.H{"disks": disks})
 }
-

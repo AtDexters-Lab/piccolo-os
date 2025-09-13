@@ -6,6 +6,7 @@ import (
     "net/http/httptest"
     "os"
     "testing"
+    "piccolod/internal/remote"
 )
 
 func setupBasicServer(t *testing.T) *GinServer {
@@ -13,7 +14,14 @@ func setupBasicServer(t *testing.T) *GinServer {
     tempDir, err := os.MkdirTemp("", "phase2")
     if err != nil { t.Fatalf("tempdir: %v", err) }
     t.Cleanup(func(){ _ = os.RemoveAll(tempDir) })
-    return createGinTestServer(t, tempDir)
+    srv := createGinTestServer(t, tempDir)
+    if srv.remoteManager == nil {
+        rm, err := remote.NewManager(tempDir)
+        if err != nil { t.Fatalf("remote mgr: %v", err) }
+        srv.remoteManager = rm
+        srv.setupGinRoutes()
+    }
+    return srv
 }
 
 func TestOSUpdateStatus_OK(t *testing.T) {
@@ -42,4 +50,3 @@ func TestStorageDisks_OK(t *testing.T) {
     srv.router.ServeHTTP(w, req)
     if w.Code != http.StatusOK { t.Fatalf("status %d", w.Code) }
 }
-

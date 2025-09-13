@@ -15,6 +15,7 @@ import (
 	"piccolod/internal/app"
 	"piccolod/internal/container"
     "piccolod/internal/services"
+    "piccolod/internal/remote"
 )
 
 // TestGinAppAPI_Install tests POST /api/v1/apps endpoint with Gin
@@ -592,12 +593,12 @@ func TestInvalidRoutes(t *testing.T) {
 		url            string
 		expectedStatus int
 	}{
-		{
-			name:           "empty app name",
-			method:         "GET",
-			url:            "/api/v1/apps/",
-			expectedStatus: http.StatusMovedPermanently, // Gin treats this as a different route
-		},
+            {
+                name:           "empty app name",
+                method:         "GET",
+                url:            "/api/v1/apps/",
+                expectedStatus: http.StatusNotFound, // Trailing slash redirect disabled; expect 404
+            },
 		{
 			name:           "too many path segments",
 			method:         "POST",
@@ -636,7 +637,9 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
     }
 	
 	// Create minimal server instance for testing
-    server := &GinServer{appManager: appMgr, serviceManager: svcMgr, version: "test-gin"}
+    rm, err := remote.NewManager(tempDir)
+    if err != nil { t.Fatalf("remote mgr: %v", err) }
+    server := &GinServer{appManager: appMgr, serviceManager: svcMgr, remoteManager: rm, version: "test-gin"}
 	
 	// Setup Gin routes
 	server.setupGinRoutes()
@@ -660,12 +663,12 @@ func generateMockContainerID(id int) string {
 
 // GinMockContainerManager implements the ContainerManager interface for Gin testing
 type GinMockContainerManager struct {
-	containers map[string]*MockContainer
-	nextID     int
-	createError   error
-	startError    error
-	stopError     error
-	removeError   error
+    containers map[string]*MockContainer
+    nextID     int
+    createError   error
+    startError    error
+    stopError     error
+    removeError   error
 }
 
 func (m *GinMockContainerManager) CreateContainer(ctx context.Context, spec container.ContainerCreateSpec) (string, error) {
@@ -726,4 +729,18 @@ func (m *GinMockContainerManager) RemoveContainer(ctx context.Context, container
 		return nil
 	}
 	return container.ErrContainerNotFound(containerID)
+}
+
+func (m *GinMockContainerManager) PullImage(ctx context.Context, image string) error {
+    return nil
+}
+
+func (m *GinMockContainerManager) Logs(ctx context.Context, containerID string, lines int) ([]string, error) {
+    if _, ok := m.containers[containerID]; !ok {
+        return nil, container.ErrContainerNotFound(containerID)
+    }
+    if lines <= 0 { lines = 2 }
+    out := []string{}
+    for i := 0; i < lines; i++ { out = append(out, "demo log entry") }
+    return out, nil
 }

@@ -30,11 +30,15 @@ func (s *GinServer) handleAuthSession(c *gin.Context) {
     id, ok := s.getSession(c)
     if ok {
         if sess, ok := s.sessions.Get(id); ok {
+            locked := false
+            if s.cryptoManager != nil && s.cryptoManager.IsInitialized() {
+                locked = s.cryptoManager.IsLocked()
+            }
             c.JSON(http.StatusOK, gin.H{
                 "authenticated": true,
                 "user": sess.User,
                 "expires_at": time.Unix(sess.ExpiresAt, 0).UTC().Format(time.RFC3339),
-                "volumes_locked": false,
+                "volumes_locked": locked,
             })
             return
         }
@@ -128,4 +132,10 @@ func (s *GinServer) handleAuthCSRF(c *gin.Context) {
         return
     }
     c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+}
+
+// handleAuthInitialized: GET /api/v1/auth/initialized
+func (s *GinServer) handleAuthInitialized(c *gin.Context) {
+    init := s.authManager.IsInitialized()
+    c.JSON(http.StatusOK, gin.H{"initialized": init})
 }

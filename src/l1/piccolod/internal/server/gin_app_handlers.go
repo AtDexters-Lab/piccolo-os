@@ -6,9 +6,10 @@ import (
     "strings"
     "os"
     "time"
+    "strconv"
 
-	"github.com/gin-gonic/gin"
-	"piccolod/internal/app"
+    "github.com/gin-gonic/gin"
+    "piccolod/internal/app"
 )
 
 // APIError represents a structured API error response
@@ -228,14 +229,12 @@ func (s *GinServer) handleGinAppUpdate(c *gin.Context) {
     appName := c.Param("name")
     var req struct{ Tag *string `json:"tag"` }
     _ = c.ShouldBindJSON(&req)
-    // For now, we accept the request and respond OK; real implementation would pull new image/tag and restart
     // Demo mode: always OK
     if os.Getenv("PICCOLO_DEMO") != "" {
         writeGinSuccess(c, nil, "App '"+appName+"' updated")
         return
     }
-    // Validate app exists
-    if _, err := s.appManager.Get(c.Request.Context(), appName); err != nil {
+    if err := s.appManager.UpdateImage(c.Request.Context(), appName, req.Tag); err != nil {
         if strings.Contains(err.Error(), "not found") {
             writeGinError(c, http.StatusNotFound, err.Error())
         } else {
@@ -253,11 +252,11 @@ func (s *GinServer) handleGinAppRevert(c *gin.Context) {
         writeGinSuccess(c, nil, "App '"+appName+"' reverted")
         return
     }
-    if _, err := s.appManager.Get(c.Request.Context(), appName); err != nil {
+    if err := s.appManager.Revert(c.Request.Context(), appName); err != nil {
         if strings.Contains(err.Error(), "not found") {
             writeGinError(c, http.StatusNotFound, err.Error())
         } else {
-            writeGinError(c, http.StatusInternalServerError, "Failed to revert app: "+err.Error())
+            writeGinError(c, http.StatusBadRequest, "Failed to revert app: "+err.Error())
         }
         return
     }
@@ -267,22 +266,30 @@ func (s *GinServer) handleGinAppRevert(c *gin.Context) {
 // handleGinAppLogs handles GET /api/v1/apps/:name/logs - Return recent logs for an app (placeholder).
 func (s *GinServer) handleGinAppLogs(c *gin.Context) {
     appName := c.Param("name")
-    // Verify app exists; demo returns static entries regardless
-    if os.Getenv("PICCOLO_DEMO") == "" {
-        if _, err := s.appManager.Get(c.Request.Context(), appName); err != nil {
-            if strings.Contains(err.Error(), "not found") {
-                writeGinError(c, http.StatusNotFound, err.Error())
-            } else {
-                writeGinError(c, http.StatusInternalServerError, "Failed to get logs: "+err.Error())
-            }
-            return
+    // Verify app exists; in prod fetch real logs
+    if os.Getenv("PICCOLO_DEMO") != "" {
+        entries := []gin.H{
+            {"ts": time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339), "level": "info", "message": appName + " starting"},
+            {"ts": time.Now().Add(-1 * time.Minute).UTC().Format(time.RFC3339), "level": "info", "message": appName + " running"},
         }
+        c.JSON(http.StatusOK, gin.H{"app": appName, "entries": entries})
+        return
     }
-    entries := []gin.H{
-        {"ts": time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339), "level": "info", "message": appName + " starting"},
-        {"ts": time.Now().Add(-1 * time.Minute).UTC().Format(time.RFC3339), "level": "info", "message": appName + " running"},
+    lines := 200
+    if q := c.Query("tail"); q != "" {
+        if n, err := strconv.Atoi(q); err == nil && n > 0 { lines = n }
     }
-    c.JSON(http.StatusOK, gin.H{"app": appName, "entries": entries})
+    out, err := s.appManager.Logs(c.Request.Context(), appName, lines)
+    if err != nil {
+        if strings.Contains(err.Error(), "not found") {
+            writeGinError(c, http.StatusNotFound, err.Error())
+        } else {
+            writeGinError(c, http.StatusInternalServerError, "Failed to get logs: "+err.Error())
+        }
+        return
+    }
+    // Return as entries (array of lines)
+    c.JSON(http.StatusOK, gin.H{"app": appName, "entries": out})
 }
 
 // handleGinCatalog handles GET /api/v1/catalog - returns curated catalog.

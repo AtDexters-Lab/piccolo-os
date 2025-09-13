@@ -24,6 +24,7 @@ import (
     "piccolod/internal/trust"
     "piccolod/internal/update"
     "piccolod/internal/remote"
+    crypt "piccolod/internal/crypt"
 
 	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/gin-gonic/gin"
@@ -57,6 +58,9 @@ type GinServer struct {
     sessions    *authpkg.SessionStore
     // simple rate-limit counters for login failures
     loginFailures int
+
+    // Crypto manager for lock/unlock of app data volumes
+    cryptoManager *crypt.Manager
 }
 
 // GinServerOption is a function that configures a GinServer.
@@ -125,6 +129,11 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
     if err != nil { return nil, fmt.Errorf("auth manager init: %w", err) }
     s.authManager = am
     s.sessions = authpkg.NewSessionStore()
+
+    // Initialize crypto manager
+    cmgr, err := crypt.NewManager(stateDir)
+    if err != nil { return nil, fmt.Errorf("crypto manager init: %w", err) }
+    s.cryptoManager = cmgr
 
     // Remote manager
     rm, err := remote.NewManager(stateDir)
@@ -237,6 +246,12 @@ func (s *GinServer) setupGinRoutes() {
         authed.Use(s.requireSession())
         authed.Use(s.csrfMiddleware())
 
+        // Crypto endpoints
+        authed.GET("/crypto/status", s.handleCryptoStatus)
+        authed.POST("/crypto/setup", s.handleCryptoSetup)
+        authed.POST("/crypto/unlock", s.handleCryptoUnlock)
+        authed.POST("/crypto/lock", s.handleCryptoLock)
+
         // Container management endpoints (existing)
         authed.GET("/containers", s.handleGinContainers)
         authed.POST("/containers", s.handleGinContainers)
@@ -244,19 +259,19 @@ func (s *GinServer) setupGinRoutes() {
         // App management endpoints
         apps := authed.Group("/apps")
         {
-            apps.POST("", s.handleGinAppInstall)           // POST /api/v1/apps
+            apps.POST("", s.requireUnlocked(), s.handleGinAppInstall)           // POST /api/v1/apps
             apps.GET("", s.handleGinAppList)               // GET /api/v1/apps
             apps.GET("/:name", s.handleGinAppGet)          // GET /api/v1/apps/:name
-            apps.DELETE("/:name", s.handleGinAppUninstall) // DELETE /api/v1/apps/:name
+            apps.DELETE("/:name", s.requireUnlocked(), s.handleGinAppUninstall) // DELETE /api/v1/apps/:name
 
             // App actions
-            apps.POST("/:name/start", s.handleGinAppStart)     // POST /api/v1/apps/:name/start
-            apps.POST("/:name/stop", s.handleGinAppStop)       // POST /api/v1/apps/:name/stop
-            apps.POST("/:name/enable", s.handleGinAppEnable)   // POST /api/v1/apps/:name/enable
-            apps.POST("/:name/disable", s.handleGinAppDisable) // POST /api/v1/apps/:name/disable
+            apps.POST("/:name/start", s.requireUnlocked(), s.handleGinAppStart)     // POST /api/v1/apps/:name/start
+            apps.POST("/:name/stop", s.requireUnlocked(), s.handleGinAppStop)       // POST /api/v1/apps/:name/stop
+            apps.POST("/:name/enable", s.requireUnlocked(), s.handleGinAppEnable)   // POST /api/v1/apps/:name/enable
+            apps.POST("/:name/disable", s.requireUnlocked(), s.handleGinAppDisable) // POST /api/v1/apps/:name/disable
             apps.GET("/:name/logs", s.handleGinAppLogs)        // GET /api/v1/apps/:name/logs
-            apps.POST("/:name/update", s.handleGinAppUpdate)   // POST /api/v1/apps/:name/update
-            apps.POST("/:name/revert", s.handleGinAppRevert)   // POST /api/v1/apps/:name/revert
+            apps.POST("/:name/update", s.requireUnlocked(), s.handleGinAppUpdate)   // POST /api/v1/apps/:name/update
+            apps.POST("/:name/revert", s.requireUnlocked(), s.handleGinAppRevert)   // POST /api/v1/apps/:name/revert
         }
 
         // Health endpoints (detailed) require auth

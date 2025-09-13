@@ -77,6 +77,10 @@ func loadOpenAPISpec() ([]byte, error) {
     if b, err := os.ReadFile(filepath.Join("docs", "api", "openapi.yaml")); err == nil {
         return b, nil
     }
+    // When running tests from package dir, try up two levels
+    if b, err := os.ReadFile(filepath.Join("..", "..", "docs", "api", "openapi.yaml")); err == nil {
+        return b, nil
+    }
     // Optional: package data path
     return nil, os.ErrNotExist
 }

@@ -106,6 +106,18 @@ func (s *GinServer) requestLoggingMiddleware() gin.HandlerFunc {
     })
 }
 
+// requireUnlocked blocks state-changing operations when crypto is initialized and currently locked
+func (s *GinServer) requireUnlocked() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        if s != nil && s.cryptoManager != nil && s.cryptoManager.IsInitialized() && s.cryptoManager.IsLocked() {
+            c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden"})
+            c.Abort()
+            return
+        }
+        c.Next()
+    }
+}
+
 // requireSession ensures a valid session cookie is present and not expired
 func (s *GinServer) requireSession() gin.HandlerFunc {
     return func(c *gin.Context) {
