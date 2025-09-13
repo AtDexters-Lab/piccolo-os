@@ -393,7 +393,33 @@ func (s *GinServer) handleGinContainers(c *gin.Context) {
 // handleGinServicesAll returns all service endpoints across apps
 func (s *GinServer) handleGinServicesAll(c *gin.Context) {
     eps := s.serviceManager.GetAll()
-    c.JSON(http.StatusOK, gin.H{"services": eps})
+    out := make([]gin.H, 0, len(eps))
+    for _, ep := range eps {
+        var local string
+        switch ep.Protocol {
+        case "http":
+            local = fmt.Sprintf("http://127.0.0.1:%d", ep.HostBind)
+        case "websocket":
+            local = fmt.Sprintf("ws://127.0.0.1:%d", ep.HostBind)
+        default:
+            local = ""
+        }
+        var localPtr *string
+        if local != "" { localPtr = &local }
+        out = append(out, gin.H{
+            "app": ep.App,
+            "subdomain": ep.Subdomain,
+            "name": ep.Name,
+            "guest_port": ep.GuestPort,
+            "host_port": ep.HostBind,
+            "public_port": ep.PublicPort,
+            "flow": ep.Flow,
+            "protocol": ep.Protocol,
+            "middleware": ep.Middleware,
+            "local_url": localPtr,
+        })
+    }
+    c.JSON(http.StatusOK, gin.H{"services": out})
 }
 
 // handleGinServicesByApp returns services for a single app
@@ -404,7 +430,33 @@ func (s *GinServer) handleGinServicesByApp(c *gin.Context) {
         writeGinError(c, http.StatusNotFound, err.Error())
         return
     }
-    c.JSON(http.StatusOK, gin.H{"app": name, "services": eps})
+    out := make([]gin.H, 0, len(eps))
+    for _, ep := range eps {
+        var local string
+        switch ep.Protocol {
+        case "http":
+            local = fmt.Sprintf("http://127.0.0.1:%d", ep.HostBind)
+        case "websocket":
+            local = fmt.Sprintf("ws://127.0.0.1:%d", ep.HostBind)
+        default:
+            local = ""
+        }
+        var localPtr *string
+        if local != "" { localPtr = &local }
+        out = append(out, gin.H{
+            "app": ep.App,
+            "subdomain": ep.Subdomain,
+            "name": ep.Name,
+            "guest_port": ep.GuestPort,
+            "host_port": ep.HostBind,
+            "public_port": ep.PublicPort,
+            "flow": ep.Flow,
+            "protocol": ep.Protocol,
+            "middleware": ep.Middleware,
+            "local_url": localPtr,
+        })
+    }
+    c.JSON(http.StatusOK, gin.H{"app": name, "services": out})
 }
 
 func (s *GinServer) handleGinVersion(c *gin.Context) {

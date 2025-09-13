@@ -54,21 +54,21 @@ func (s *GinServer) handleGinAppValidate(c *gin.Context) {
         writeGinError(c, http.StatusUnsupportedMediaType, "Content-Type must be application/x-yaml or text/yaml or application/json")
         return
     }
-    body, err := c.GetRawData()
-    if err != nil || len(body) == 0 {
-        writeGinError(c, http.StatusBadRequest, "Request body cannot be empty")
-        return
-    }
     var yamlData []byte
     if strings.Contains(contentType, "application/json") {
         // Accept { app_definition: "...yaml..." }
         var req struct{ AppDefinition string `json:"app_definition"` }
-        if err := c.BindJSON(&req); err != nil || strings.TrimSpace(req.AppDefinition) == "" {
+        if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.AppDefinition) == "" {
             writeGinError(c, http.StatusBadRequest, "Invalid JSON body; expected {app_definition}")
             return
         }
         yamlData = []byte(req.AppDefinition)
     } else {
+        body, err := c.GetRawData()
+        if err != nil || len(body) == 0 {
+            writeGinError(c, http.StatusBadRequest, "Request body cannot be empty")
+            return
+        }
         yamlData = body
     }
     if _, err := app.ParseAppDefinition(yamlData); err != nil {
