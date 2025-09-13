@@ -13,9 +13,20 @@ test.describe('Crypto setup and unlock (real API)', () => {
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect(page.locator('h2')).toHaveText('Dashboard');
 
-    // Setup crypto (locked by default)
-    const setupResp = await page.request.post('/api/v1/crypto/setup', { data: { password: adminPass } });
-    expect(setupResp.ok()).toBeTruthy();
+    // CSRF token for state-changing requests
+    const csrf = await page.request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string);
+    expect(csrf).toBeTruthy();
+
+    // Ensure crypto initialized, and force locked state for deterministic test
+    const status = await page.request.get('/api/v1/crypto/status');
+    const js = await status.json();
+    if (!js.initialized) {
+      const setupResp = await page.request.post('/api/v1/crypto/setup', { headers: { 'X-CSRF-Token': csrf }, data: { password: adminPass } });
+      expect(setupResp.ok()).toBeTruthy();
+    } else if (!js.locked) {
+      const lockResp = await page.request.post('/api/v1/crypto/lock', { headers: { 'X-CSRF-Token': csrf } });
+      expect(lockResp.ok()).toBeTruthy();
+    }
 
     // Session should report volumes locked
     const s1 = await page.request.get('/api/v1/auth/session');
@@ -23,9 +34,6 @@ test.describe('Crypto setup and unlock (real API)', () => {
     expect(js1.authenticated).toBeTruthy();
     expect(js1.volumes_locked).toBeTruthy();
 
-    // CSRF token for state-changing requests
-    const csrf = await page.request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string);
-    expect(csrf).toBeTruthy();
 
     // While locked, app install must be forbidden (403) regardless of payload
     const badYaml = 'name: foo\n';
@@ -36,7 +44,7 @@ test.describe('Crypto setup and unlock (real API)', () => {
     expect(resLocked.status()).toBe(403);
 
     // Unlock
-    const u = await page.request.post('/api/v1/crypto/unlock', { data: { password: adminPass } });
+    const u = await page.request.post('/api/v1/crypto/unlock', { headers: { 'X-CSRF-Token': csrf }, data: { password: adminPass } });
     expect(u.ok()).toBeTruthy();
 
     // Session should report unlocked
@@ -52,4 +60,3 @@ test.describe('Crypto setup and unlock (real API)', () => {
     expect(resAfter.status()).toBe(400);
   });
 });
-
