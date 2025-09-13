@@ -10,11 +10,17 @@ import (
 
 // corsMiddleware adds CORS headers for web UI access
 func (s *GinServer) corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*") // TODO: Make configurable for production
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, X-Requested-With")
-		c.Header("Access-Control-Allow-Credentials", "false") // Will be true when auth is added
+    return func(c *gin.Context) {
+        // For same-origin UI, CORS is mostly unused, but keep minimal support for dev
+        origin := c.GetHeader("Origin")
+        if origin != "" {
+            c.Header("Access-Control-Allow-Origin", origin)
+        } else {
+            c.Header("Access-Control-Allow-Origin", "*")
+        }
+        c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, X-Requested-With, X-CSRF-Token")
+        c.Header("Access-Control-Allow-Credentials", "true")
 
 		// Handle preflight requests
 		if c.Request.Method == "OPTIONS" {
@@ -65,11 +71,11 @@ func (s *GinServer) rateLimitMiddleware() gin.HandlerFunc {
 
 // authMiddleware provides authentication (placeholder for future enhancement) 
 func (s *GinServer) authMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// TODO: Implement JWT or session-based authentication
-		// For now, just pass through
-		
-		// Example of how it would work:
+    return func(c *gin.Context) {
+        // TODO: Implement JWT or session-based authentication
+        // For now, just pass through
+
+        // Example of how it would work:
 		// token := c.GetHeader("Authorization")
 		// if token == "" {
 		//     c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization required"})
@@ -97,5 +103,54 @@ func (s *GinServer) requestLoggingMiddleware() gin.HandlerFunc {
 			param.Request.UserAgent(),
 			param.ErrorMessage,
 		)
-	})
+    })
+}
+
+// requireSession ensures a valid session cookie is present and not expired
+func (s *GinServer) requireSession() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        id, ok := s.getSession(c)
+        if !ok {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+            c.Abort()
+            return
+        }
+        if _, ok := s.sessions.Get(id); !ok {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+            c.Abort()
+            return
+        }
+        c.Next()
+    }
+}
+
+// csrfMiddleware enforces X-CSRF-Token on state-changing requests when session exists
+func (s *GinServer) csrfMiddleware() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        // Only enforce on non-GET/HEAD/OPTIONS
+        switch c.Request.Method {
+        case http.MethodGet, http.MethodHead, http.MethodOptions:
+            c.Next()
+            return
+        }
+        id, ok := s.getSession(c)
+        if !ok {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+            c.Abort()
+            return
+        }
+        sess, ok := s.sessions.Get(id)
+        if !ok {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+            c.Abort()
+            return
+        }
+        token := c.GetHeader("X-CSRF-Token")
+        if token == "" || token != sess.CSRF {
+            c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden"})
+            c.Abort()
+            return
+        }
+        c.Next()
+    }
 }

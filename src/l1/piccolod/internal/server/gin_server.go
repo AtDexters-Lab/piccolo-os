@@ -20,9 +20,10 @@ import (
 	"piccolod/internal/installer"
 	"piccolod/internal/mdns"
 	"piccolod/internal/network"
-	"piccolod/internal/storage"
-	"piccolod/internal/trust"
-	"piccolod/internal/update"
+    "piccolod/internal/storage"
+    "piccolod/internal/trust"
+    "piccolod/internal/update"
+    "piccolod/internal/remote"
 
 	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/gin-gonic/gin"
@@ -40,10 +41,11 @@ type GinServer struct {
     installer         *installer.Installer
 	updateManager     *update.Manager
 	networkManager    *network.Manager
-	backupManager     *backup.Manager
-	federationManager *federation.Manager
-	mdnsManager       *mdns.Manager
-	ecosystemManager  *ecosystem.Manager
+    backupManager     *backup.Manager
+    federationManager *federation.Manager
+    mdnsManager       *mdns.Manager
+    ecosystemManager  *ecosystem.Manager
+    remoteManager     *remote.Manager
     router            *gin.Engine
     version           string
 
@@ -124,6 +126,11 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
     s.authManager = am
     s.sessions = authpkg.NewSessionStore()
 
+    // Remote manager
+    rm, err := remote.NewManager(stateDir)
+    if err != nil { return nil, fmt.Errorf("remote manager init: %w", err) }
+    s.remoteManager = rm
+
     s.setupGinRoutes()
     return s, nil
 }
@@ -201,7 +208,7 @@ func (s *GinServer) setupGinRoutes() {
     // API v1 group
     v1 := r.Group("/api/v1")
     {
-        // Serve embedded OpenAPI document for tooling/debug
+        // Serve embedded OpenAPI document for tooling/debug (no auth)
         v1.GET("/openapi.yaml", func(c *gin.Context) {
             if b, err := loadOpenAPISpec(); err == nil {
                 c.Data(http.StatusOK, "application/yaml; charset=utf-8", b)
@@ -210,20 +217,32 @@ func (s *GinServer) setupGinRoutes() {
             }
         })
 
-        // Auth & sessions
+        // Auth & sessions (no auth required)
         v1.GET("/auth/session", s.handleAuthSession)
         v1.POST("/auth/login", s.handleAuthLogin)
         v1.POST("/auth/logout", s.handleAuthLogout)
         v1.POST("/auth/password", s.handleAuthPassword)
         v1.GET("/auth/csrf", s.handleAuthCSRF)
+        v1.GET("/auth/initialized", s.handleAuthInitialized)
         v1.POST("/auth/setup", s.handleAuthSetup)
 
+        // Selected read-only status endpoints remain public
+        v1.GET("/updates/os", s.handleOSUpdateStatus)
+        v1.GET("/remote/status", s.handleRemoteStatus)
+        v1.GET("/storage/disks", s.handleStorageDisks)
+        v1.GET("/health/ready", s.handleGinReadinessCheck)
+
+        // All other API endpoints require session + CSRF
+        authed := v1.Group("/")
+        authed.Use(s.requireSession())
+        authed.Use(s.csrfMiddleware())
+
         // Container management endpoints (existing)
-        v1.GET("/containers", s.handleGinContainers)
-        v1.POST("/containers", s.handleGinContainers)
+        authed.GET("/containers", s.handleGinContainers)
+        authed.POST("/containers", s.handleGinContainers)
 
         // App management endpoints
-        apps := v1.Group("/apps")
+        apps := authed.Group("/apps")
         {
             apps.POST("", s.handleGinAppInstall)           // POST /api/v1/apps
             apps.GET("", s.handleGinAppList)               // GET /api/v1/apps
@@ -240,28 +259,25 @@ func (s *GinServer) setupGinRoutes() {
             apps.POST("/:name/revert", s.handleGinAppRevert)   // POST /api/v1/apps/:name/revert
         }
 
-        // Health endpoints
-        v1.GET("/health", s.handleGinEcosystemTest)        // Full ecosystem details
-        v1.GET("/health/ready", s.handleGinReadinessCheck) // Simple boolean health
-        v1.GET("/ecosystem", s.handleGinEcosystemTest)     // Full ecosystem details
+        // Health endpoints (detailed) require auth
+        authed.GET("/health", s.handleGinEcosystemTest)
+        authed.GET("/ecosystem", s.handleGinEcosystemTest)
 
-        // Phase 2: read-only status endpoints
-        v1.GET("/updates/os", s.handleOSUpdateStatus)
-        v1.GET("/remote/status", s.handleRemoteStatus)
-        v1.GET("/storage/disks", s.handleStorageDisks)
+        // Remote config endpoints require auth
+        authed.POST("/remote/configure", s.handleRemoteConfigure)
+        authed.POST("/remote/disable", s.handleRemoteDisable)
+        authed.POST("/remote/rotate", s.handleRemoteRotate)
 
-        // Catalog
-        v1.GET("/catalog", s.handleGinCatalog)
+        // Catalog (read-only) and services require auth
+        authed.GET("/catalog", s.handleGinCatalog)
+        authed.GET("/services", s.handleGinServicesAll)
+        authed.GET("/apps/:name/services", s.handleGinServicesByApp)
 
-		// Service discovery endpoints (v1)
-		v1.GET("/services", s.handleGinServicesAll)
-		v1.GET("/apps/:name/services", s.handleGinServicesByApp)
-
-		// Demo mode: serve JSON fixtures under /api/v1/demo/* from ./testdata/api
-		if os.Getenv("PICCOLO_DEMO") != "" {
-			v1.Any("/demo/*path", s.handleDemoJSON)
-		}
-	}
+        // Demo mode: serve JSON fixtures under /api/v1/demo/* from ./testdata/api (require auth)
+        if os.Getenv("PICCOLO_DEMO") != "" {
+            authed.Any("/demo/*path", s.handleDemoJSON)
+        }
+    }
 
 	// Admin routes
 	r.GET("/version", s.handleGinVersion)
