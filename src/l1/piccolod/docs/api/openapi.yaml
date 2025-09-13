@@ -39,6 +39,30 @@ paths:
               schema:
                 $ref: '#/components/schemas/ResponseApp'
         '400': { description: Bad Request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /apps/validate:
+    post:
+      summary: Validate an app.yaml without installing
+      requestBody:
+        required: true
+        content:
+          application/x-yaml:
+            schema: { type: string }
+          application/json:
+            schema:
+              type: object
+              properties:
+                app_definition:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+        '400': { description: Bad Request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   /apps/{name}:
     get:
       summary: Get app details (with services)
@@ -504,6 +528,22 @@ paths:
                         name: { type: string }
                         image: { type: string }
                         description: { type: string }
+  /catalog/{name}/template:
+    get:
+      summary: Get example app.yaml for a catalog item
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/x-yaml:
+              schema:
+                type: string
+        '404': { description: Not Found }
 
   /auth/setup:
     post:

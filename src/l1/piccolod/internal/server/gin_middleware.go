@@ -1,11 +1,12 @@
 package server
 
 import (
-	"fmt"
-	"net/http"
-	"time"
+    "fmt"
+    "net/http"
+    "time"
+    "strings"
 
-	"github.com/gin-gonic/gin"
+    "github.com/gin-gonic/gin"
 )
 
 // corsMiddleware adds CORS headers for web UI access

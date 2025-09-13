@@ -260,6 +260,7 @@ func (s *GinServer) setupGinRoutes() {
         apps := authed.Group("/apps")
         {
             apps.POST("", s.requireUnlocked(), s.handleGinAppInstall)           // POST /api/v1/apps
+            apps.POST("/validate", s.handleGinAppValidate)                      // POST /api/v1/apps/validate
             apps.GET("", s.handleGinAppList)               // GET /api/v1/apps
             apps.GET("/:name", s.handleGinAppGet)          // GET /api/v1/apps/:name
             apps.DELETE("/:name", s.requireUnlocked(), s.handleGinAppUninstall) // DELETE /api/v1/apps/:name
@@ -285,6 +286,7 @@ func (s *GinServer) setupGinRoutes() {
 
         // Catalog (read-only) and services require auth
         authed.GET("/catalog", s.handleGinCatalog)
+        authed.GET("/catalog/:name/template", s.handleGinCatalogTemplate)
         authed.GET("/services", s.handleGinServicesAll)
         authed.GET("/apps/:name/services", s.handleGinServicesByApp)
 

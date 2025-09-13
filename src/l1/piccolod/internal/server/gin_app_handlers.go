@@ -47,6 +47,55 @@ func writeGinSuccess(c *gin.Context, data interface{}, message string) {
 	c.JSON(http.StatusOK, response)
 }
 
+// handleGinAppValidate handles POST /api/v1/apps/validate - Validate app.yaml without installing
+func (s *GinServer) handleGinAppValidate(c *gin.Context) {
+    contentType := c.GetHeader("Content-Type")
+    if !strings.Contains(contentType, "application/x-yaml") && !strings.Contains(contentType, "text/yaml") && !strings.Contains(contentType, "application/json") {
+        writeGinError(c, http.StatusUnsupportedMediaType, "Content-Type must be application/x-yaml or text/yaml or application/json")
+        return
+    }
+    body, err := c.GetRawData()
+    if err != nil || len(body) == 0 {
+        writeGinError(c, http.StatusBadRequest, "Request body cannot be empty")
+        return
+    }
+    var yamlData []byte
+    if strings.Contains(contentType, "application/json") {
+        // Accept { app_definition: "...yaml..." }
+        var req struct{ AppDefinition string `json:"app_definition"` }
+        if err := c.BindJSON(&req); err != nil || strings.TrimSpace(req.AppDefinition) == "" {
+            writeGinError(c, http.StatusBadRequest, "Invalid JSON body; expected {app_definition}")
+            return
+        }
+        yamlData = []byte(req.AppDefinition)
+    } else {
+        yamlData = body
+    }
+    if _, err := app.ParseAppDefinition(yamlData); err != nil {
+        writeGinError(c, http.StatusBadRequest, "Invalid app.yaml: "+err.Error())
+        return
+    }
+    writeGinSuccess(c, gin.H{"valid": true}, "valid")
+}
+
+// handleGinCatalogTemplate handles GET /api/v1/catalog/:name/template - return YAML template for a catalog app
+func (s *GinServer) handleGinCatalogTemplate(c *gin.Context) {
+    name := strings.ToLower(strings.TrimSpace(c.Param("name")))
+    var yaml string
+    switch name {
+    case "vaultwarden":
+        yaml = "name: vaultwarden\nimage: vaultwarden/server:1.30.5\nlisteners:\n  - name: http\n    guest_port: 80\n    flow: tcp\n    protocol: http\n"
+    case "gitea":
+        yaml = "name: gitea\nimage: gitea/gitea:1.21\nlisteners:\n  - name: http\n    guest_port: 3000\n    flow: tcp\n    protocol: http\n"
+    case "wordpress":
+        yaml = "name: wordpress\nimage: wordpress:6\nlisteners:\n  - name: http\n    guest_port: 80\n    flow: tcp\n    protocol: http\n"
+    default:
+        c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+        return
+    }
+    c.Data(http.StatusOK, "application/x-yaml; charset=utf-8", []byte(yaml))
+}
+
 // handleGinAppInstall handles POST /api/v1/apps - Install app from app.yaml upload
 func (s *GinServer) handleGinAppInstall(c *gin.Context) {
 	// Check Content-Type
