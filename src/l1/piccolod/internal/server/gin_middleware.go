@@ -11,25 +11,43 @@ import (
 // corsMiddleware adds CORS headers for web UI access
 func (s *GinServer) corsMiddleware() gin.HandlerFunc {
     return func(c *gin.Context) {
-        // For same-origin UI, CORS is mostly unused, but keep minimal support for dev
+        // Strict same-origin CORS policy with credentials allowed only for same-origin
         origin := c.GetHeader("Origin")
+        reqHost := c.Request.Host // may include :port
+        allow := false
         if origin != "" {
+            // Compare origin host to request host
+            // Origin format: scheme://host[:port]
+            // Cheap parse: strip scheme and compare host:port suffix
+            // Note: in reverse proxy deployments, host should be preserved for same-origin.
+            if strings.HasPrefix(origin, "http://") || strings.HasPrefix(origin, "https://") {
+                o := origin
+                if i := strings.Index(o, "://"); i >= 0 { o = o[i+3:] }
+                // o now 'host[:port]'
+                if o == reqHost { allow = true }
+            }
+        }
+        if allow {
             c.Header("Access-Control-Allow-Origin", origin)
-        } else {
-            c.Header("Access-Control-Allow-Origin", "*")
+            c.Header("Vary", "Origin")
+            c.Header("Access-Control-Allow-Credentials", "true")
         }
         c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, X-Requested-With, X-CSRF-Token")
-        c.Header("Access-Control-Allow-Credentials", "true")
 
-		// Handle preflight requests
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusOK)
-			return
-		}
+        // Handle preflight requests
+        if c.Request.Method == "OPTIONS" {
+            if allow {
+                c.AbortWithStatus(http.StatusOK)
+            } else {
+                // Not same-origin: deny preflight
+                c.AbortWithStatus(http.StatusForbidden)
+            }
+            return
+        }
 
-		c.Next()
-	}
+        c.Next()
+    }
 }
 
 // securityHeadersMiddleware adds security headers

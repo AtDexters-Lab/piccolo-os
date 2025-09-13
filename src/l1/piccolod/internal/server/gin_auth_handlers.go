@@ -12,11 +12,32 @@ const sessionCookieName = "piccolo_session"
 
 func (s *GinServer) setSessionCookie(c *gin.Context, id string, ttl time.Duration) {
     secure := c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
-    c.SetCookie(sessionCookieName, id, int(ttl.Seconds()), "/", "", secure, true)
+    // Prefer SameSite=Lax for session cookie
+    c.SetSameSite(http.SameSiteLaxMode)
+    // Use explicit cookie to control SameSite and HttpOnly flags
+    http.SetCookie(c.Writer, &http.Cookie{
+        Name:     sessionCookieName,
+        Value:    id,
+        Path:     "/",
+        MaxAge:   int(ttl.Seconds()),
+        HttpOnly: true,
+        Secure:   secure,
+        SameSite: http.SameSiteLaxMode,
+    })
 }
 
 func (s *GinServer) clearSessionCookie(c *gin.Context) {
-    c.SetCookie(sessionCookieName, "", -1, "/", "", false, true)
+    // Clear with SameSite=Lax
+    c.SetSameSite(http.SameSiteLaxMode)
+    http.SetCookie(c.Writer, &http.Cookie{
+        Name:     sessionCookieName,
+        Value:    "",
+        Path:     "/",
+        MaxAge:   -1,
+        HttpOnly: true,
+        Secure:   false,
+        SameSite: http.SameSiteLaxMode,
+    })
 }
 
 func (s *GinServer) getSession(c *gin.Context) (id string, ok bool) {
