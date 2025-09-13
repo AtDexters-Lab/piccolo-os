@@ -50,12 +50,17 @@
     } catch (e: any) { toast(e?.message || 'Update default root failed', 'error'); }
     finally { working = false; }
   }
-  async function unlock(ok: boolean) {
+  let unlockPassword = '';
+  async function unlock() {
     working = true;
     try {
-      const path = ok ? '/storage/unlock' : '/storage/unlock_failed';
-      await api(path, { method: demo ? 'GET' : 'POST' });
-      toast(ok ? 'Volumes unlocked' : 'Unlock failed', ok ? 'success' : 'error');
+      if (!demo) {
+        if (!unlockPassword) { toast('Enter password', 'error'); return; }
+        await api('/crypto/unlock', { method: 'POST', body: JSON.stringify({ password: unlockPassword }) });
+      } else {
+        await api('/storage/unlock', { method: 'GET' });
+      }
+      toast('Volumes unlocked', 'success');
       // Refresh session and mounts after unlock attempt
       try { const s = await api('/auth/session'); sessionStore.set(s as any); } catch {}
       await load();
@@ -127,11 +132,16 @@
       >{session?.volumes_locked ? 'Locked' : 'Unlocked'}</span>
     </div>
     <p class="text-sm text-gray-700">{session?.volumes_locked ? 'Volumes are locked until you unlock.' : 'Volumes are available.'}</p>
-    <div class="mt-2 space-x-2">
-      <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => unlock(true)} disabled={working}>Unlock volumes</button>
-      {#if demo}
-        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => unlock(false)} disabled={working}>Simulate unlock failure</button>
-      {/if}
+    <div class="mt-2 space-y-2">
+      <label class="block text-sm">Password
+        <input id="unlock-password" type="password" class="mt-1 w-full border rounded p-1 text-sm" bind:value={unlockPassword} autocomplete="current-password" />
+      </label>
+      <div class="space-x-2">
+        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={unlock} disabled={working}>Unlock volumes</button>
+        {#if demo}
+          <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => { /* simulate failure */ api('/storage/unlock_failed', { method: 'GET' }).then(()=>toast('Unlock failed','error')).catch(()=>toast('Unlock failed','error')); }} disabled={working}>Simulate unlock failure</button>
+        {/if}
+      </div>
     </div>
   </div>
   <div class="bg-white rounded border p-4">

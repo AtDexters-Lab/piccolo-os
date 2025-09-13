@@ -247,6 +247,52 @@ paths:
                 recovery_key: { type: string, nullable: true }
       responses:
         '200': { description: OK }
+  /crypto/status:
+    get:
+      summary: Crypto status (initialized/locked)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  initialized: { type: boolean }
+                  locked: { type: boolean }
+  /crypto/setup:
+    post:
+      summary: Initialize crypto using admin password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password: { type: string }
+      responses:
+        '200': { description: OK }
+        '400': { description: Bad Request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /crypto/unlock:
+    post:
+      summary: Unlock crypto with admin password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password: { type: string }
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+  /crypto/lock:
+    post:
+      summary: Lock crypto (forget SDEK)
+      responses:
+        '200': { description: OK }
   /updates/os:
     get:
       summary: OS update status
@@ -303,6 +349,11 @@ paths:
   /remote/disable:
     post:
       summary: Disable remote access
+      responses:
+        '200': { description: OK }
+  /remote/rotate:
+    post:
+      summary: Rotate remote credentials
       responses:
         '200': { description: OK }
 
@@ -791,3 +842,15 @@ components:
       type: apiKey
       in: header
       name: X-CSRF-Token
+  /auth/initialized:
+    get:
+      summary: Returns whether admin setup has been completed
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  initialized: { type: boolean }
