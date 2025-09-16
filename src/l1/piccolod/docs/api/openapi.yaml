@@ -585,6 +585,7 @@ paths:
       summary: First-run admin setup
       responses:
         '200': { description: OK }
+        '400': { description: Bad Request }
   /auth/login:
     post:
       summary: Login
@@ -597,6 +598,18 @@ paths:
       summary: Logout
       responses:
         '200': { description: OK }
+  /auth/initialized:
+    get:
+      summary: Returns whether admin setup has been completed
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  initialized: { type: boolean }
   /auth/session:
     get:
       summary: Session status
@@ -620,6 +633,8 @@ paths:
                 new_password: { type: string }
       responses:
         '200': { description: OK }
+        '400': { description: Bad Request }
+        '401': { description: Unauthorized }
   /auth/csrf:
     get:
       summary: Get CSRF token
@@ -917,15 +932,3 @@ components:
       type: apiKey
       in: header
       name: X-CSRF-Token
-  /auth/initialized:
-    get:
-      summary: Returns whether admin setup has been completed
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  initialized: { type: boolean }
