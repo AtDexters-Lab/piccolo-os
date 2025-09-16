@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, demo } from '@api/client';
+  import { api, apiProd, demo } from '@api/client';
   import { toast } from '@stores/ui';
   import { link } from 'svelte-spa-router';
   let catalog: any = null; let loading = true; let error = '';
   let yamlText = 'name: example\nimage: alpine:latest\n';
   onMount(async () => {
-    try { catalog = await api('/catalog'); }
+    try { catalog = await apiProd('/catalog'); }
     catch (e: any) { error = e?.message || 'Failed to load catalog'; }
     finally { loading = false; }
   });

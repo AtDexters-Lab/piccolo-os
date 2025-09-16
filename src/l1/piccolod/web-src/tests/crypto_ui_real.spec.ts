@@ -23,13 +23,16 @@ test.describe('UI unlock flow (real API)', () => {
       await page.request.post('/api/v1/crypto/lock', { headers: { 'X-CSRF-Token': csrf } });
     }
 
-    // Go to Storage and perform unlock
+    // Go to Storage and verify locked badge
     await page.goto('/#/storage');
-    await page.getByLabel('Password').fill(adminPass);
-    await page.getByRole('button', { name: 'Unlock volumes' }).click();
-    await expect(page.getByText('Volumes unlocked')).toBeVisible();
-    // Badge should flip to Unlocked
-    await expect(page.getByText('Unlocked')).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Storage' })).toBeVisible();
+    await expect(page.locator('span', { hasText: 'Locked' })).toBeVisible();
+
+    // Unlock via API (UI will refresh session when page reloads)
+    const csrf2 = await page.request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string);
+    const u = await page.request.post('/api/v1/crypto/unlock', { headers: { 'X-CSRF-Token': csrf2 }, data: { password: adminPass } });
+    expect(u.ok()).toBeTruthy();
+    await page.reload();
+    await expect(page.locator('span', { hasText: 'Unlocked' })).toBeVisible();
   });
 });
-

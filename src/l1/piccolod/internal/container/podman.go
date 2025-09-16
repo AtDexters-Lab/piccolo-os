@@ -260,6 +260,41 @@ func (p *PodmanCLI) RemoveContainer(ctx context.Context, containerID string) err
 	return nil
 }
 
+// PullImage pulls an image by name
+func (p *PodmanCLI) PullImage(ctx context.Context, image string) error {
+    if err := ValidateContainerName(image); err != nil {
+        return fmt.Errorf("invalid image name: %w", err)
+    }
+    cmd := exec.CommandContext(ctx, "podman", "pull", image)
+    output, err := cmd.CombinedOutput()
+    if err != nil {
+        return fmt.Errorf("podman pull failed: %w, output: %s", err, string(output))
+    }
+    return nil
+}
+
+// Logs returns recent log lines from a container
+func (p *PodmanCLI) Logs(ctx context.Context, containerID string, lines int) ([]string, error) {
+    if !isValidContainerID(containerID) {
+        return nil, fmt.Errorf("invalid container ID format: %s", containerID)
+    }
+    if lines <= 0 { lines = 200 }
+    args := []string{"logs", "--tail", fmt.Sprintf("%d", lines)}
+    args = append(args, containerID)
+    cmd := exec.CommandContext(ctx, "podman", args...)
+    output, err := cmd.CombinedOutput()
+    if err != nil {
+        return nil, fmt.Errorf("podman logs failed: %w, output: %s", err, string(output))
+    }
+    // Split into lines
+    var linesOut []string
+    for _, ln := range strings.Split(strings.ReplaceAll(string(output), "\r\n", "\n"), "\n") {
+        if strings.TrimSpace(ln) == "" { continue }
+        linesOut = append(linesOut, ln)
+    }
+    return linesOut, nil
+}
+
 // UpdatePublishAdd adds a port publish mapping to a running container
 func (p *PodmanCLI) UpdatePublishAdd(ctx context.Context, containerID string, hostBind, guestPort int) error {
     if !isValidContainerID(containerID) { return fmt.Errorf("invalid container ID format: %s", containerID) }

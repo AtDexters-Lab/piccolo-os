@@ -10,12 +10,12 @@ import (
 
 // MockContainerManager implements container operations for testing
 type MockContainerManager struct {
-	containers    map[string]*MockContainer
-	nextID        int
-	createError   error
-	startError    error
-	stopError     error
-	removeError   error
+    containers    map[string]*MockContainer
+    nextID        int
+    createError   error
+    startError    error
+    stopError     error
+    removeError   error
 }
 
 type MockContainer struct {
@@ -94,6 +94,22 @@ func (m *MockContainerManager) RemoveContainer(ctx context.Context, containerID 
 	}
 
 	return container.ErrContainerNotFound(containerID)
+}
+
+func (m *MockContainerManager) PullImage(ctx context.Context, image string) error {
+    // Always succeed in tests
+    return nil
+}
+
+func (m *MockContainerManager) Logs(ctx context.Context, containerID string, lines int) ([]string, error) {
+    if _, ok := m.containers[containerID]; !ok {
+        return nil, container.ErrContainerNotFound(containerID)
+    }
+    // Return deterministic fake logs
+    if lines <= 0 { lines = 3 }
+    out := []string{}
+    for i := 0; i < lines; i++ { out = append(out, "log line") }
+    return out, nil
 }
 
 func generateMockContainerID(id int) string {

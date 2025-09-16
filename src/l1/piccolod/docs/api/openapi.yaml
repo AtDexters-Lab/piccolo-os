@@ -333,6 +333,14 @@ paths:
   /crypto/recovery-key/generate:
     post:
       summary: Generate recovery key (requires unlocked)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password: { type: string, description: Optional password to unlock transiently }
       responses:
         '200':
           description: OK

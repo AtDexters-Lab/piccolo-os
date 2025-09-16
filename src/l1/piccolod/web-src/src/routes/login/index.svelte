@@ -1,11 +1,21 @@
 <script lang="ts">
   import { api, apiProd, demo } from '@api/client';
+  import { onMount } from 'svelte';
   import { sessionStore, bootstrapSession } from '@stores/session';
   import { toast } from '@stores/ui';
   let username = '';
   let password = '';
   let error = '';
   let working = false;
+  onMount(async () => {
+    if (demo) return;
+    try {
+      const init: any = await apiProd('/auth/initialized');
+      if (!init?.initialized) {
+        window.location.hash = '/setup';
+      }
+    } catch {}
+  });
   async function signIn(path: string = '/auth/login') {
     error = '';
     working = true;

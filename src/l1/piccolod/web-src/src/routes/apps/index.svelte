@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, demo } from '@api/client';
+  import { api, apiProd, demo } from '@api/client';
   import { toast } from '@stores/ui';
   let resp: any = null; let error = ''; let loading = true;
   onMount(async () => {
@@ -8,16 +8,16 @@
   });
   async function load() {
     loading = true; error = '';
-    try { resp = await api('/apps'); }
+    try { resp = await apiProd('/apps'); }
     catch (e: any) { error = e?.message || 'Failed to load apps'; }
     finally { loading = false; }
   }
   async function start(name: string) {
-    try { await api(`/apps/${name}/start`, { method: demo ? 'GET' : 'POST' }); toast(`Started ${name}`, 'success'); await load(); }
+    try { await apiProd(`/apps/${name}/start`, { method: 'POST' }); toast(`Started ${name}`, 'success'); await load(); }
     catch (e: any) { toast(e?.message || 'Start failed', 'error'); }
   }
   async function stop(name: string) {
-    try { await api(`/apps/${name}/stop`, { method: demo ? 'GET' : 'POST' }); toast(`Stopped ${name}`, 'success'); await load(); }
+    try { await apiProd(`/apps/${name}/stop`, { method: 'POST' }); toast(`Stopped ${name}`, 'success'); await load(); }
     catch (e: any) { toast(e?.message || 'Stop failed', 'error'); }
   }
 </script>

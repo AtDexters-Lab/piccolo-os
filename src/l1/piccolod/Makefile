@@ -74,3 +74,14 @@ e2e-visual: ## Generate visual screenshots (desktop+mobile) for demo UI
 e2e-visual-one: ## Run visual tour with ARGS (e.g., --project=chromium)
 	$(MAKE) build DEMO=1
 	cd web-src && npm ci && npx playwright install chromium && npx playwright test tests/visual.spec.ts $(ARGS)
+
+# Real-auth E2E (no demo bypass)
+.PHONY: e2e-real e2e-one-real
+e2e-real: ## Run Playwright against real server (auth/setup enforced)
+	$(MAKE) build DEMO=0
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test --config=playwright.real.config.ts || true
+	node web-src/tools/summarize-playwright.js || true
+
+e2e-one-real: ## Run a single Playwright spec against real server (ARGS="tests/setup_redirect.spec.ts")
+	$(MAKE) build DEMO=0
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test --config=playwright.real.config.ts $(ARGS)

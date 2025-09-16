@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { sessionStore, bootstrapSession } from './stores/session';
+  import { apiProd } from '@api/client';
   import Router, { link } from 'svelte-spa-router';
   import { wrap } from 'svelte-spa-router/wrap';
   import { get } from 'svelte/store';
@@ -27,7 +28,16 @@
     try { await bootstrapSession(); } catch {}
     const ok = !!get(sessionStore).authenticated;
     if (!ok) {
+      // Check if admin is initialized; if not, redirect to setup
+      try {
+        const init: any = await apiProd('/auth/initialized');
+        if (!init?.initialized) {
+          window.location.hash = '/setup';
+          return false;
+        }
+      } catch {}
       window.location.hash = '/login';
+      return false;
     }
     return ok;
   };

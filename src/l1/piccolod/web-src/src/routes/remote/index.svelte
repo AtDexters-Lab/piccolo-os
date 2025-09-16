@@ -16,7 +16,13 @@
     working = true; error = '';
     try {
       const path = simulate === 'dns' ? '/remote/configure/dns_error' : simulate === 'port80' ? '/remote/configure/port80_blocked' : simulate === 'caa' ? '/remote/configure/caa_error' : '/remote/configure';
-      await api(path, { method: demo ? 'GET' : 'POST', body: demo ? undefined : JSON.stringify(form) });
+      const payload = {
+        endpoint: form.endpoint,
+        device_id: form.device_key, // align with OpenAPI
+        device_secret: '',
+        hostname: form.hostname,
+      };
+      await api(path, { method: demo ? 'GET' : 'POST', body: demo ? undefined : JSON.stringify(payload) });
       toast('Remote configured', 'success');
       if (demo) {
         status = { ...(status || {}), enabled: true, public_url: status?.public_url || 'https://demo.piccolo.example', issuer: status?.issuer || 'Let\'s Encrypt', expires_at: status?.expires_at || new Date(Date.now() + 86_400_000).toISOString() };

@@ -162,6 +162,32 @@ func (fsm *FilesystemStateManager) loadAppFromDisk(appName string) (*AppInstance
 	return app, nil
 }
 
+// BackupCurrentAppDefinition writes current app.yaml to app.prev.yaml for rollback
+func (fsm *FilesystemStateManager) BackupCurrentAppDefinition(name string) error {
+    fsm.fsMu.Lock()
+    defer fsm.fsMu.Unlock()
+    appDir := filepath.Join(fsm.appsDir, name)
+    cur := filepath.Join(appDir, "app.yaml")
+    prev := filepath.Join(appDir, "app.prev.yaml")
+    data, err := os.ReadFile(cur)
+    if err != nil { return fmt.Errorf("read current app.yaml: %w", err) }
+    if err := os.WriteFile(prev, data, 0644); err != nil { return fmt.Errorf("write app.prev.yaml: %w", err) }
+    return nil
+}
+
+// GetPreviousAppDefinition reads app.prev.yaml if present
+func (fsm *FilesystemStateManager) GetPreviousAppDefinition(name string) (*api.AppDefinition, error) {
+    appDir := filepath.Join(fsm.appsDir, name)
+    prev := filepath.Join(appDir, "app.prev.yaml")
+    data, err := os.ReadFile(prev)
+    if err != nil {
+        return nil, fmt.Errorf("previous definition not found: %w", err)
+    }
+    def, err := ParseAppDefinition(data)
+    if err != nil { return nil, fmt.Errorf("parse previous app.yaml: %w", err) }
+    return def, nil
+}
+
 // GetAppDefinition reads and parses app.yaml for a given app name
 func (fsm *FilesystemStateManager) GetAppDefinition(name string) (*api.AppDefinition, error) {
     appDir := filepath.Join(fsm.appsDir, name)

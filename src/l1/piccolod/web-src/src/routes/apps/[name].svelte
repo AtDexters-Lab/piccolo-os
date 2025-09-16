@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, demo } from '@api/client';
+  import { api, apiProd, demo } from '@api/client';
   import { toast } from '@stores/ui';
   export let params: { name: string };
   let resp: any = null; let error = ''; let loading = true;
@@ -13,25 +13,25 @@
   });
   async function load() {
     loading = true; error = '';
-    try { resp = await api(`/apps/${params.name}`); }
+    try { resp = await apiProd(`/apps/${params.name}`); }
     catch (e: any) { error = e?.message || 'Failed to load'; }
     finally { loading = false; }
   }
   async function loadLogs() {
-    loadingLogs = true; try { logs = await api(`/apps/${params.name}/logs`); } finally { loadingLogs = false; }
+    loadingLogs = true; try { logs = await apiProd(`/apps/${params.name}/logs`); } finally { loadingLogs = false; }
   }
   async function doUpdate() {
-    try { await api(`/apps/${params.name}/update`, { method: demo ? 'GET' : 'POST' }); toast(`Updated ${params.name}`, 'success'); }
+    try { await apiProd(`/apps/${params.name}/update`, { method: 'POST' }); toast(`Updated ${params.name}`, 'success'); }
     catch (e: any) { toast(e?.message || 'Update failed', 'error'); }
   }
   async function doRevert() {
-    try { await api(`/apps/${params.name}/revert`, { method: demo ? 'GET' : 'POST' }); toast(`Reverted ${params.name}`, 'success'); }
+    try { await apiProd(`/apps/${params.name}/revert`, { method: 'POST' }); toast(`Reverted ${params.name}`, 'success'); }
     catch (e: any) { toast(e?.message || 'Revert failed', 'error'); }
   }
   async function doUninstall(purge = false) {
     try {
       const q = purge ? '?purge=true' : '';
-      await api(`/apps/${params.name}${q}`, { method: 'DELETE' });
+      await apiProd(`/apps/${params.name}${q}`, { method: 'DELETE' });
       toast(`Uninstalled ${params.name}`, 'success');
       showUninstall = false; purgeData = false;
     } catch (e: any) { toast(e?.message || 'Uninstall failed', 'error'); }
@@ -101,7 +101,7 @@
     </div>
     <div class="bg-white rounded border p-4">
       <h3 class="font-medium mb-2">Logs (recent)</h3>
-      <a class="text-xs text-blue-600 underline" href="/api/v1/demo/logs/bundle" target="_blank" rel="noopener">Download logs bundle</a>
+      <a class="text-xs text-blue-600 underline" href="/api/v1/logs/bundle" target="_blank" rel="noopener">Download logs bundle</a>
       {#if loadingLogs}
         <p class="text-sm text-gray-500">Loading…</p>
       {:else if logs}

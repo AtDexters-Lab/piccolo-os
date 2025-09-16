@@ -6,6 +6,7 @@ import (
     "time"
     "os"
     "path/filepath"
+    "strings"
 
     "piccolod/internal/api"
     "piccolod/internal/container"
@@ -259,7 +260,104 @@ func (m *FSManager) IsEnabled(ctx context.Context, name string) (bool, error) {
 
 // ListEnabled returns names of all enabled apps
 func (m *FSManager) ListEnabled(ctx context.Context) ([]string, error) {
-	return m.stateManager.ListEnabledApps()
+    return m.stateManager.ListEnabledApps()
+}
+
+// UpdateImage updates an app's container image tag and recreates the container preserving services
+func (m *FSManager) UpdateImage(ctx context.Context, name string, tag *string) error {
+    appInst, exists := m.stateManager.GetApp(name)
+    if !exists { return fmt.Errorf("app not found: %s", name) }
+    // Load current app definition
+    curDef, err := m.stateManager.GetAppDefinition(name)
+    if err != nil { return fmt.Errorf("failed to read current app.yaml: %w", err) }
+    // Compute new image
+    newImage := curDef.Image
+    if tag != nil {
+        // Replace tag portion if present, or append
+        img := curDef.Image
+        // Split on ':' but be careful with registry includes ':'
+        // Strategy: if '@' digest present, ignore; else change last ':' segment after last '/'
+        if i := strings.LastIndex(img, "/"); i >= 0 {
+            repo := img[:i+1]
+            rest := img[i+1:]
+            if j := strings.LastIndex(rest, ":"); j >= 0 {
+                newImage = repo + rest[:j] + ":" + *tag
+            } else {
+                newImage = repo + rest + ":" + *tag
+            }
+        } else {
+            if j := strings.LastIndex(img, ":"); j >= 0 {
+                newImage = img[:j] + ":" + *tag
+            } else {
+                newImage = img + ":" + *tag
+            }
+        }
+    }
+    // Prepare new def
+    newDef := *curDef
+    newDef.Image = newImage
+    // Backup current YAML and validate new
+    if err := ValidateAppDefinition(&newDef); err != nil { return fmt.Errorf("invalid new app definition: %w", err) }
+    if err := m.stateManager.BackupCurrentAppDefinition(name); err != nil { return fmt.Errorf("backup app.yaml: %w", err) }
+    // Pull image (best effort)
+    _ = m.containerManager.PullImage(ctx, newImage)
+    // Preserve endpoints
+    endpoints, _ := m.serviceManager.GetByApp(name)
+    // Stop and remove old container
+    _ = m.containerManager.StopContainer(ctx, appInst.ContainerID)
+    _ = m.containerManager.RemoveContainer(ctx, appInst.ContainerID)
+    // Create new container with same endpoints
+    spec, err := m.appDefToContainerSpec(&newDef, endpoints)
+    if err != nil { return fmt.Errorf("build container spec: %w", err) }
+    newCID, err := m.containerManager.CreateContainer(ctx, spec)
+    if err != nil { return fmt.Errorf("create container: %w", err) }
+    if m.serviceManager != nil { m.serviceManager.SetAppContainerID(name, newCID) }
+    // Update instance and persist app.yaml + metadata
+    appInst.Image = newImage
+    appInst.ContainerID = newCID
+    appInst.Status = "created"
+    appInst.UpdatedAt = time.Now()
+    if err := m.stateManager.StoreApp(appInst, &newDef); err != nil { return fmt.Errorf("store app: %w", err) }
+    return nil
+}
+
+// Revert reverts an app to the previous app.yaml (if available) and recreates container
+func (m *FSManager) Revert(ctx context.Context, name string) error {
+    appInst, exists := m.stateManager.GetApp(name)
+    if !exists { return fmt.Errorf("app not found: %s", name) }
+    // Read previous def
+    prevDef, err := m.stateManager.GetPreviousAppDefinition(name)
+    if err != nil { return fmt.Errorf("no previous version to revert to: %w", err) }
+    // Backup current before writing previous
+    if err := m.stateManager.BackupCurrentAppDefinition(name); err != nil { return fmt.Errorf("backup current: %w", err) }
+    // Preserve endpoints
+    endpoints, _ := m.serviceManager.GetByApp(name)
+    // Stop and remove current container
+    _ = m.containerManager.StopContainer(ctx, appInst.ContainerID)
+    _ = m.containerManager.RemoveContainer(ctx, appInst.ContainerID)
+    // Pull best-effort
+    if prevDef.Image != "" { _ = m.containerManager.PullImage(ctx, prevDef.Image) }
+    // Create new container from prev
+    spec, err := m.appDefToContainerSpec(prevDef, endpoints)
+    if err != nil { return fmt.Errorf("build container spec: %w", err) }
+    newCID, err := m.containerManager.CreateContainer(ctx, spec)
+    if err != nil { return fmt.Errorf("create container: %w", err) }
+    if m.serviceManager != nil { m.serviceManager.SetAppContainerID(name, newCID) }
+    // Update instance and persist prev as current
+    appInst.Image = prevDef.Image
+    appInst.ContainerID = newCID
+    appInst.Status = "created"
+    appInst.UpdatedAt = time.Now()
+    if err := m.stateManager.StoreApp(appInst, prevDef); err != nil { return fmt.Errorf("store app: %w", err) }
+    return nil
+}
+
+// Logs fetches recent container logs for an app
+func (m *FSManager) Logs(ctx context.Context, name string, lines int) ([]string, error) {
+    appInst, exists := m.stateManager.GetApp(name)
+    if !exists { return nil, fmt.Errorf("app not found: %s", name) }
+    if lines <= 0 { lines = 200 }
+    return m.containerManager.Logs(ctx, appInst.ContainerID, lines)
 }
 
 // appDefToContainerSpec converts an AppDefinition to a ContainerCreateSpec

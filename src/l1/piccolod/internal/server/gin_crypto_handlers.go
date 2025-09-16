@@ -84,7 +84,20 @@ func (s *GinServer) handleCryptoRecoveryGenerate(c *gin.Context) {
         c.JSON(http.StatusBadRequest, gin.H{"error": "not initialized"})
         return
     }
-    words, err := s.cryptoManager.GenerateRecoveryKey()
+    // Optional body: { password }
+    var body struct{ Password string `json:"password"` }
+    _ = c.ShouldBindJSON(&body)
+    var words []string
+    var err error
+    // Prefer unlocked path; else use direct with password
+    if !s.cryptoManager.IsLocked() {
+        words, err = s.cryptoManager.GenerateRecoveryKey()
+    } else if strings.TrimSpace(body.Password) != "" {
+        words, err = s.cryptoManager.GenerateRecoveryKeyWithPassword(body.Password)
+    } else {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "unlock required"})
+        return
+    }
     if err != nil {
         c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
         return

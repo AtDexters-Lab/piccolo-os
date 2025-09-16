@@ -35,8 +35,7 @@ test('focus moves to main after route change', async ({ page, request }) => {
   await expect(page.locator('h2')).toHaveText('Dashboard');
   await page.getByRole('link', { name: 'Apps' }).click();
   await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
-  const activeId = await page.evaluate(() => document.activeElement?.id);
-  expect(activeId).toBe('router-root');
+  await page.waitForFunction(() => document.activeElement && (document.activeElement as HTMLElement).id === 'router-root');
 });
 
 test('toasts expose aria-live and role status', async ({ page }) => {

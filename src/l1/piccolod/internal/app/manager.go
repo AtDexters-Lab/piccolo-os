@@ -12,10 +12,14 @@ import (
 
 // ContainerManager interface for container operations
 type ContainerManager interface {
-	CreateContainer(ctx context.Context, spec container.ContainerCreateSpec) (string, error)
-	StartContainer(ctx context.Context, containerID string) error
-	StopContainer(ctx context.Context, containerID string) error
-	RemoveContainer(ctx context.Context, containerID string) error
+    CreateContainer(ctx context.Context, spec container.ContainerCreateSpec) (string, error)
+    StartContainer(ctx context.Context, containerID string) error
+    StopContainer(ctx context.Context, containerID string) error
+    RemoveContainer(ctx context.Context, containerID string) error
+    // PullImage ensures the given image is present locally
+    PullImage(ctx context.Context, image string) error
+    // Logs returns recent logs for a container (tail by lines)
+    Logs(ctx context.Context, containerID string, lines int) ([]string, error)
 }
 
 // AppInstance represents a running application instance
