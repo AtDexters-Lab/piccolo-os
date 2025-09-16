@@ -597,6 +597,18 @@ paths:
       summary: Logout
       responses:
         '200': { description: OK }
+  /auth/initialized:
+    get:
+      summary: Returns whether admin setup has been completed
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  initialized: { type: boolean }
   /auth/session:
     get:
       summary: Session status
@@ -917,15 +929,3 @@ components:
       type: apiKey
       in: header
       name: X-CSRF-Token
-  /auth/initialized:
-    get:
-      summary: Returns whether admin setup has been completed
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  initialized: { type: boolean }
