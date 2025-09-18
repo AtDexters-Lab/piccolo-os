@@ -22,7 +22,7 @@ export default defineConfig({
     ['html', { open: 'never', outputFolder: 'playwright-report' }],
   ],
   webServer: {
-    command: 'PORT=8080 PICCOLO_DEMO=1 ./piccolod',
+    command: 'PORT=8080 PICCOLO_STATE_DIR=.e2e-state ./piccolod',
     port: 8080,
     timeout: 120000,
     reuseExistingServer: true,

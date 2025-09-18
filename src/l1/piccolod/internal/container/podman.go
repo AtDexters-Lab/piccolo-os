@@ -1,11 +1,13 @@
 package container
 
 import (
-    "context"
-    "fmt"
-    "os/exec"
-    "regexp"
-    "strings"
+	"bufio"
+	"context"
+	"fmt"
+	"os/exec"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
 // ErrContainerNotFound returns an error for when a container is not found
@@ -20,13 +22,13 @@ type PodmanCLI struct{}
 var (
 	// Container/image names: lowercase letters, numbers, hyphens, slashes, colons
 	namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._:/-]*[a-z0-9]$|^[a-z0-9]$`)
-	
+
 	// Volume paths: absolute paths only, no special chars
 	pathPattern = regexp.MustCompile(`^/[a-zA-Z0-9._/-]*$`)
-	
+
 	// Resource values: numbers with units
 	resourcePattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[kmgtKMGT]?[bB]?$`)
-	
+
 	// Environment variable keys
 	envKeyPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 )
@@ -82,6 +84,45 @@ func ValidateResource(resource string) error {
 	return nil
 }
 
+// InspectPublishedPorts returns a map of guest_port -> host_port for a container.
+func InspectPublishedPorts(ctx context.Context, containerID string) (map[int]int, error) {
+	if containerID == "" {
+		return nil, fmt.Errorf("container ID required")
+	}
+	cmd := exec.CommandContext(ctx, "podman", "port", containerID)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("podman port failed: %w", err)
+	}
+
+	result := make(map[int]int)
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "->")
+		if len(parts) != 2 {
+			continue
+		}
+		left := strings.TrimSpace(parts[0])  // e.g. "80/tcp"
+		right := strings.TrimSpace(parts[1]) // e.g. "127.0.0.1:15001"
+		guestStr := strings.Split(left, "/")[0]
+		guest, _ := strconv.Atoi(strings.TrimSpace(guestStr))
+		hostParts := strings.Split(right, ":")
+		hostStr := hostParts[len(hostParts)-1]
+		host, _ := strconv.Atoi(strings.TrimSpace(hostStr))
+		if guest > 0 && host > 0 {
+			result[guest] = host
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // ValidateEnvKey validates environment variable keys
 func ValidateEnvKey(key string) error {
 	if key == "" {
@@ -110,13 +151,13 @@ func ValidateEnvValue(value string) error {
 
 // ContainerCreateSpec defines validated parameters for container creation
 type ContainerCreateSpec struct {
-	Name         string
-	Image        string
-	Ports        []PortMapping
-	Volumes      []VolumeMapping
-	Environment  map[string]string
-	Resources    ResourceLimits
-	NetworkMode  string
+	Name          string
+	Image         string
+	Ports         []PortMapping
+	Volumes       []VolumeMapping
+	Environment   map[string]string
+	Resources     ResourceLimits
+	NetworkMode   string
 	RestartPolicy string
 }
 
@@ -139,21 +180,21 @@ type ResourceLimits struct {
 // CreateContainer creates a container using pre-validated arguments
 func (p *PodmanCLI) CreateContainer(ctx context.Context, spec ContainerCreateSpec) (string, error) {
 	// All inputs must be validated before calling this method
-	
+
 	// Build command with pre-validated arguments
 	args := []string{"run", "-d"}
-	
+
 	// Add name
 	if spec.Name != "" {
 		args = append(args, "--name", spec.Name)
 	}
-	
+
 	// Add port mappings - SECURITY: Force localhost binding for fortress architecture
 	for _, port := range spec.Ports {
-		args = append(args, "--publish", 
+		args = append(args, "--publish",
 			fmt.Sprintf("127.0.0.1:%d:%d", port.Host, port.Container))
 	}
-	
+
 	// Add volume mappings
 	for _, volume := range spec.Volumes {
 		volumeArg := fmt.Sprintf("%s:%s", volume.Host, volume.Container)
@@ -162,7 +203,7 @@ func (p *PodmanCLI) CreateContainer(ctx context.Context, spec ContainerCreateSpe
 		}
 		args = append(args, "--volume", volumeArg)
 	}
-	
+
 	// Add resource limits
 	if spec.Resources.Memory != "" {
 		args = append(args, "--memory", spec.Resources.Memory)
@@ -170,35 +211,35 @@ func (p *PodmanCLI) CreateContainer(ctx context.Context, spec ContainerCreateSpe
 	if spec.Resources.CPU != "" {
 		args = append(args, "--cpus", spec.Resources.CPU)
 	}
-	
+
 	// Add environment variables (pre-validated keys and values)
 	for key, value := range spec.Environment {
 		args = append(args, "--env", fmt.Sprintf("%s=%s", key, value))
 	}
-	
+
 	// Add network mode
 	if spec.NetworkMode != "" {
 		args = append(args, "--network", spec.NetworkMode)
 	}
-	
+
 	// Add restart policy
 	if spec.RestartPolicy != "" {
 		args = append(args, "--restart", spec.RestartPolicy)
 	}
-	
+
 	// Add image (must be last positional argument)
 	if spec.Image != "" {
 		args = append(args, spec.Image)
 	}
-	
+
 	// Execute command using exec.CommandContext (no shell interpretation)
 	cmd := exec.CommandContext(ctx, "podman", args...)
 	output, err := cmd.CombinedOutput()
-	
+
 	if err != nil {
 		return "", fmt.Errorf("podman run failed: %w, output: %s", err, string(output))
 	}
-	
+
 	// Extract container ID from output - look for the actual hex container ID
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
@@ -207,7 +248,7 @@ func (p *PodmanCLI) CreateContainer(ctx context.Context, spec ContainerCreateSpe
 			return line, nil
 		}
 	}
-	
+
 	return "", fmt.Errorf("could not extract valid container ID from output: %s", string(output))
 }
 
@@ -217,14 +258,14 @@ func (p *PodmanCLI) StartContainer(ctx context.Context, containerID string) erro
 	if !isValidContainerID(containerID) {
 		return fmt.Errorf("invalid container ID format: %s", containerID)
 	}
-	
+
 	cmd := exec.CommandContext(ctx, "podman", "start", containerID)
 	output, err := cmd.CombinedOutput()
-	
+
 	if err != nil {
 		return fmt.Errorf("podman start failed: %w, output: %s", err, string(output))
 	}
-	
+
 	return nil
 }
 
@@ -233,14 +274,14 @@ func (p *PodmanCLI) StopContainer(ctx context.Context, containerID string) error
 	if !isValidContainerID(containerID) {
 		return fmt.Errorf("invalid container ID format: %s", containerID)
 	}
-	
+
 	cmd := exec.CommandContext(ctx, "podman", "stop", containerID)
 	output, err := cmd.CombinedOutput()
-	
+
 	if err != nil {
 		return fmt.Errorf("podman stop failed: %w, output: %s", err, string(output))
 	}
-	
+
 	return nil
 }
 
@@ -249,78 +290,94 @@ func (p *PodmanCLI) RemoveContainer(ctx context.Context, containerID string) err
 	if !isValidContainerID(containerID) {
 		return fmt.Errorf("invalid container ID format: %s", containerID)
 	}
-	
+
 	cmd := exec.CommandContext(ctx, "podman", "rm", containerID)
 	output, err := cmd.CombinedOutput()
-	
+
 	if err != nil {
 		return fmt.Errorf("podman rm failed: %w, output: %s", err, string(output))
 	}
-	
+
 	return nil
 }
 
 // PullImage pulls an image by name
 func (p *PodmanCLI) PullImage(ctx context.Context, image string) error {
-    if err := ValidateContainerName(image); err != nil {
-        return fmt.Errorf("invalid image name: %w", err)
-    }
-    cmd := exec.CommandContext(ctx, "podman", "pull", image)
-    output, err := cmd.CombinedOutput()
-    if err != nil {
-        return fmt.Errorf("podman pull failed: %w, output: %s", err, string(output))
-    }
-    return nil
+	if err := ValidateContainerName(image); err != nil {
+		return fmt.Errorf("invalid image name: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, "podman", "pull", image)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman pull failed: %w, output: %s", err, string(output))
+	}
+	return nil
 }
 
 // Logs returns recent log lines from a container
 func (p *PodmanCLI) Logs(ctx context.Context, containerID string, lines int) ([]string, error) {
-    if !isValidContainerID(containerID) {
-        return nil, fmt.Errorf("invalid container ID format: %s", containerID)
-    }
-    if lines <= 0 { lines = 200 }
-    args := []string{"logs", "--tail", fmt.Sprintf("%d", lines)}
-    args = append(args, containerID)
-    cmd := exec.CommandContext(ctx, "podman", args...)
-    output, err := cmd.CombinedOutput()
-    if err != nil {
-        return nil, fmt.Errorf("podman logs failed: %w, output: %s", err, string(output))
-    }
-    // Split into lines
-    var linesOut []string
-    for _, ln := range strings.Split(strings.ReplaceAll(string(output), "\r\n", "\n"), "\n") {
-        if strings.TrimSpace(ln) == "" { continue }
-        linesOut = append(linesOut, ln)
-    }
-    return linesOut, nil
+	if !isValidContainerID(containerID) {
+		return nil, fmt.Errorf("invalid container ID format: %s", containerID)
+	}
+	if lines <= 0 {
+		lines = 200
+	}
+	args := []string{"logs", "--tail", fmt.Sprintf("%d", lines)}
+	args = append(args, containerID)
+	cmd := exec.CommandContext(ctx, "podman", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("podman logs failed: %w, output: %s", err, string(output))
+	}
+	// Split into lines
+	var linesOut []string
+	for _, ln := range strings.Split(strings.ReplaceAll(string(output), "\r\n", "\n"), "\n") {
+		if strings.TrimSpace(ln) == "" {
+			continue
+		}
+		linesOut = append(linesOut, ln)
+	}
+	return linesOut, nil
 }
 
 // UpdatePublishAdd adds a port publish mapping to a running container
 func (p *PodmanCLI) UpdatePublishAdd(ctx context.Context, containerID string, hostBind, guestPort int) error {
-    if !isValidContainerID(containerID) { return fmt.Errorf("invalid container ID format: %s", containerID) }
-    if err := ValidatePort(hostBind); err != nil { return err }
-    if err := ValidatePort(guestPort); err != nil { return err }
-    mapping := fmt.Sprintf("127.0.0.1:%d:%d", hostBind, guestPort)
-    cmd := exec.CommandContext(ctx, "podman", "container", "update", "--publish-add", mapping, containerID)
-    output, err := cmd.CombinedOutput()
-    if err != nil {
-        return fmt.Errorf("podman update --publish-add failed: %w, output: %s", err, string(output))
-    }
-    return nil
+	if !isValidContainerID(containerID) {
+		return fmt.Errorf("invalid container ID format: %s", containerID)
+	}
+	if err := ValidatePort(hostBind); err != nil {
+		return err
+	}
+	if err := ValidatePort(guestPort); err != nil {
+		return err
+	}
+	mapping := fmt.Sprintf("127.0.0.1:%d:%d", hostBind, guestPort)
+	cmd := exec.CommandContext(ctx, "podman", "container", "update", "--publish-add", mapping, containerID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman update --publish-add failed: %w, output: %s", err, string(output))
+	}
+	return nil
 }
 
 // UpdatePublishRemove removes a port publish mapping from a running container
 func (p *PodmanCLI) UpdatePublishRemove(ctx context.Context, containerID string, hostBind, guestPort int) error {
-    if !isValidContainerID(containerID) { return fmt.Errorf("invalid container ID format: %s", containerID) }
-    if err := ValidatePort(hostBind); err != nil { return err }
-    if err := ValidatePort(guestPort); err != nil { return err }
-    mapping := fmt.Sprintf("127.0.0.1:%d:%d", hostBind, guestPort)
-    cmd := exec.CommandContext(ctx, "podman", "container", "update", "--publish-rm", mapping, containerID)
-    output, err := cmd.CombinedOutput()
-    if err != nil {
-        return fmt.Errorf("podman update --publish-rm failed: %w, output: %s", err, string(output))
-    }
-    return nil
+	if !isValidContainerID(containerID) {
+		return fmt.Errorf("invalid container ID format: %s", containerID)
+	}
+	if err := ValidatePort(hostBind); err != nil {
+		return err
+	}
+	if err := ValidatePort(guestPort); err != nil {
+		return err
+	}
+	mapping := fmt.Sprintf("127.0.0.1:%d:%d", hostBind, guestPort)
+	cmd := exec.CommandContext(ctx, "podman", "container", "update", "--publish-rm", mapping, containerID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman update --publish-rm failed: %w, output: %s", err, string(output))
+	}
+	return nil
 }
 
 // isValidContainerID validates container ID format
@@ -344,12 +401,12 @@ func ValidateContainerSpec(spec ContainerCreateSpec) error {
 	if err := ValidateContainerName(spec.Name); err != nil {
 		return fmt.Errorf("invalid container name: %w", err)
 	}
-	
+
 	// Validate image
 	if err := ValidateContainerName(spec.Image); err != nil {
 		return fmt.Errorf("invalid image name: %w", err)
 	}
-	
+
 	// Validate ports
 	for i, port := range spec.Ports {
 		if err := ValidatePort(port.Host); err != nil {
@@ -359,7 +416,7 @@ func ValidateContainerSpec(spec ContainerCreateSpec) error {
 			return fmt.Errorf("invalid container port at index %d: %w", i, err)
 		}
 	}
-	
+
 	// Validate volumes
 	for i, volume := range spec.Volumes {
 		if err := ValidatePath(volume.Host); err != nil {
@@ -369,7 +426,7 @@ func ValidateContainerSpec(spec ContainerCreateSpec) error {
 			return fmt.Errorf("invalid container path at index %d: %w", i, err)
 		}
 	}
-	
+
 	// Validate environment variables
 	for key, value := range spec.Environment {
 		if err := ValidateEnvKey(key); err != nil {
@@ -379,7 +436,7 @@ func ValidateContainerSpec(spec ContainerCreateSpec) error {
 			return fmt.Errorf("invalid environment value for key '%s': %w", key, err)
 		}
 	}
-	
+
 	// Validate resources
 	if spec.Resources.Memory != "" {
 		if err := ValidateResource(spec.Resources.Memory); err != nil {
@@ -391,6 +448,6 @@ func ValidateContainerSpec(spec ContainerCreateSpec) error {
 			return fmt.Errorf("invalid CPU resource: %w", err)
 		}
 	}
-	
+
 	return nil
 }

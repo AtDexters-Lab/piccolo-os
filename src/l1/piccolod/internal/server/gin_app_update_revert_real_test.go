@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestAppUpdateRevertAndLogs_RealHandlers(t *testing.T) {
+func TestAppServicesDiscovery_RealHandlers(t *testing.T) {
 	srv := createGinTestServer(t, t.TempDir())
 	sessionCookie, csrfToken := setupTestAdminSession(t, srv)
 
@@ -23,74 +23,39 @@ func TestAppUpdateRevertAndLogs_RealHandlers(t *testing.T) {
 		t.Fatalf("install status %d body=%s", w.Code, w.Body.String())
 	}
 
-	// Update tag
+	// Global services listing should include the app listener
 	w = httptest.NewRecorder()
-	payload := map[string]string{"tag": "3.19"}
-	pbytes, _ := json.Marshal(payload)
-	req, _ = http.NewRequest("POST", "/api/v1/apps/demo/update", bytes.NewReader(pbytes))
-	req.Header.Set("Content-Type", "application/json")
+	req, _ = http.NewRequest("GET", "/api/v1/services", nil)
 	attachAuth(req, sessionCookie, csrfToken)
 	srv.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("update status %d body=%s", w.Code, w.Body.String())
+		t.Fatalf("services status %d", w.Code)
 	}
-
-	// Verify image changed
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/api/v1/apps/demo", nil)
-	attachAuth(req, sessionCookie, csrfToken)
-	srv.router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("get after update %d", w.Code)
+	var servicesResp struct {
+		Services []map[string]any `json:"services"`
 	}
-	var resp struct {
-		Data struct {
-			App struct {
-				Image string `json:"image"`
-			} `json:"app"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+	if err := json.Unmarshal(w.Body.Bytes(), &servicesResp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Data.App.Image != "alpine:3.19" {
-		t.Fatalf("expected alpine:3.19, got %s", resp.Data.App.Image)
+	if len(servicesResp.Services) == 0 {
+		t.Fatalf("expected at least one service, got 0")
 	}
 
-	// Revert
+	// Per-app services
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/api/v1/apps/demo/revert", nil)
+	req, _ = http.NewRequest("GET", "/api/v1/apps/demo/services", nil)
 	attachAuth(req, sessionCookie, csrfToken)
 	srv.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("revert status %d body=%s", w.Code, w.Body.String())
+		t.Fatalf("app services status %d", w.Code)
 	}
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/api/v1/apps/demo", nil)
-	attachAuth(req, sessionCookie, csrfToken)
-	srv.router.ServeHTTP(w, req)
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+	var appServicesResp struct {
+		Services []map[string]any `json:"services"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &appServicesResp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Data.App.Image != "alpine:3.18" {
-		t.Fatalf("expected alpine:3.18 after revert, got %s", resp.Data.App.Image)
-	}
-
-	// Logs
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/api/v1/apps/demo/logs?tail=3", nil)
-	attachAuth(req, sessionCookie, csrfToken)
-	srv.router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("logs status %d", w.Code)
-	}
-	var logs struct {
-		Entries []string `json:"entries"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &logs); err != nil {
-		t.Fatal(err)
-	}
-	if len(logs.Entries) != 3 {
-		t.Fatalf("expected 3 log entries, got %d", len(logs.Entries))
+	if len(appServicesResp.Services) == 0 {
+		t.Fatalf("expected at least one app service, got 0")
 	}
 }

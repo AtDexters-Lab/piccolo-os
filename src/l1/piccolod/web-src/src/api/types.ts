@@ -2020,6 +2020,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/initialized": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Returns whether admin setup has been completed */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            initialized?: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/session": {
         parameters: {
             query?: never;
@@ -2357,7 +2395,7 @@ export interface components {
             guest_port?: number;
             /** @description Port bound on 127.0.0.1 for LAN */
             host_port?: number;
-            public_port?: number;
+            public_port?: number; scheme?: string;
             flow?: string;
             protocol?: string;
             middleware?: Record<string, never>[];

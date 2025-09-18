@@ -1,61 +1,86 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiProd, demo } from '@api/client';
+  import { apiProd } from '@api/client';
   import { toast } from '@stores/ui';
+  import { buildServiceLink } from '@lib/serviceLinks';
+
   export let params: { name: string };
-  let resp: any = null; let error = ''; let loading = true;
-  let logs: any = null; let loadingLogs = false;
-  let showUninstall = false; let purgeData = false;
+
+  let data: any = null;
+  let loading = true;
+  let error = '';
   let working = false;
-  onMount(async () => {
-    await load();
-    await loadLogs();
-  });
+  let workingAction: 'start' | 'stop' | 'uninstall' | null = null;
+  let showUninstall = false;
+  let purgeData = false;
+  let status = 'unknown';
+  let isRunning = false;
+
   async function load() {
-    loading = true; error = '';
-    try { resp = await apiProd(`/apps/${params.name}`); }
-    catch (e: any) { error = e?.message || 'Failed to load'; }
-    finally { loading = false; }
-  }
-  async function loadLogs() {
-    loadingLogs = true; try { logs = await apiProd(`/apps/${params.name}/logs`); } finally { loadingLogs = false; }
-  }
-  async function doUpdate() {
-    try { await apiProd(`/apps/${params.name}/update`, { method: 'POST' }); toast(`Updated ${params.name}`, 'success'); }
-    catch (e: any) { toast(e?.message || 'Update failed', 'error'); }
-  }
-  async function doRevert() {
-    try { await apiProd(`/apps/${params.name}/revert`, { method: 'POST' }); toast(`Reverted ${params.name}`, 'success'); }
-    catch (e: any) { toast(e?.message || 'Revert failed', 'error'); }
-  }
-  async function doUninstall(purge = false) {
+    loading = true;
+    error = '';
     try {
-      const q = purge ? '?purge=true' : '';
-      await apiProd(`/apps/${params.name}${q}`, { method: 'DELETE' });
-      toast(`Uninstalled ${params.name}`, 'success');
-      showUninstall = false; purgeData = false;
-    } catch (e: any) { toast(e?.message || 'Uninstall failed', 'error'); }
+      data = await apiProd(`/apps/${params.name}`);
+      status = (data?.data?.app?.status || 'unknown').toLowerCase();
+      isRunning = status === 'running';
+    } catch (e: any) {
+      error = e?.message || 'Failed to load app details';
+    } finally {
+      loading = false;
+    }
   }
 
-  async function backupApp() {
+  onMount(load);
+
+  async function startApp() {
     working = true;
+    workingAction = 'start';
     try {
-      const r: any = await api(`/backup/app/${params.name}`, { method: demo ? 'GET' : 'POST' });
-      toast(r?.message || `Backup created for ${params.name}`, 'success');
+      await apiProd(`/apps/${params.name}/start`, { method: 'POST' });
+      toast(`Started ${params.name}`, 'success');
+      await load();
     } catch (e: any) {
-      toast(e?.message || 'Backup failed', 'error');
-    } finally { working = false; }
+      toast(e?.message || 'Failed to start app', 'error');
+    } finally {
+      working = false;
+      workingAction = null;
+    }
   }
-  async function restoreApp() {
-    if (!confirm(`Restore app '${params.name}' from latest backup?`)) return;
+
+  async function stopApp() {
     working = true;
+    workingAction = 'stop';
     try {
-      const r: any = await api(`/restore/app/${params.name}`, { method: demo ? 'GET' : 'POST' });
-      toast(r?.message || `Restore started for ${params.name}`, 'success');
+      await apiProd(`/apps/${params.name}/stop`, { method: 'POST' });
+      toast(`Stopped ${params.name}`, 'success');
+      await load();
     } catch (e: any) {
-      toast(e?.message || 'Restore failed', 'error');
-    } finally { working = false; }
+      toast(e?.message || 'Failed to stop app', 'error');
+    } finally {
+      working = false;
+      workingAction = null;
+    }
   }
+
+  async function uninstallApp(purge = false) {
+    working = true;
+    workingAction = 'uninstall';
+    try {
+      const suffix = purge ? '?purge=true' : '';
+      await apiProd(`/apps/${params.name}${suffix}`, { method: 'DELETE' });
+      toast(`Uninstalled ${params.name}`, 'success');
+      window.location.hash = '/apps';
+    } catch (e: any) {
+      toast(e?.message || 'Failed to uninstall app', 'error');
+    } finally {
+      working = false;
+      workingAction = null;
+      showUninstall = false;
+      purgeData = false;
+    }
+  }
+
+  const serviceLink = (service: any): string | null => buildServiceLink(service);
 </script>
 
 <h2 class="text-xl font-semibold mb-4">App: {params.name}</h2>
@@ -64,51 +89,76 @@
 {:else if error}
   <p class="text-red-600">{error}</p>
 {:else}
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-    <div class="bg-white rounded border p-4 md:col-span-2">
-      <h3 class="font-medium mb-2">Overview</h3>
-      <p class="text-sm">Image: {resp?.data?.app?.image || 'n/a'}</p>
-      <p class="text-sm">Status: {resp?.data?.app?.status || 'unknown'}</p>
-      <div class="mt-3 space-x-2">
-        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={doUpdate}>Update</button>
-        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={doRevert}>Revert</button>
-        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => showUninstall = !showUninstall}>Uninstall</button>
-        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={backupApp} disabled={working}>Backup app</button>
-        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={restoreApp} disabled={working}>Restore app</button>
+  <div class="bg-white rounded border p-4">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h3 class="font-medium">Overview</h3>
+        <p class="text-sm text-gray-700">Image: <span class="font-mono">{data?.data?.app?.image || 'unknown'}</span></p>
+        <p class="text-sm text-gray-700">Status: {data?.data?.app?.status || 'unknown'}</p>
       </div>
-      {#if showUninstall}
-        <div class="mt-3 border rounded p-3 bg-red-50 border-red-200">
-          <p class="text-sm text-red-800">Uninstall will remove the service. Optionally delete its data as well.</p>
-          <label class="text-sm mt-2 inline-flex items-center gap-2"><input type="checkbox" bind:checked={purgeData}> Delete data too</label>
-          <div class="mt-2 space-x-2">
-            <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => doUninstall(purgeData)}>Confirm uninstall</button>
-            <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => { showUninstall = false; purgeData = false; }}>Cancel</button>
-          </div>
+      <div class="space-x-2">
+        <button
+          class="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50"
+          on:click={startApp}
+          disabled={working || isRunning}
+        >
+          {workingAction === 'start' ? 'Starting…' : 'Start'}
+        </button>
+        <button
+          class="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50"
+          on:click={stopApp}
+          disabled={working || !isRunning}
+        >
+          {workingAction === 'stop' ? 'Stopping…' : 'Stop'}
+        </button>
+        <button
+          class="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50"
+          on:click={() => { showUninstall = true; }}
+          disabled={working}
+        >
+          {workingAction === 'uninstall' ? 'Uninstalling…' : 'Uninstall'}
+        </button>
+      </div>
+    </div>
+
+    {#if showUninstall}
+      <div class="mt-4 bg-red-50 border border-red-200 rounded p-3">
+        <p class="text-sm text-red-800">Uninstall will remove the app. Optionally purge its data.</p>
+        <label class="mt-2 inline-flex items-center gap-2 text-sm text-red-900">
+          <input type="checkbox" bind:checked={purgeData}> Delete stored data
+        </label>
+        <div class="mt-2 space-x-2">
+          <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50" on:click={() => uninstallApp(purgeData)} disabled={working}>Confirm uninstall</button>
+          <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => { showUninstall = false; purgeData = false; }}>Cancel</button>
         </div>
-      {/if}
-      <h4 class="font-medium mt-4 mb-1">Services</h4>
-      <ul class="text-sm list-disc ml-5">
-        {#each (resp?.data?.services ?? []) as s}
+      </div>
+    {/if}
+
+    <h3 class="font-medium mt-6 mb-2">Service Endpoints</h3>
+    {#if (data?.data?.services ?? []).length === 0}
+      <p class="text-sm text-gray-600">No services registered.</p>
+    {:else}
+      <ul class="text-sm space-y-1 list-disc ml-5">
+        {#each data.data.services as service}
           <li>
-            {s.name}: {s.protocol} {#if s.local_url}
-              — <a class="text-blue-600 underline" href={s.local_url} target="_blank" rel="noopener">Open locally</a>
-            {:else if s.host_port}
-              — <a class="text-blue-600 underline" href={`http://127.0.0.1:${s.host_port}/`} target="_blank" rel="noopener">Open locally</a>
+            <span class="font-medium">{service.name}</span>
+            <span class="text-gray-600"> — {service.protocol?.toUpperCase?.() || service.protocol}</span>
+            {#if serviceLink(service)}
+              <span> ·
+                {#if isRunning}
+                  <a class="text-blue-600 underline" href={serviceLink(service) || '#'} target="_blank" rel="noopener">Open</a>
+                {:else}
+                  <span class="text-gray-400 cursor-not-allowed" title="Start the app to open this endpoint">Open</span>
+                {/if}
+              </span>
+            {/if}
+            {#if service.subdomain}
+              <span class="text-xs text-gray-500 block">Remote: {service.subdomain}</span>
             {/if}
           </li>
         {/each}
       </ul>
-    </div>
-    <div class="bg-white rounded border p-4">
-      <h3 class="font-medium mb-2">Logs (recent)</h3>
-      <a class="text-xs text-blue-600 underline" href="/api/v1/logs/bundle" target="_blank" rel="noopener">Download logs bundle</a>
-      {#if loadingLogs}
-        <p class="text-sm text-gray-500">Loading…</p>
-      {:else if logs}
-        <pre class="text-xs max-h-64 overflow-auto">{JSON.stringify(logs.entries ?? logs, null, 2)}</pre>
-      {:else}
-        <p class="text-sm text-gray-500">No logs.</p>
-      {/if}
-    </div>
+      <p class="text-xs text-gray-500 mt-2">When accessing the portal remotely, services will be available at their Nexus subdomain.</p>
+    {/if}
   </div>
 {/if}

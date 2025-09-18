@@ -11,32 +11,25 @@ func TestAppPhase3_EndpointsReturnOK(t *testing.T) {
 	srv := createGinTestServer(t, t.TempDir())
 	sessionCookie, csrfToken := setupTestAdminSession(t, srv)
 
-	// Logs endpoint for non-existing app in demo should still return 200
+	// Demo mode allows lifecycle actions to succeed without real backend
 	os.Setenv("PICCOLO_DEMO", "1")
 	t.Cleanup(func() { os.Unsetenv("PICCOLO_DEMO") })
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/apps/demo/logs", nil)
+	req, _ := http.NewRequest("POST", "/api/v1/apps/demo/start", nil)
 	attachAuth(req, sessionCookie, csrfToken)
 	srv.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("logs status %d", w.Code)
+		t.Fatalf("start status %d", w.Code)
 	}
 
-	// Update/revert endpoints should 200 in demo
+	// Stop should also succeed in demo mode
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/api/v1/apps/demo/update", nil)
+	req, _ = http.NewRequest("POST", "/api/v1/apps/demo/stop", nil)
 	attachAuth(req, sessionCookie, csrfToken)
 	srv.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("update status %d", w.Code)
-	}
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/api/v1/apps/demo/revert", nil)
-	attachAuth(req, sessionCookie, csrfToken)
-	srv.router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("revert status %d", w.Code)
+		t.Fatalf("stop status %d", w.Code)
 	}
 
 	// Catalog
@@ -46,5 +39,14 @@ func TestAppPhase3_EndpointsReturnOK(t *testing.T) {
 	srv.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("catalog status %d", w.Code)
+	}
+
+	// Catalog template
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/catalog/wordpress/template", nil)
+	attachAuth(req, sessionCookie, csrfToken)
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("catalog template status %d", w.Code)
 	}
 }

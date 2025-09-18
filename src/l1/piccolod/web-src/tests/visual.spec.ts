@@ -8,15 +8,11 @@ test.describe('Visual tour (demo)', () => {
     const shots: Array<{ url: string; waitFor: string; name: string; after?: () => Promise<void> }> = [
       { url: '/', waitFor: 'h2:text("Dashboard")', name: '00_dashboard' },
       { url: '/#/apps', waitFor: 'h2:text("Apps")', name: '10_apps' },
-      { url: '/#/apps/vaultwarden', waitFor: 'h2:text("App: vaultwarden")', name: '11_app_vaultwarden' },
-      { url: '/#/apps/gitea', waitFor: 'h2:text("App: gitea")', name: '12_app_gitea' },
-      { url: '/#/apps/catalog', waitFor: 'h2:text("App Catalog")', name: '13_catalog' },
+      { url: '/#/apps/wordpress', waitFor: 'h2:text("App: wordpress")', name: '11_app_wordpress' },
+      { url: '/#/apps/catalog', waitFor: 'h2:text("App Catalog")', name: '12_catalog' },
       { url: '/#/storage', waitFor: 'h2:text("Storage")', name: '20_storage' },
       { url: '/#/updates', waitFor: 'h2:text("Updates")', name: '30_updates' },
       { url: '/#/remote', waitFor: 'h2:text("Remote")', name: '40_remote' },
-      { url: '/#/backup', waitFor: 'h2:text("Backup")', name: '50_backup' },
-      { url: '/#/install', waitFor: 'h2:text("Install")', name: '60_install' },
-      { url: '/#/events', waitFor: 'h2:text("Events")', name: '70_events' },
     ];
 
     for (const s of shots) {

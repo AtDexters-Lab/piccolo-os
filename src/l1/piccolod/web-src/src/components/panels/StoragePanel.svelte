@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiProd } from '@api/client';
-  let disks: any = null; let mounts: any = null; let loading = true; let error = '';
+  import { apiProd } from '@api/client';
+  let disks: any = null; let loading = true; let error = '';
   onMount(async () => {
     try {
-      [disks, mounts] = await Promise.all([apiProd('/storage/disks'), api('/storage/mounts')]);
+      disks = await apiProd('/storage/disks');
     } catch (e: any) { error = e?.message || 'Failed to load storage'; }
     finally { loading = false; }
   });
@@ -17,6 +17,6 @@
   {:else if error}
     <p class="text-sm text-red-600">{error}</p>
   {:else}
-    <p class="text-sm text-gray-700">{disks.disks?.length || 0} disks; {mounts.mounts?.length || 0} mounts</p>
+    <p class="text-sm text-gray-700">{disks?.disks?.length || 0} disks detected</p>
   {/if}
 </div>

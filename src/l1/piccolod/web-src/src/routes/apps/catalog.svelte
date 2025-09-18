@@ -1,32 +1,39 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiProd, demo } from '@api/client';
+  import { apiProd, demo } from '@api/client';
   import { toast } from '@stores/ui';
-  import { link } from 'svelte-spa-router';
   let catalog: any = null; let loading = true; let error = '';
-  let yamlText = 'name: example\nimage: alpine:latest\n';
+  let yamlText = 'name: wordpress\nimage: docker.io/library/wordpress:6\nlisteners:\n  - name: web\n    guest_port: 80\n    flow: tcp\n    protocol: http\n';
+  let installingApp: string | null = null;
+  let yamlInstalling = false;
   onMount(async () => {
     try { catalog = await apiProd('/catalog'); }
     catch (e: any) { error = e?.message || 'Failed to load catalog'; }
     finally { loading = false; }
   });
   function genYaml(app: any): string {
-    const name = app.name || 'app';
-    const image = app.image || 'alpine:latest';
+    if (app?.template) return app.template;
+    const name = app?.name || 'app';
+    const image = app?.image || 'alpine:latest';
     return `name: ${name}\nimage: ${image}\n`;
   }
-  async function installFromYaml(yaml: string) {
+  async function installFromYaml(yaml: string, appName?: string) {
     try {
+      if (appName) installingApp = appName;
+      else yamlInstalling = true;
       if (demo) {
         toast('Installed (demo)', 'success');
         window.location.hash = '/apps';
         return;
       }
-      const res: any = await api('/apps', { method: 'POST', headers: { 'Content-Type': 'application/x-yaml' }, body: yaml });
+      const res: any = await apiProd('/apps', { method: 'POST', headers: { 'Content-Type': 'application/x-yaml' }, body: yaml });
       toast(res?.message || 'Installed', 'success');
       window.location.hash = '/apps';
     } catch (e: any) {
       toast(e?.message || 'Install failed', 'error');
+    } finally {
+      installingApp = null;
+      yamlInstalling = false;
     }
   }
 </script>
@@ -49,7 +56,9 @@
               <div class="text-xs text-gray-500 font-mono">{app.image}</div>
             </div>
             <div class="shrink-0 space-x-2">
-              <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => installFromYaml(genYaml(app))}>Install</button>
+              <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50" on:click={() => installFromYaml(genYaml(app), app.name)} disabled={installingApp === app.name || yamlInstalling}>
+                {installingApp === app.name ? 'Installing…' : 'Install'}
+              </button>
               <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => { yamlText = genYaml(app); }}>View YAML</button>
             </div>
           </div>
@@ -62,7 +71,9 @@
     <p class="text-xs text-gray-600 mb-2">Paste an app.yaml and click Install. In demo mode, this shows a success toast and navigates to Apps.</p>
     <textarea class="w-full border rounded p-2 text-xs font-mono min-h-[120px]" bind:value={yamlText}></textarea>
     <div class="mt-2">
-      <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => installFromYaml(yamlText)}>Install</button>
+      <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50" on:click={() => installFromYaml(yamlText)} disabled={yamlInstalling || installingApp !== null}>
+        {yamlInstalling ? 'Installing…' : 'Install'}
+      </button>
       <a class="ml-2 text-xs text-blue-600 underline" href="/#/apps">Back to Apps</a>
     </div>
   </div>

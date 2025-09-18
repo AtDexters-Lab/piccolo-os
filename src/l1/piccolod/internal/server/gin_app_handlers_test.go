@@ -17,8 +17,10 @@ import (
 	authpkg "piccolod/internal/auth"
 	"piccolod/internal/container"
 	crypt "piccolod/internal/crypt"
+	"piccolod/internal/mdns"
 	"piccolod/internal/remote"
 	"piccolod/internal/services"
+	"piccolod/internal/storage"
 )
 
 // TestGinAppAPI_Install tests POST /api/v1/apps endpoint with Gin
@@ -339,20 +341,6 @@ func TestGinAppAPI_AppActions(t *testing.T) {
 			expectError:    false,
 		},
 		{
-			name:           "enable app",
-			method:         "POST",
-			url:            "/api/v1/apps/test-app/enable",
-			expectedStatus: http.StatusOK,
-			expectError:    false,
-		},
-		{
-			name:           "disable app",
-			method:         "POST",
-			url:            "/api/v1/apps/test-app/disable",
-			expectedStatus: http.StatusOK,
-			expectError:    false,
-		},
-		{
 			name:           "wrong method for action",
 			method:         "GET",
 			url:            "/api/v1/apps/test-app/start",
@@ -467,17 +455,7 @@ environment:
 		t.Fatalf("Failed to start app: status %d, body: %s", w.Code, w.Body.String())
 	}
 
-	// 5. Enable the app
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/api/v1/apps/lifecycle-test/enable", nil)
-	attachAuth(req, sessionCookie, csrfToken)
-	server.router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Failed to enable app: status %d", w.Code)
-	}
-
-	// 6. Stop the app
+	// 5. Stop the app
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/v1/apps/lifecycle-test/stop", nil)
 	attachAuth(req, sessionCookie, csrfToken)
@@ -487,17 +465,7 @@ environment:
 		t.Fatalf("Failed to stop app: status %d", w.Code)
 	}
 
-	// 7. Disable the app
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/api/v1/apps/lifecycle-test/disable", nil)
-	attachAuth(req, sessionCookie, csrfToken)
-	server.router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Failed to disable app: status %d", w.Code)
-	}
-
-	// 8. Uninstall the app
+	// 6. Uninstall the app
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/api/v1/apps/lifecycle-test", nil)
 	attachAuth(req, sessionCookie, csrfToken)
@@ -507,7 +475,7 @@ environment:
 		t.Fatalf("Failed to uninstall app: status %d", w.Code)
 	}
 
-	// 9. Verify app is gone
+	// 7. Verify app is gone
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("GET", "/api/v1/apps", nil)
 	attachAuth(req, sessionCookie, csrfToken)
@@ -680,6 +648,8 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 	server := &GinServer{
 		appManager:     appMgr,
 		serviceManager: svcMgr,
+		storageManager: storage.NewManager(),
+		mdnsManager:    mdns.NewManager(),
 		remoteManager:  rm,
 		authManager:    authMgr,
 		sessions:       authpkg.NewSessionStore(),

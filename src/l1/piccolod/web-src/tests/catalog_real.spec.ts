@@ -22,15 +22,15 @@ test.describe('Catalog + YAML install (real API)', () => {
     // Load catalog + template
     const cat = await page.request.get('/api/v1/catalog').then(r => r.json());
     expect(Array.isArray(cat.apps)).toBeTruthy();
-    const tpl = await page.request.get('/api/v1/catalog/vaultwarden/template');
+    const tpl = await page.request.get('/api/v1/catalog/wordpress/template');
     let yaml: string;
     if (tpl.ok()) {
       yaml = await tpl.text();
     } else {
       // Fallback inline template if endpoint not available in current build
-      yaml = 'name: vaultwarden\nimage: vaultwarden/server:1.30.5\nlisteners:\n  - name: http\n    guest_port: 80\n    flow: tcp\n    protocol: http\n';
+      yaml = 'name: wordpress\nimage: docker.io/library/wordpress:6\nlisteners:\n  - name: web\n    guest_port: 80\n    flow: tcp\n    protocol: http\n';
     }
-    expect(yaml).toContain('name: vaultwarden');
+    expect(yaml).toContain('name: wordpress');
 
     // Validate YAML
     await page.request.post('/api/v1/apps/validate', { headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, data: { app_definition: yaml } }).catch(() => {});

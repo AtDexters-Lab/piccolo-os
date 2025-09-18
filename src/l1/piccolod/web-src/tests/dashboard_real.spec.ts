@@ -22,6 +22,6 @@ test.describe('Dashboard panels (real-backed status)', () => {
     // Storage panel (real /storage/disks for disks count; mounts still from demo)
     const storagePanel = page.locator('h3', { hasText: 'Storage' }).locator('xpath=..');
     await expect(storagePanel).toBeVisible();
-    await expect(storagePanel.getByText(/disks;\s+\d+\s+mounts/)).toBeVisible();
+    await expect(storagePanel.getByText(/disks detected/)).toBeVisible();
   });
 });

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiProd } from '@api/client';
+  import { apiProd } from '@api/client';
   let status: any = null; let loading = true; let error = '';
   onMount(async () => {
     try { status = await apiProd('/remote/status'); }

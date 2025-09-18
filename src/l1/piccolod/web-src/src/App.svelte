@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { sessionStore, bootstrapSession } from './stores/session';
   import { apiProd } from '@api/client';
-  import Router, { link } from 'svelte-spa-router';
+  import Router from 'svelte-spa-router';
   import { wrap } from 'svelte-spa-router/wrap';
   import { get } from 'svelte/store';
   import Dashboard from '@routes/index.svelte';
@@ -14,9 +14,6 @@
   import Storage from '@routes/storage/index.svelte';
   import Updates from '@routes/updates/index.svelte';
   import Remote from '@routes/remote/index.svelte';
-  import Install from '@routes/install/index.svelte';
-  import Backup from '@routes/backup/index.svelte';
-  import Events from '@routes/events/index.svelte';
   import Settings from '@routes/settings/index.svelte';
   import Login from '@routes/login/index.svelte';
   import Setup from '@routes/setup/index.svelte';
@@ -49,9 +46,6 @@
     '/storage': wrap({ component: Storage, conditions: [authGuard] }),
     '/updates': wrap({ component: Updates, conditions: [authGuard] }),
     '/remote': wrap({ component: Remote, conditions: [authGuard] }),
-    '/install': wrap({ component: Install, conditions: [authGuard] }),
-    '/backup': wrap({ component: Backup, conditions: [authGuard] }),
-    '/events': wrap({ component: Events, conditions: [authGuard] }),
     '/settings': wrap({ component: Settings, conditions: [authGuard] }),
     '/login': wrap({ component: Login }),
     '/setup': wrap({ component: Setup }),
@@ -154,9 +148,6 @@
           <a href="/#/storage" class="hover:underline" on:click={() => (menuOpen = false)}>Storage</a>
           <a href="/#/updates" class="hover:underline" on:click={() => (menuOpen = false)}>Updates</a>
           <a href="/#/remote" class="hover:underline" on:click={() => (menuOpen = false)}>Remote</a>
-          <a href="/#/install" class="hover:underline" on:click={() => (menuOpen = false)}>Install</a>
-          <a href="/#/backup" class="hover:underline" on:click={() => (menuOpen = false)}>Backup</a>
-          <a href="/#/events" class="hover:underline" on:click={() => (menuOpen = false)}>Events</a>
           <a href="/#/settings" class="hover:underline" on:click={() => (menuOpen = false)}>Settings</a>
           {#if !$sessionStore.authenticated}
             <a href="/#/login" class="hover:underline" on:click={() => (menuOpen = false)}>Sign in</a>
@@ -200,12 +191,9 @@
           </ul>
         </div>
         <div>
-          <div class="text-xs uppercase tracking-tight text-gray-500 mb-2">Admin</div>
+          <div class="text-xs uppercase tracking-tight text-gray-500 mb-2">Settings</div>
           <ul class="space-y-1">
-            <li><a href="/#/install" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/install') ? 'page' : undefined}>Install</a></li>
-            <li><a href="/#/backup" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/backup') ? 'page' : undefined}>Backup</a></li>
-            <li><a href="/#/events" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/events') ? 'page' : undefined}>Events</a></li>
-            <li><a href="/#/settings" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/settings') ? 'page' : undefined}>Settings</a></li>
+            <li><a href="/#/settings" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/settings') ? 'page' : undefined}>Preferences</a></li>
           </ul>
         </div>
       </nav>

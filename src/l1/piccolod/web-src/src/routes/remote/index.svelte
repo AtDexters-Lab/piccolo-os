@@ -1,40 +1,39 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, demo } from '@api/client';
+  import { apiProd } from '@api/client';
   import { toast } from '@stores/ui';
   let status: any = null; let loading = true; let error = '';
   let form = { endpoint: '', device_key: '', hostname: '' };
   let working = false;
   async function load() {
     loading = true; error = '';
-    try { status = await api('/remote/status'); }
+    try { status = await apiProd('/remote/status'); }
     catch (e: any) { error = e?.message || 'Failed to load status'; }
     finally { loading = false; }
   }
   onMount(load);
-  async function configure(simulate?: 'dns'|'port80'|'caa') {
+  async function configure() {
     working = true; error = '';
     try {
-      const path = simulate === 'dns' ? '/remote/configure/dns_error' : simulate === 'port80' ? '/remote/configure/port80_blocked' : simulate === 'caa' ? '/remote/configure/caa_error' : '/remote/configure';
       const payload = {
         endpoint: form.endpoint,
-        device_id: form.device_key, // align with OpenAPI
+        device_id: form.device_key,
         device_secret: '',
         hostname: form.hostname,
       };
-      await api(path, { method: demo ? 'GET' : 'POST', body: demo ? undefined : JSON.stringify(payload) });
+      await apiProd('/remote/configure', { method: 'POST', body: JSON.stringify(payload) });
       toast('Remote configured', 'success');
-      if (demo) {
-        status = { ...(status || {}), enabled: true, public_url: status?.public_url || 'https://demo.piccolo.example', issuer: status?.issuer || 'Let\'s Encrypt', expires_at: status?.expires_at || new Date(Date.now() + 86_400_000).toISOString() };
-      } else {
-        await load();
-      }
+      await load();
     } catch (e: any) { toast(e?.message || 'Configure failed', 'error'); }
     finally { working = false; }
   }
   async function disable() {
     working = true;
-    try { await api('/remote/disable', { method: demo ? 'GET' : 'POST' }); toast('Remote disabled', 'success'); if (demo) { status = { ...(status || {}), enabled: false }; } else { await load(); } }
+    try {
+      await apiProd('/remote/disable', { method: 'POST' });
+      toast('Remote disabled', 'success');
+      await load();
+    }
     catch (e: any) { toast(e?.message || 'Disable failed', 'error'); }
     finally { working = false; }
   }
@@ -42,9 +41,9 @@
   async function rotate() {
     working = true;
     try {
-      const res: any = await api('/remote/rotate', { method: demo ? 'GET' : 'POST' });
-      toast(res?.message || 'Credentials rotated', 'success');
-      if (!demo) { await load(); }
+      await apiProd('/remote/rotate', { method: 'POST' });
+      toast('Credentials rotated', 'success');
+      await load();
     } catch (e: any) {
       toast(e?.message || 'Rotate failed', 'error');
     } finally {
@@ -88,13 +87,7 @@
         <label class="block text-sm">Hostname <input class="mt-0.5 w-full border rounded p-1 text-sm" bind:value={form.hostname} placeholder="mybox.example.com" /></label>
       </div>
       <div class="mt-2 space-x-2">
-        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => configure()} disabled={working}>Enable Remote</button>
-        <!-- Demo error simulations -->
-        {#if demo}
-          <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => configure('dns')} disabled={working}>Simulate DNS error</button>
-          <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => configure('port80')} disabled={working}>Simulate port 80 blocked</button>
-          <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => configure('caa')} disabled={working}>Simulate CAA error</button>
-        {/if}
+        <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={configure} disabled={working}>Enable Remote</button>
       </div>
     </div>
   </div>

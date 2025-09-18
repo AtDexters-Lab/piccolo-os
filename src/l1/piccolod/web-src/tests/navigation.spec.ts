@@ -1,8 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Fail tests on any browser console error (ignore known benign resource 401/403 during auth transitions)
 test.beforeEach(async ({ page }) => {
-  // Avoid favicon 404 noise
   await page.route('**/favicon.ico', async (route) => {
     await route.fulfill({ status: 200, body: '' });
   });
@@ -15,50 +13,40 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test.describe('Top-level navigation and deep links', () => {
+test.describe('Navigation basics', () => {
   test.beforeAll(async ({ request }) => {
-    // Ensure admin exists for real-auth guarded routes
     await request.post('/api/v1/auth/setup', { data: { password: 'password' } }).catch(() => {});
   });
+
   test.beforeEach(async ({ page }) => {
-    // Try to access Dashboard; if we land on Sign in, perform login
     await page.goto('/');
-    const h2 = page.locator('h2');
-    const txt = (await h2.textContent()) || '';
-    if (/Sign in/i.test(txt)) {
+    const heading = page.locator('h2');
+    const text = (await heading.textContent()) || '';
+    if (/Sign in/i.test(text)) {
       await page.getByLabel('Username').fill('admin');
       await page.getByLabel('Password').fill('password');
       await page.getByRole('button', { name: 'Sign in' }).click();
       await expect(page.locator('h2')).toHaveText('Dashboard');
     } else {
-      await expect(h2).toHaveText('Dashboard');
+      await expect(heading).toHaveText('Dashboard');
     }
   });
+
   test('home loads without redirects and assets are reachable', async ({ page, request }) => {
-    let resp = await page.goto('/');
-    if ((await page.locator('h2').textContent())?.includes('Sign in')) {
-      await page.getByLabel('Username').fill('admin');
-      await page.getByLabel('Password').fill('password');
-      await page.getByRole('button', { name: 'Sign in' }).click();
-      await expect(page.locator('h2')).toHaveText('Dashboard');
-      resp = await page.goto('/');
-    }
-    expect(resp?.status()).toBe(200);
+    const response = await page.goto('/');
+    expect(response?.status()).toBe(200);
     await expect(page.locator('header img[alt="Piccolo"]')).toBeVisible();
 
-    // Ensure main asset JS is reachable
     const scriptHref = await page.locator('script[type="module"][src^="/assets/"]').first().getAttribute('src');
     expect(scriptHref).toBeTruthy();
     const js = await request.get(scriptHref!);
     expect(js.ok()).toBeTruthy();
 
-    // Branding logo is reachable
     const logo = await request.get('/branding/piccolo.svg');
     expect(logo.ok()).toBeTruthy();
   });
 
-  test('navigate via nav: Apps/Storage/Updates/Remote', async ({ page }) => {
-    await page.goto('/');
+  test('navigate via sidebar to core pages', async ({ page }) => {
     await page.locator('aside').getByRole('link', { name: 'Apps' }).click();
     await expect(page.locator('h2')).toHaveText('Apps');
 
@@ -70,8 +58,6 @@ test.describe('Top-level navigation and deep links', () => {
 
     await page.locator('aside').getByRole('link', { name: 'Remote' }).click();
     await expect(page.locator('h2')).toHaveText('Remote');
-
-    // Additional BFS routes validated separately
   });
 
   test('deep-link directly to /#/apps', async ({ page }) => {
@@ -79,146 +65,4 @@ test.describe('Top-level navigation and deep links', () => {
     expect(resp?.status()).toBe(200);
     await expect(page.locator('h2')).toHaveText('Apps');
   });
-
-  test('deep-link to app details then navigate via nav and back', async ({ page }) => {
-    await page.goto('/#/apps');
-    await expect(page.locator('h2')).toHaveText('Apps');
-    await page.getByRole('link', { name: /vaultwarden/i }).click();
-    await expect(page.locator('h2')).toHaveText(/App: vaultwarden/);
-    // Navigate to Apps via nav
-    await page.locator('aside').getByRole('link', { name: 'Apps' }).click();
-    await expect(page.locator('h2')).toHaveText('Apps');
-    // Go back to details via browser back
-    await page.goBack();
-    await expect(page.locator('h2')).toHaveText(/App: vaultwarden/);
-  });
-
-  test('deep-link to second app (gitea) then navigate via nav and back', async ({ page }) => {
-    await page.goto('/#/apps');
-    await expect(page.locator('h2')).toHaveText('Apps');
-    await page.getByRole('link', { name: /gitea/i }).click();
-    await expect(page.locator('h2')).toHaveText(/App: gitea/);
-    await page.locator('aside').getByRole('link', { name: 'Apps' }).click();
-    await expect(page.locator('h2')).toHaveText('Apps');
-    await page.goBack();
-    await expect(page.locator('h2')).toHaveText(/App: gitea/);
-  });
-});
-
-test('apps actions show toasts (real if apps present, else skip)', async ({ page }) => {
-  if (test.info().project.name === 'mobile-chromium') test.skip();
-  await page.goto('/#/apps');
-  const startBtn = page.getByRole('button', { name: 'Start' }).first();
-  if (await startBtn.count() === 0) test.skip();
-  await startBtn.click();
-  await expect(page.getByText('Started', { exact: false }).last()).toBeVisible();
-
-  // Navigate to details and perform update (toast check)
-  await page.getByRole('link', { name: /vaultwarden/i }).click();
-  await expect(page.locator('h2')).toHaveText(/App: vaultwarden/);
-  await page.getByRole('button', { name: 'Update' }).click();
-  await expect(page.getByText('Updated', { exact: false }).last()).toBeVisible();
-
-  // Logs bundle link visible
-  await expect(page.getByRole('link', { name: 'Download logs bundle' })).toBeVisible();
-
-  // Uninstall flow with purge option
-  const uninstallBtn = page.getByRole('button', { name: 'Uninstall' });
-  if (await uninstallBtn.count() === 0) test.skip();
-  await uninstallBtn.click();
-  await expect(page.getByText('Confirm uninstall')).toBeVisible();
-  const purge = page.getByRole('checkbox', { name: /Delete data too/i });
-  await purge.check();
-  await page.getByRole('button', { name: 'Confirm uninstall' }).click();
-  await expect(page.getByText(/Uninstalled/i)).toBeVisible();
-});
-
-test('updates OS apply shows toast (demo)', async ({ page }) => {
-  await page.goto('/#/updates');
-  const applyBtn = page.getByRole('button', { name: 'Apply' });
-  await applyBtn.click();
-  await expect(page.getByText('OS update applied')).toBeVisible();
-});
-
-test('remote simulate DNS error shows error toast (demo)', async ({ page }) => {
-  await page.goto('/#/remote');
-  const btn = page.getByRole('button', { name: 'Simulate DNS error' });
-  await btn.click();
-  await expect(page.getByText(/Configure failed|DNS/i)).toBeVisible();
-});
-
-test('remote enable and disable show toasts (demo)', async ({ page }) => {
-  await page.goto('/#/remote');
-  // Enable
-  await page.getByRole('button', { name: 'Enable Remote' }).click();
-  await expect(page.getByText('Remote configured')).toBeVisible();
-  // Disable
-  await page.getByRole('button', { name: 'Disable' }).click();
-  await expect(page.getByText('Remote disabled')).toBeVisible();
-});
-
-test('remote warnings are visible (demo)', async ({ page }) => {
-  await page.goto('/#/remote');
-  await expect(page.getByText(/Remote access is disabled/i)).toBeVisible();
-});
-
-test('remote rotate credentials shows toast (demo)', async ({ page }) => {
-  await page.goto('/#/remote');
-  // Enable first (demo)
-  await page.getByRole('button', { name: 'Enable Remote' }).click();
-  await expect(page.getByText('Remote configured')).toBeVisible();
-  // Rotate credentials
-  await page.getByRole('button', { name: 'Rotate credentials' }).click();
-  await expect(page.getByText(/Device credentials rotated|Credentials rotated/)).toBeVisible();
-});
-
-test('storage action shows toast (demo)', async ({ page }) => {
-  await page.goto('/#/storage');
-  // Prefer non-destructive action: Set default if available, else Use as-is
-  const setDefault = page.getByRole('button', { name: 'Set default' }).first();
-  if (await setDefault.count() > 0) {
-    await setDefault.click();
-    await expect(page.getByText('Default data root updated')).toBeVisible();
-  } else {
-    const useBtn = page.getByRole('button', { name: 'Use as-is' }).first();
-    await useBtn.click();
-    await expect(page.getByText('Using', { exact: false })).toBeVisible();
-  }
-});
-
-test('storage unlock and recovery key flows (demo)', async ({ page }) => {
-  await page.goto('/#/storage');
-  // Unlock success
-  const unlockBtn = page.getByRole('button', { name: 'Unlock volumes' }).first();
-  await unlockBtn.click();
-  await expect(page.getByText('Volumes unlocked')).toBeVisible();
-
-  // Simulate unlock failure (demo-only)
-  const failBtn = page.getByRole('button', { name: 'Simulate unlock failure' }).first();
-  if (await failBtn.count() > 0) {
-    await failBtn.click();
-    await expect(page.getByText(/Unlock failed|failed/i)).toBeVisible();
-  }
-
-  // Generate recovery key (if not present) or re-generate in demo
-  const genBtn = page.getByRole('button', { name: 'Generate Recovery Key' }).first();
-  if (await genBtn.count() > 0) {
-    await genBtn.click();
-    await expect(page.getByText('Recovery key generated')).toBeVisible();
-  }
-});
-
-test('storage encrypt-in-place dry-run, confirm, and failure (demo)', async ({ page }) => {
-  await page.goto('/#/storage');
-  const input = page.getByPlaceholder('/var/piccolo/storage/app/data');
-  await input.fill('/tmp/piccolo-demo');
-  await page.getByRole('button', { name: 'Dry-run' }).click();
-  await expect(page.getByText('Dry run plan generated')).toBeVisible();
-  await page.getByRole('button', { name: 'Confirm' }).click();
-  await expect(page.getByText('Encryption completed')).toBeVisible();
-  const failBtn = page.getByRole('button', { name: 'Simulate failure' });
-  if (await failBtn.count() > 0) {
-    await failBtn.click();
-    await expect(page.getByText(/Encryption failed|failed/i)).toBeVisible();
-  }
 });
