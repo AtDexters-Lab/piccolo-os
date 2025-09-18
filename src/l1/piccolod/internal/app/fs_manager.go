@@ -240,6 +240,11 @@ func (m *FSManager) Stop(ctx context.Context, name string) error {
 		return fmt.Errorf("failed to update app status: %w", err)
 	}
 
+	// Tear down service proxies so dashboard/services reflect the stopped state
+	if m.serviceManager != nil {
+		m.serviceManager.RemoveApp(name)
+	}
+
 	return nil
 }
 
