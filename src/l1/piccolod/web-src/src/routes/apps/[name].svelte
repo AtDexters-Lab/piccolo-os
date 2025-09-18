@@ -136,7 +136,7 @@
 
     <h3 class="font-medium mt-6 mb-2">Service Endpoints</h3>
     {#if (data?.data?.services ?? []).length === 0}
-      <p class="text-sm text-gray-600">No services registered.</p>
+      <p class="text-sm text-gray-600">No running services.</p>
     {:else}
       <ul class="text-sm space-y-1 list-disc ml-5">
         {#each data.data.services as service}

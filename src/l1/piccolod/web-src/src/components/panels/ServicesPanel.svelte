@@ -19,7 +19,7 @@
   {:else if error}
     <p class="text-sm text-red-600">{error}</p>
   {:else}
-    <p class="text-sm text-gray-700 mb-2">{data.services?.length || 0} services</p>
+    <p class="text-sm text-gray-700 mb-2">{data.services?.length || 0} running</p>
     <ul class="text-sm list-disc ml-5 space-y-1">
       {#each (data.services?.slice(0,5) ?? []) as s}
         <li>
