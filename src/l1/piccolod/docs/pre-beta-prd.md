@@ -5,11 +5,12 @@ Purpose: Ship a dependable, privacy‑first image that tinkerers can boot, insta
 ## Scope & Targets
 - Architectures: x86_64 UEFI (Secure Boot) and Raspberry Pi aarch64.
 - TPM‑only remote unlock. Non‑TPM devices require LAN unlock after every reboot.
+- TPM-dependent flows are stubbed on non-TPM pre-beta hardware; remote unlock UX is present but hardware-backed unseal will land after TPM boards arrive.
 - Base OS: SUSE MicroOS with piccolod baked in. No SSH/shell/serial access; the product surface is the piccolod web portal.
 
 ## Networking Model
 - Portal: binds on `tcp/80` (LAN); remote access via Nexus L4 passthrough; device terminates TLS.
-- Service ports: `30000–50000` allocated dynamically and reported by service discovery.
+- Service networking uses a three-layer port model: containers expose their declared `guest_port` (Layer 1), piccolod binds loopback security ports in the 15000–25000 range (`127.0.0.1:<host_bind_port>`, Layer 2), and piccolod proxies LAN traffic on managed ports in the 35000–45000 range (`0.0.0.0:<public_port>`, Layer 3).
 - mDNS: `http://piccolo.local` (internal implementation; Avahi not used).
 - WAN: closed by default; public access only via Nexus. Nexus never terminates device traffic.
 
@@ -51,6 +52,7 @@ Purpose: Ship a dependable, privacy‑first image that tinkerers can boot, insta
 
 ## Remote Publish & TLS
 - DNS: user points Nexus A/AAAA to VPS; CNAME `portal.<domain>` and `*.pclo.<domain>` (or `*.<domain>`) to Nexus. Portal/app split is configurable.
+- Listener hostnames: each listener publishes as `https://<listener>.<user-domain>[:remote_port]`. If `remote_ports` are omitted in the manifest, piccolod advertises 80 and 443.
 - ACME: lego; HTTP‑01 over Nexus tunnel; Let’s Encrypt staging for tests.
 - Portal TLS
   - TPM devices: portal HTTPS available in ≤ 5 minutes post‑reboot using TEK‑decrypted key; ACME account key also TEK‑protected.
@@ -93,7 +95,7 @@ Purpose: Ship a dependable, privacy‑first image that tinkerers can boot, insta
 - Performance/UX
   - Mobile viewport 360×800 usable; no blocked flows; NTP available.
 - Security sanity
-  - Only ports 80 and 30000–50000 open on LAN; Nexus only for remote; no SSH by default; secrets not logged.
+  - Only ports 80 and the managed proxy range (35000–45000) are exposed on LAN; loopback guard ports (15000–25000) never egress; Nexus is the sole remote path; no SSH; secrets not logged.
 
 ## Out of Scope (Pre‑Beta)
 - Measured boot hardening beyond PCR7; remote attestation.
@@ -135,4 +137,3 @@ Purpose: Ship a dependable, privacy‑first image that tinkerers can boot, insta
 - Product PRD (org‑context): `org-context/02_product/piccolo_os_prd.md`
 - Acceptance features (org‑context): `org-context/02_product/acceptance_features/`
 - Piccolod architecture/docs (this repo): `docs/`
-

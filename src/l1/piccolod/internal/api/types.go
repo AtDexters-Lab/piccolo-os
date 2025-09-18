@@ -45,11 +45,10 @@ type BackupTarget struct {
 
 // AppDefinition represents an app.yaml definition file
 type AppDefinition struct {
-	Name      string    `yaml:"name" json:"name"`
-	Image     string    `yaml:"image,omitempty" json:"image,omitempty"`
-	Build     *AppBuild `yaml:"build,omitempty" json:"build,omitempty"`
-	Subdomain string    `yaml:"subdomain,omitempty" json:"subdomain,omitempty"`
-	Type      string    `yaml:"type,omitempty" json:"type,omitempty"` // "system" or "user"
+	Name  string    `yaml:"name" json:"name"`
+	Image string    `yaml:"image,omitempty" json:"image,omitempty"`
+	Build *AppBuild `yaml:"build,omitempty" json:"build,omitempty"`
+	Type  string    `yaml:"type,omitempty" json:"type,omitempty"` // "system" or "user"
 	// Service-oriented listener configuration (v1)
 	Listeners   []AppListener          `yaml:"listeners,omitempty" json:"listeners,omitempty"`
 	Storage     *AppStorage            `yaml:"storage,omitempty" json:"storage,omitempty"`
@@ -65,11 +64,12 @@ type AppDefinition struct {
 
 // AppListener defines a named service exposed by the app (service-oriented model)
 type AppListener struct {
-	Name       string                  `yaml:"name" json:"name"`
-	GuestPort  int                     `yaml:"guest_port" json:"guest_port"`
-	Flow       string                  `yaml:"flow,omitempty" json:"flow,omitempty"`         // "tcp" | "tls" (default: tcp)
-	Protocol   string                  `yaml:"protocol,omitempty" json:"protocol,omitempty"` // hint: "http" | "websocket" | "raw" | etc.
-	Middleware []AppProtocolMiddleware `yaml:"protocol_middleware,omitempty" json:"protocol_middleware,omitempty"`
+	Name        string                  `yaml:"name" json:"name"`
+	GuestPort   int                     `yaml:"guest_port" json:"guest_port"`
+	Flow        string                  `yaml:"flow,omitempty" json:"flow,omitempty"`         // "tcp" | "tls" (default: tcp)
+	Protocol    string                  `yaml:"protocol,omitempty" json:"protocol,omitempty"` // hint: "http" | "websocket" | "raw" | etc.
+	Middleware  []AppProtocolMiddleware `yaml:"protocol_middleware,omitempty" json:"protocol_middleware,omitempty"`
+	RemotePorts []int                   `yaml:"remote_ports,omitempty" json:"remote_ports,omitempty"`
 }
 
 // AppProtocolMiddleware defines protocol-specific middleware entry
@@ -164,7 +164,6 @@ type App struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Image       string `json:"image"`
-	Subdomain   string `json:"subdomain"`
 	Type        string `json:"type"`
 	Status      string `json:"status"` // "running", "stopped", "error"
 	ContainerID string `json:"container_id,omitempty"`

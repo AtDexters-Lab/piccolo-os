@@ -494,7 +494,6 @@ ports:
 **New Model** (Service-Centric):
 ```yaml  
 name: pfolio
-subdomain: pfolio    # Single subdomain per app
 
 listeners:
   - name: frontend   # Service name (not port number)
@@ -570,7 +569,6 @@ GET /api/v1/services
 GET /api/v1/apps/pfolio/services  
 {
   "app": "pfolio", 
-  "subdomain": "pfolio",
   "services": {
     "frontend": {
       "local_url": "http://localhost:35001",
@@ -623,7 +621,6 @@ type AllocatedPorts struct {
 **Rationale**: Maximum security with middleware processing capability  
 **Result**: Fortress architecture with sophisticated traffic management
 
-### **3. Subdomain + Port Remote Access**
 **Decision**: `app.user.piccolospace.com:port` instead of `service.user.piccolospace.com`  
 **Rationale**: More natural for multi-service apps, simpler nexus routing  
 **Result**: Clean URL structure that maps directly to container architecture
@@ -772,7 +769,6 @@ type ServiceMapping struct {
 func (sm *ServiceManager) OnServiceDeployed(app *AppInstance) {
     for _, service := range app.Services {
         mapping := ServiceMapping{
-            RemoteKey:     fmt.Sprintf("%s.%s:%d", app.Subdomain, userID, service.GuestPort),
             LocalEndpoint: fmt.Sprintf("localhost:%d", service.PublicPort),
             AppName:       app.Name,
             ServiceName:   service.Name,
@@ -799,7 +795,6 @@ func (sm *ServiceManager) OnServiceDeployed(app *AppInstance) {
    - Forwards via established tunnel
    
 3. Nexus Client (On User Device):
-   - Receives tunnel data with metadata: {subdomain: "pfolio", port: 80}
    - Looks up local mapping: "pfolio.userA:80" → "localhost:35001"
    - Establishes TCP connection to localhost:35001
    - Streams data bidirectionally
@@ -835,7 +830,6 @@ func (sm *ServiceManager) GenerateNexusConfig(userID string) *NexusConfig {
     for _, app := range sm.GetActiveApps() {
         for _, service := range app.Services {
             remoteKey := fmt.Sprintf("%s.%s:%d", 
-                app.Subdomain, userID, service.GuestPort)
             localEndpoint := fmt.Sprintf("localhost:%d", service.PublicPort)
             
             config.Mappings[remoteKey] = localEndpoint
@@ -893,7 +887,6 @@ func (nc *NexusClient) OnServiceUpdate(event *ServiceEvent) {
     case "service_removed":
         // Remove mapping
         remoteKey := fmt.Sprintf("%s.%s:%d", 
-            event.App.Subdomain, nc.userID, event.Service.GuestPort)
         nc.updateServerMapping(remoteKey, "remove")
         
     case "app_restarted":

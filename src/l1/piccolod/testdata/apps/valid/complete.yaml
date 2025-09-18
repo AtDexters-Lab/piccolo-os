@@ -1,6 +1,5 @@
 name: test-complete
 image: nginx:alpine
-subdomain: test
 type: user
 
 listeners:

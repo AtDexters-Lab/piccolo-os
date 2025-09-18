@@ -25,11 +25,10 @@ type ContainerManager interface {
 // AppInstance represents a running application instance
 type AppInstance struct {
 	// App metadata
-	Name      string `json:"name"`
-	Image     string `json:"image"`
-	Subdomain string `json:"subdomain"`
-	Type      string `json:"type"`
-	Status    string `json:"status"` // "created", "running", "stopped", "error"
+	Name   string `json:"name"`
+	Image  string `json:"image"`
+	Type   string `json:"type"`
+	Status string `json:"status"` // "created", "running", "stopped", "error"
 
 	// Container information
 	ContainerID string `json:"container_id"`
@@ -90,7 +89,6 @@ func (m *Manager) Install(ctx context.Context, appDef *api.AppDefinition) (*AppI
 	app := &AppInstance{
 		Name:        appDef.Name,
 		Image:       appDef.Image,
-		Subdomain:   appDef.Subdomain,
 		Type:        appDef.Type,
 		Status:      "created",
 		ContainerID: containerID,

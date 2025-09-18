@@ -19,7 +19,6 @@
 # Used for:
 # - Container naming
 # - Storage directory naming (/var/piccolo/storage/<name>)
-# - Default subdomain generation
 # - Service discovery
 name: dev-workspace
 
@@ -65,9 +64,8 @@ build:
 # CORE OPTIONAL FIELDS
 # =============================================================================
 
-# Subdomain for remote access via https://<subdomain>.<user>.piccolospace.com
-# Default: derived from name (dev-workspace -> https://dev-workspace.user.piccolospace.com)
-subdomain: code
+# Remote endpoints resolve to https://<listener>.<user-domain>[:remote_port]. The
+# legacy `subdomain` field has been removed; listener names now drive remote hostnames.
 
 # App type determines startup order and lifecycle
 # - system: Starts during boot sequence, before user authentication
@@ -120,6 +118,9 @@ listeners:
         params:
           log_level: info
           include_headers: ["User-Agent", "X-Forwarded-For"]
+
+    # Optional remote publish ports (Layer 3). If omitted, 80/443 are advertised.
+    remote_ports: [80, 443]
   
   - name: ssh-dev
     guest_port: 22         # SSH service inside container
@@ -176,7 +177,6 @@ listeners:
 # Example Service Discovery Response:
 # {
 #   "app": "dev-workspace",
-#   "subdomain": "code", 
 #   "services": {
 #     "web-frontend": {
 #       "guest_port": 8080,

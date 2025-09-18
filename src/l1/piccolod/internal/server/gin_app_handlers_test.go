@@ -53,7 +53,6 @@ func TestGinAppAPI_Install(t *testing.T) {
 			body: `name: test-nginx
 image: docker.io/library/nginx:alpine
 type: user
-subdomain: test-nginx
 listeners:
   - name: web
     guest_port: 80
@@ -236,7 +235,6 @@ func TestGinAppAPI_GetApp(t *testing.T) {
 		Name:      "test-app",
 		Image:     "nginx:alpine",
 		Type:      "user",
-		Subdomain: "test",
 		Listeners: []api.AppListener{{Name: "web", GuestPort: 80}},
 	}
 
@@ -405,7 +403,6 @@ func TestGinAppAPI_FullLifecycle(t *testing.T) {
 	appYAML := `name: lifecycle-test
 image: docker.io/library/nginx:alpine
 type: user
-subdomain: lifecycle-test
 listeners:
   - name: web
     guest_port: 80

@@ -56,7 +56,7 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 - Self‑hosted Nexus (first‑class): run your own Nexus Proxy Server on a VPS. Device terminates TLS; Nexus stays L4 passthrough.
 - Certificates: device issues/renews its own certs via Let’s Encrypt HTTP‑01 over the tunnel.
 - Nexus server TLS: Nexus manages its own cert via ACME TLS‑ALPN‑01; it does not terminate device traffic.
-- SSO continuity: after signing into the portal, apps open without a second login (local ports or remote subdomains). Third‑party apps never see the portal cookie; the proxy gates access.
+- SSO continuity: after signing into the portal, apps open without a second login (local proxy ports or remote listener hosts (e.g., listener.user-domain)). Third‑party apps never see the portal cookie; the proxy gates access.
 
 ## Install and Quick Start
 
@@ -99,13 +99,12 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 - Piccolo Network (optional managed remote access and services).
 
 ## Documentation
-Comprehensive documentation is available in the `/docs` directory:
-- **[Architecture](docs/architecture/)** — system design and layers
-- **[Development](docs/development/)** — building, testing, and contributing
-- **[Security](docs/security/)** — encryption and trust model
-- **[Operations](docs/operations/)** — installation and system management
-- **Admin API**: `docs/api/openapi.yaml` (draft)
-- **App platform spec**: `docs/app-platform/specification.yaml`
+Key planning documents:
+- **Pre-beta PRD**: `docs/pre-beta-prd.md`
+- **Product PRD**: `src/l1/piccolod/piccolo_os_prd.md` (symlink to org context)
+- **Portal overview**: `src/l1/piccolod/docs/ui/portal-overview.md`
+- **App platform spec**: `src/l1/piccolod/docs/app-platform/specification.yaml`
+- **HTTP API (OpenAPI)**: `src/l1/piccolod/docs/api/openapi.yaml`
 
 ## Contribute
 We’re early, scrappy, and community‑powered. PRs, issues, and design discussions are welcome.
@@ -113,7 +112,7 @@ We’re early, scrappy, and community‑powered. PRs, issues, and design discuss
 ```bash
 git clone https://github.com/AtDexters-Lab/piccolo-os
 cd piccolo-os
-# See docs/development/ for build instructions
+# Build instructions: use `make run` (daemon) or see pre-beta PRD for scope
 ```
 
 Join the conversation:

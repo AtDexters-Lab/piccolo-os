@@ -750,7 +750,6 @@ components:
         id: { type: string }
         name: { type: string }
         image: { type: string }
-        subdomain: { type: string }
         type: { type: string }
         status: { type: string, enum: [running, stopped, error] }
         volumes: { type: array, items: { $ref: '#/components/schemas/AppVolume' } }
@@ -765,11 +764,14 @@ components:
       type: object
       properties:
         app: { type: string }
-        subdomain: { type: string }
         name: { type: string }
         guest_port: { type: integer }
         host_port: { type: integer, description: Port bound on 127.0.0.1 for LAN }
         public_port: { type: integer }
+        remote_ports:
+          type: array
+          items: { type: integer }
+          description: Explicit ports advertised on the remote listener hostname; defaults to [80, 443].
         flow: { type: string }
         protocol: { type: string }
         middleware: { type: array, items: { type: object } }

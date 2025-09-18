@@ -1,15 +1,17 @@
 # Development environment with filesystem persistence
 name: code-server
 image: codercom/code-server:latest
-subdomain: code
 
-ports:
-  web:
-    container: 8080
-    host: 8080
-  ssh:
-    container: 22
-    host: 2222
+listeners:
+  - name: web
+    guest_port: 8080
+    flow: tcp
+    protocol: http
+    remote_ports: [80, 443]
+  - name: ssh
+    guest_port: 22
+    flow: tcp
+    protocol: raw
 
 storage:
   persistent:

@@ -61,7 +61,7 @@ func (m *FSManager) RestoreServices(ctx context.Context) {
 			m.serviceManager.RemoveApp(app.Name)
 			continue
 		}
-		if _, err := m.serviceManager.RestoreFromPodman(app.Name, def.Subdomain, def.Listeners, ports); err != nil {
+		if _, err := m.serviceManager.RestoreFromPodman(app.Name, def.Listeners, ports); err != nil {
 			log.Printf("WARN: restore services: failed to restore proxies for %s: %v", app.Name, err)
 			continue
 		}
@@ -83,7 +83,7 @@ func (m *FSManager) Install(ctx context.Context, appDef *api.AppDefinition) (*Ap
 	}
 
 	// Allocate services and convert to container spec
-	endpoints, err := m.serviceManager.AllocateForApp(appDef.Name, appDef.Subdomain, appDef.Listeners)
+	endpoints, err := m.serviceManager.AllocateForApp(appDef.Name, appDef.Listeners)
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate service ports: %w", err)
 	}
@@ -108,7 +108,6 @@ func (m *FSManager) Install(ctx context.Context, appDef *api.AppDefinition) (*Ap
 	app := &AppInstance{
 		Name:        appDef.Name,
 		Image:       appDef.Image,
-		Subdomain:   appDef.Subdomain,
 		Type:        appDef.Type,
 		Status:      "created",
 		ContainerID: containerID,
@@ -131,7 +130,7 @@ func (m *FSManager) Install(ctx context.Context, appDef *api.AppDefinition) (*Ap
 func (m *FSManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*AppInstance, error) {
 	if existing, exists := m.stateManager.GetApp(appDef.Name); exists {
 		// Reconcile listeners first
-		rec, containerChange, err := m.serviceManager.Reconcile(appDef.Name, appDef.Subdomain, appDef.Listeners)
+		rec, containerChange, err := m.serviceManager.Reconcile(appDef.Name, appDef.Listeners)
 		if err != nil {
 			return nil, fmt.Errorf("failed to reconcile services: %w", err)
 		}
@@ -210,7 +209,7 @@ func (m *FSManager) Start(ctx context.Context, name string) error {
 			} else if len(ports) == 0 {
 				log.Printf("WARN: start app %s: no published ports found during restore", name)
 			} else {
-				if _, restoreErr := m.serviceManager.RestoreFromPodman(name, def.Subdomain, def.Listeners, ports); restoreErr != nil {
+				if _, restoreErr := m.serviceManager.RestoreFromPodman(name, def.Listeners, ports); restoreErr != nil {
 					log.Printf("WARN: start app %s: failed to restore services: %v", name, restoreErr)
 				} else {
 					m.serviceManager.SetAppContainerID(name, app.ContainerID)

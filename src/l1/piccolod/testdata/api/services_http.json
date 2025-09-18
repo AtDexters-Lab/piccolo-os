@@ -1,7 +1,6 @@
 {
   "service": {
     "app": "vaultwarden",
-    "subdomain": "vault",
     "name": "http",
     "guest_port": 80,
     "host_port": 30001,
@@ -12,4 +11,3 @@
     "local_url": "http://127.0.0.1:30001/"
   }
 }
-

@@ -1,7 +1,6 @@
 export type ServiceLinkInput = {
   scheme?: string | null;
   public_port?: number | null;
-  subdomain?: string | null;
 };
 
 const LOCAL_SUFFIXES = ['.local', '.lan', '.home.arpa'];
@@ -54,17 +53,12 @@ export function buildServiceLink(service: ServiceLinkInput | null | undefined, h
   const host = defaultHost(hostOverride);
   const scheme = normalizeScheme(service.scheme ?? undefined);
   const publicPort = typeof service.public_port === 'number' ? service.public_port : null;
-  const subdomain = (service.subdomain || '').trim();
 
   if (isLikelyLocalHost(host)) {
     if (publicPort) {
       return `${scheme}://${host}:${publicPort}/`;
     }
     return null;
-  }
-
-  if (subdomain && subdomain.includes('.')) {
-    return `${scheme}://${subdomain}`;
   }
 
   if (publicPort) {

@@ -1,6 +1,5 @@
 name: nginx-demo
 image: nginx:latest
-subdomain: web
 type: user
 ports:
   http:

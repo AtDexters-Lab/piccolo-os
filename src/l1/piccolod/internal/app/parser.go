@@ -18,20 +18,20 @@ var (
 // ParseAppDefinition parses YAML content into AppDefinition struct with validation
 func ParseAppDefinition(content []byte) (*api.AppDefinition, error) {
 	var app api.AppDefinition
-	
+
 	// Parse YAML
 	if err := yaml.Unmarshal(content, &app); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
-	
+
 	// Set defaults
 	SetDefaults(&app)
-	
+
 	// Validate
 	if err := ValidateAppDefinition(&app); err != nil {
 		return nil, err
 	}
-	
+
 	return &app, nil
 }
 
@@ -46,67 +46,62 @@ func SerializeAppDefinition(app *api.AppDefinition) ([]byte, error) {
 
 // SetDefaults sets default values for AppDefinition fields
 func SetDefaults(app *api.AppDefinition) {
-    // Default type is "user"
-    if app.Type == "" {
-        app.Type = "user"
-    }
+	// Default type is "user"
+	if app.Type == "" {
+		app.Type = "user"
+	}
 
-    // Default subdomain is the app name (if not specified)
-    if app.Subdomain == "" {
-        app.Subdomain = app.Name
-    }
-
-    // Listeners defaults
-    for i := range app.Listeners {
-        // Default flow is tcp
-        if strings.TrimSpace(app.Listeners[i].Flow) == "" {
-            app.Listeners[i].Flow = "tcp"
-        }
-        // Default protocol is raw
-        if strings.TrimSpace(app.Listeners[i].Protocol) == "" {
-            app.Listeners[i].Protocol = "raw"
-        }
-    }
+	// Listeners defaults
+	for i := range app.Listeners {
+		// Default flow is tcp
+		if strings.TrimSpace(app.Listeners[i].Flow) == "" {
+			app.Listeners[i].Flow = "tcp"
+		}
+		// Default protocol is raw
+		if strings.TrimSpace(app.Listeners[i].Protocol) == "" {
+			app.Listeners[i].Protocol = "raw"
+		}
+	}
 }
 
 // ValidateAppDefinition validates an AppDefinition struct
 func ValidateAppDefinition(app *api.AppDefinition) error {
-    // Validate name
-    if err := validateName(app.Name); err != nil {
-        return err
-    }
+	// Validate name
+	if err := validateName(app.Name); err != nil {
+		return err
+	}
 
-    // Validate image/build requirement
-    if err := validateImageOrBuild(app); err != nil {
-        return err
-    }
-	
+	// Validate image/build requirement
+	if err := validateImageOrBuild(app); err != nil {
+		return err
+	}
+
 	// Validate type
 	if err := validateType(app.Type); err != nil {
 		return err
 	}
-	
-    // Validate listeners (service-oriented)
-    if err := validateListeners(app.Listeners); err != nil {
-        return err
-    }
-	
+
+	// Validate listeners (service-oriented)
+	if err := validateListeners(app.Listeners); err != nil {
+		return err
+	}
+
 	// Validate storage
 	if err := validateStorage(app.Storage); err != nil {
 		return err
 	}
-	
+
 	// Validate resources
 	if err := validateResources(app.Resources); err != nil {
 		return err
 	}
-	
+
 	// Validate permissions
 	if err := validatePermissions(app.Permissions); err != nil {
 		return err
 	}
-	
-    return nil
+
+	return nil
 }
 
 // validateName validates app name follows naming conventions
@@ -114,15 +109,15 @@ func validateName(name string) error {
 	if name == "" {
 		return fmt.Errorf("name is required")
 	}
-	
+
 	if len(name) > 50 {
 		return fmt.Errorf("name must be 50 characters or less")
 	}
-	
+
 	if !appNameRegex.MatchString(name) {
 		return fmt.Errorf("name must contain only lowercase letters, numbers, and hyphens, and must start with a letter")
 	}
-	
+
 	// Reserved names check
 	reserved := []string{"api", "www", "admin", "root", "system", "piccolo"}
 	for _, r := range reserved {
@@ -130,7 +125,7 @@ func validateName(name string) error {
 			return fmt.Errorf("name '%s' is reserved", name)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -138,20 +133,20 @@ func validateName(name string) error {
 func validateImageOrBuild(app *api.AppDefinition) error {
 	hasImage := app.Image != ""
 	hasBuild := app.Build != nil && (app.Build.Containerfile != "" || app.Build.Git != "")
-	
+
 	if !hasImage && !hasBuild {
 		return fmt.Errorf("either image or build must be specified")
 	}
-	
+
 	if hasImage && hasBuild {
 		return fmt.Errorf("cannot specify both image and build")
 	}
-	
+
 	// If build is specified, validate it
 	if hasBuild {
 		return validateBuild(app.Build)
 	}
-	
+
 	return nil
 }
 
@@ -168,58 +163,58 @@ func validateType(appType string) error {
 
 // validatePorts validates port mappings
 func validateListeners(listeners []api.AppListener) error {
-    if len(listeners) == 0 {
-        return fmt.Errorf("listeners are required; legacy ports are no longer supported")
-    }
+	if len(listeners) == 0 {
+		return fmt.Errorf("listeners are required; legacy ports are no longer supported")
+	}
 
-    names := make(map[string]struct{})
-    guestPorts := make(map[int]string)
+	names := make(map[string]struct{})
+	guestPorts := make(map[int]string)
 
-    for i, l := range listeners {
-        // name required
-        if strings.TrimSpace(l.Name) == "" {
-            return fmt.Errorf("listener[%d] name is required", i)
-        }
-        // unique name per app
-        if _, ok := names[l.Name]; ok {
-            return fmt.Errorf("duplicate listener name '%s'", l.Name)
-        }
-        names[l.Name] = struct{}{}
+	for i, l := range listeners {
+		// name required
+		if strings.TrimSpace(l.Name) == "" {
+			return fmt.Errorf("listener[%d] name is required", i)
+		}
+		// unique name per app
+		if _, ok := names[l.Name]; ok {
+			return fmt.Errorf("duplicate listener name '%s'", l.Name)
+		}
+		names[l.Name] = struct{}{}
 
-        // guest_port required and valid
-        if l.GuestPort < 1 || l.GuestPort > 65535 {
-            return fmt.Errorf("listener '%s' guest_port must be between 1 and 65535", l.Name)
-        }
-        if existing, ok := guestPorts[l.GuestPort]; ok {
-            return fmt.Errorf("guest_port %d used by both '%s' and '%s'", l.GuestPort, existing, l.Name)
-        }
-        guestPorts[l.GuestPort] = l.Name
+		// guest_port required and valid
+		if l.GuestPort < 1 || l.GuestPort > 65535 {
+			return fmt.Errorf("listener '%s' guest_port must be between 1 and 65535", l.Name)
+		}
+		if existing, ok := guestPorts[l.GuestPort]; ok {
+			return fmt.Errorf("guest_port %d used by both '%s' and '%s'", l.GuestPort, existing, l.Name)
+		}
+		guestPorts[l.GuestPort] = l.Name
 
-        // flow default handled in SetDefaults; ensure value is one of tcp|tls if provided
-        flow := strings.ToLower(strings.TrimSpace(l.Flow))
-        if flow != "tcp" && flow != "tls" {
-            return fmt.Errorf("listener '%s' flow must be 'tcp' or 'tls'", l.Name)
-        }
+		// flow default handled in SetDefaults; ensure value is one of tcp|tls if provided
+		flow := strings.ToLower(strings.TrimSpace(l.Flow))
+		if flow != "tcp" && flow != "tls" {
+			return fmt.Errorf("listener '%s' flow must be 'tcp' or 'tls'", l.Name)
+		}
 
-        // protocol is a hint; allow empty or known values
-        prot := strings.ToLower(strings.TrimSpace(l.Protocol))
-        switch prot {
-        case "", "raw", "http", "websocket":
-            // ok; empty normalized to raw by SetDefaults
-        default:
-            // Accept arbitrary token but keep it simple for now
-            // Return error to catch typos early
-            return fmt.Errorf("listener '%s' protocol '%s' not supported in v1", l.Name, l.Protocol)
-        }
+		// protocol is a hint; allow empty or known values
+		prot := strings.ToLower(strings.TrimSpace(l.Protocol))
+		switch prot {
+		case "", "raw", "http", "websocket":
+			// ok; empty normalized to raw by SetDefaults
+		default:
+			// Accept arbitrary token but keep it simple for now
+			// Return error to catch typos early
+			return fmt.Errorf("listener '%s' protocol '%s' not supported in v1", l.Name, l.Protocol)
+		}
 
-        // middleware entries: ensure names present
-        for j, m := range l.Middleware {
-            if strings.TrimSpace(m.Name) == "" {
-                return fmt.Errorf("listener '%s' middleware[%d] name is required", l.Name, j)
-            }
-        }
-    }
-    return nil
+		// middleware entries: ensure names present
+		for j, m := range l.Middleware {
+			if strings.TrimSpace(m.Name) == "" {
+				return fmt.Errorf("listener '%s' middleware[%d] name is required", l.Name, j)
+			}
+		}
+	}
+	return nil
 }
 
 // validateStorage validates storage configuration
@@ -227,17 +222,17 @@ func validateStorage(storage *api.AppStorage) error {
 	if storage == nil {
 		return nil // Storage is optional
 	}
-	
+
 	// Validate persistent storage
 	if err := validateStorageVolumes(storage.Persistent, "persistent"); err != nil {
 		return err
 	}
-	
+
 	// Validate temporary storage
 	if err := validateStorageVolumes(storage.Temporary, "temporary"); err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -246,21 +241,21 @@ func validateStorageVolumes(volumes map[string]api.AppVolume, storageType string
 	if volumes == nil {
 		return nil
 	}
-	
+
 	for name, volume := range volumes {
 		if name == "" {
 			return fmt.Errorf("%s storage volume name cannot be empty", storageType)
 		}
-		
+
 		if volume.Container == "" {
 			return fmt.Errorf("%s storage volume '%s' must specify container path", storageType, name)
 		}
-		
+
 		// Validate container path is absolute
 		if !strings.HasPrefix(volume.Container, "/") {
 			return fmt.Errorf("%s storage volume '%s' container path must be absolute", storageType, name)
 		}
-		
+
 		// Validate size limit format if specified
 		if volume.SizeLimit != "" {
 			if err := validateSizeLimit(volume.SizeLimit); err != nil {
@@ -268,7 +263,7 @@ func validateStorageVolumes(volumes map[string]api.AppVolume, storageType string
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -277,16 +272,16 @@ func validateResources(resources *api.AppResources) error {
 	if resources == nil || resources.Limits == nil {
 		return nil // Resources are optional
 	}
-	
+
 	limits := resources.Limits
-	
+
 	// Validate memory limit
 	if limits.Memory != "" {
 		if err := validateSizeLimit(limits.Memory); err != nil {
 			return fmt.Errorf("invalid memory limit: %w", err)
 		}
 	}
-	
+
 	// Validate CPU limit
 	if limits.CPU < 0 {
 		return fmt.Errorf("CPU limit must be non-negative")
@@ -294,14 +289,14 @@ func validateResources(resources *api.AppResources) error {
 	if limits.CPU > 64 { // Reasonable upper limit
 		return fmt.Errorf("CPU limit cannot exceed 64 cores")
 	}
-	
+
 	// Validate storage limit
 	if limits.Storage != "" {
 		if err := validateSizeLimit(limits.Storage); err != nil {
 			return fmt.Errorf("invalid storage limit: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -310,28 +305,28 @@ func validatePermissions(permissions *api.AppPermissions) error {
 	if permissions == nil {
 		return nil // Permissions are optional
 	}
-	
+
 	// Validate network permissions
 	if permissions.Network != nil {
 		if err := validateNetworkPermissions(permissions.Network); err != nil {
 			return err
 		}
 	}
-	
+
 	// Validate resource permissions
 	if permissions.Resources != nil {
 		if err := validateResourcePermissions(permissions.Resources); err != nil {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
 // validateNetworkPermissions validates network permission settings
 func validateNetworkPermissions(network *api.AppNetworkPermissions) error {
 	validValues := []string{"allow", "deny", ""}
-	
+
 	for _, field := range []struct {
 		name  string
 		value string
@@ -353,11 +348,11 @@ func validateNetworkPermissions(network *api.AppNetworkPermissions) error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
-// validateResourcePermissions validates resource permission settings  
+// validateResourcePermissions validates resource permission settings
 func validateResourcePermissions(resources *api.AppResourcePermissions) error {
 	if resources.MaxProcesses < 0 {
 		return fmt.Errorf("max_processes must be non-negative")
@@ -373,18 +368,18 @@ func validateBuild(build *api.AppBuild) error {
 	if build == nil {
 		return nil
 	}
-	
+
 	hasContainerfile := build.Containerfile != ""
 	hasGit := build.Git != ""
-	
+
 	if !hasContainerfile && !hasGit {
 		return fmt.Errorf("build must specify either containerfile or git")
 	}
-	
+
 	if hasContainerfile && hasGit {
 		return fmt.Errorf("build cannot specify both containerfile and git")
 	}
-	
+
 	return nil
 }
 
@@ -393,10 +388,10 @@ func validateSizeLimit(limit string) error {
 	if limit == "" {
 		return nil
 	}
-	
+
 	// Simple validation for size format
 	validSuffixes := []string{"B", "KB", "MB", "GB", "TB"}
-	
+
 	for _, suffix := range validSuffixes {
 		if strings.HasSuffix(strings.ToUpper(limit), suffix) {
 			// Extract number part and validate it's positive
@@ -411,6 +406,6 @@ func validateSizeLimit(limit string) error {
 			return nil
 		}
 	}
-	
+
 	return fmt.Errorf("size limit must end with B, KB, MB, GB, or TB")
 }

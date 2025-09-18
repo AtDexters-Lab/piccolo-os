@@ -152,13 +152,10 @@
                 {/if}
               </span>
             {/if}
-            {#if service.subdomain}
-              <span class="text-xs text-gray-500 block">Remote: {service.subdomain}</span>
-            {/if}
           </li>
         {/each}
       </ul>
-      <p class="text-xs text-gray-500 mt-2">When accessing the portal remotely, services will be available at their Nexus subdomain.</p>
+      <p class="text-xs text-gray-500 mt-2">Remote access publishes listener hosts as <code>listener.user-domain</code>; ports follow the `remote_ports` setting or default to 80/443.</p>
     {/if}
   </div>
 {/if}

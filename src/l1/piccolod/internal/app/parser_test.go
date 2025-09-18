@@ -26,9 +26,6 @@ func TestParseAppDefinition(t *testing.T) {
 			expectedType:  "user", // default
 			expectError:   false,
 			validateFields: func(t *testing.T, app *api.AppDefinition) {
-				if app.Subdomain != "test-minimal" {
-					t.Errorf("Expected subdomain 'test-minimal' (default from name), got %s", app.Subdomain)
-				}
 				if app.Build != nil {
 					t.Error("Expected nil build for image-based app")
 				}
@@ -41,19 +38,18 @@ func TestParseAppDefinition(t *testing.T) {
 			expectedType: "user",
 			expectError:  false,
 			validateFields: func(t *testing.T, app *api.AppDefinition) {
-				if app.Subdomain != "test" {
-					t.Errorf("Expected subdomain 'test', got %s", app.Subdomain)
+				if len(app.Listeners) == 0 {
+					t.Error("Expected listeners to be defined")
 				}
-            if len(app.Listeners) == 0 {
-                t.Error("Expected listeners to be defined")
-            }
-            found := false
-            for _, l := range app.Listeners {
-                if l.Name == "web" && l.GuestPort == 80 {
-                    found = true
-                }
-            }
-            if !found { t.Error("Expected web listener with guest_port 80") }
+				found := false
+				for _, l := range app.Listeners {
+					if l.Name == "web" && l.GuestPort == 80 {
+						found = true
+					}
+				}
+				if !found {
+					t.Error("Expected web listener with guest_port 80")
+				}
 				if app.Storage == nil || app.Storage.Persistent == nil {
 					t.Error("Expected persistent storage to be defined")
 				}
@@ -77,14 +73,14 @@ func TestParseAppDefinition(t *testing.T) {
 
 			// Parse the app definition
 			app, err := ParseAppDefinition(content)
-			
+
 			if tt.expectError {
 				if err == nil {
 					t.Fatalf("Expected error but got none")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -93,7 +89,7 @@ func TestParseAppDefinition(t *testing.T) {
 			if app.Name != tt.expectedName {
 				t.Errorf("Expected name %s, got %s", tt.expectedName, app.Name)
 			}
-			
+
 			if tt.expectedImage != "" && app.Image != tt.expectedImage {
 				t.Errorf("Expected image %s, got %s", tt.expectedImage, app.Image)
 			}
@@ -165,15 +161,15 @@ func TestValidateAppDefinition(t *testing.T) {
 		expectError bool
 		expectedErr string
 	}{
-        {
-            name: "valid minimal app",
-            app: &api.AppDefinition{
-                Name:  "test-app",
-                Image: "nginx:latest",
-                Listeners: []api.AppListener{{Name:"web", GuestPort:80}},
-            },
-            expectError: false,
-        },
+		{
+			name: "valid minimal app",
+			app: &api.AppDefinition{
+				Name:      "test-app",
+				Image:     "nginx:latest",
+				Listeners: []api.AppListener{{Name: "web", GuestPort: 80}},
+			},
+			expectError: false,
+		},
 		{
 			name:        "empty name",
 			app:         &api.AppDefinition{Image: "nginx:latest"},
@@ -208,25 +204,25 @@ func TestValidateAppDefinition(t *testing.T) {
 			expectError: true,
 			expectedErr: "cannot specify both image and build",
 		},
-        {
-            name: "invalid listener port",
-            app: &api.AppDefinition{
-                Name:  "test-app",
-                Image: "nginx:latest",
-                Listeners: []api.AppListener{{Name:"web", GuestPort:0}},
-            },
-            expectError: true,
-            expectedErr: "guest_port must be between 1 and 65535",
-        },
+		{
+			name: "invalid listener port",
+			app: &api.AppDefinition{
+				Name:      "test-app",
+				Image:     "nginx:latest",
+				Listeners: []api.AppListener{{Name: "web", GuestPort: 0}},
+			},
+			expectError: true,
+			expectedErr: "guest_port must be between 1 and 65535",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set defaults before validation (like the parser does)
 			SetDefaults(tt.app)
-			
+
 			err := ValidateAppDefinition(tt.app)
-			
+
 			if tt.expectError {
 				if err == nil {
 					t.Fatalf("Expected error but got none")
@@ -245,12 +241,12 @@ func TestValidateAppDefinition(t *testing.T) {
 
 // Helper function to check if string contains substring
 func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && 
-		   (s == substr || 
-			len(s) > len(substr) && 
-			(s[:len(substr)] == substr || 
-			 s[len(s)-len(substr):] == substr ||
-			 containsSubstring(s[1:len(s)-1], substr)))
+	return len(s) >= len(substr) &&
+		(s == substr ||
+			len(s) > len(substr) &&
+				(s[:len(substr)] == substr ||
+					s[len(s)-len(substr):] == substr ||
+					containsSubstring(s[1:len(s)-1], substr)))
 }
 
 func containsSubstring(s, substr string) bool {
@@ -276,10 +272,6 @@ func TestSetDefaults(t *testing.T) {
 
 	if app.Type != "user" {
 		t.Errorf("Expected default type 'user', got %s", app.Type)
-	}
-	
-	if app.Subdomain != "test-app" {
-		t.Errorf("Expected default subdomain 'test-app', got %s", app.Subdomain)
 	}
 }
 
@@ -337,21 +329,21 @@ func TestLargeContentHandling(t *testing.T) {
 // TestReservedNames tests that reserved app names are rejected
 func TestReservedNames(t *testing.T) {
 	reservedNames := []string{"api", "www", "admin", "root", "system", "piccolo"}
-	
+
 	for _, name := range reservedNames {
 		t.Run(name, func(t *testing.T) {
 			app := &api.AppDefinition{
 				Name:  name,
 				Image: "nginx:latest",
 			}
-			
+
 			SetDefaults(app)
 			err := ValidateAppDefinition(app)
-			
+
 			if err == nil {
 				t.Fatalf("Expected error for reserved name '%s' but got none", name)
 			}
-			
+
 			if !containsString(err.Error(), "reserved") {
 				t.Errorf("Expected error about reserved name, got %q", err.Error())
 			}
@@ -361,7 +353,7 @@ func TestReservedNames(t *testing.T) {
 
 // TestMalformedYAML tests handling of malformed YAML
 func TestMalformedYAML(t *testing.T) {
-malformedYAML := `name: test
+	malformedYAML := `name: test
 image: nginx
 listeners:
   - name: web
@@ -371,7 +363,7 @@ listeners:
 	if err == nil {
 		t.Fatal("Expected error for malformed YAML but got none")
 	}
-	
+
 	if !containsString(err.Error(), "failed to parse YAML") {
 		t.Errorf("Expected YAML parsing error, got %q", err.Error())
 	}

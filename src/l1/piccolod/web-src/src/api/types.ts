@@ -2374,7 +2374,6 @@ export interface components {
             id?: string;
             name?: string;
             image?: string;
-            subdomain?: string;
             type?: string;
             /** @enum {string} */
             status?: "running" | "stopped" | "error";
@@ -2390,12 +2389,13 @@ export interface components {
         };
         ServiceEndpoint: {
             app?: string;
-            subdomain?: string;
             name?: string;
             guest_port?: number;
             /** @description Port bound on 127.0.0.1 for LAN */
             host_port?: number;
-            public_port?: number; scheme?: string;
+            public_port?: number;
+            /** @description Explicit ports advertised on the remote listener hostname; defaults to [80, 443]. */
+            remote_ports?: number[];
             flow?: string;
             protocol?: string;
             middleware?: Record<string, never>[];

@@ -292,16 +292,16 @@ func (s *GinServer) handleGinServicesAll(c *gin.Context) {
 	out := make([]gin.H, 0, len(eps))
 	for _, ep := range eps {
 		out = append(out, gin.H{
-			"app":         ep.App,
-			"subdomain":   ep.Subdomain,
-			"name":        ep.Name,
-			"guest_port":  ep.GuestPort,
-			"host_port":   ep.HostBind,
-			"public_port": ep.PublicPort,
-			"flow":        ep.Flow,
-			"protocol":    ep.Protocol,
-			"middleware":  ep.Middleware,
-			"scheme":      determineScheme(ep.Flow, ep.Protocol),
+			"app":          ep.App,
+			"name":         ep.Name,
+			"guest_port":   ep.GuestPort,
+			"host_port":    ep.HostBind,
+			"public_port":  ep.PublicPort,
+			"remote_ports": ep.RemotePorts,
+			"flow":         ep.Flow,
+			"protocol":     ep.Protocol,
+			"middleware":   ep.Middleware,
+			"scheme":       determineScheme(ep.Flow, ep.Protocol),
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"services": out})
@@ -318,16 +318,16 @@ func (s *GinServer) handleGinServicesByApp(c *gin.Context) {
 	out := make([]gin.H, 0, len(eps))
 	for _, ep := range eps {
 		out = append(out, gin.H{
-			"app":         ep.App,
-			"subdomain":   ep.Subdomain,
-			"name":        ep.Name,
-			"guest_port":  ep.GuestPort,
-			"host_port":   ep.HostBind,
-			"public_port": ep.PublicPort,
-			"flow":        ep.Flow,
-			"protocol":    ep.Protocol,
-			"middleware":  ep.Middleware,
-			"scheme":      determineScheme(ep.Flow, ep.Protocol),
+			"app":          ep.App,
+			"name":         ep.Name,
+			"guest_port":   ep.GuestPort,
+			"host_port":    ep.HostBind,
+			"public_port":  ep.PublicPort,
+			"remote_ports": ep.RemotePorts,
+			"flow":         ep.Flow,
+			"protocol":     ep.Protocol,
+			"middleware":   ep.Middleware,
+			"scheme":       determineScheme(ep.Flow, ep.Protocol),
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"services": out})

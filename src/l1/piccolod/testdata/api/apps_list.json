@@ -4,27 +4,32 @@
       "id": "vaultwarden",
       "name": "vaultwarden",
       "image": "vaultwarden/server:1.30.5",
-      "subdomain": "vault",
       "type": "container",
       "status": "running",
       "volumes": [
-        { "container": "/data", "host": "/var/piccolo/storage/vaultwarden/data" }
+        {
+          "container": "/data",
+          "host": "/var/piccolo/storage/vaultwarden/data"
+        }
       ],
-      "environment": { "ADMIN_TOKEN": "<redacted>" }
+      "environment": {
+        "ADMIN_TOKEN": "<redacted>"
+      }
     },
     {
       "id": "gitea",
       "name": "gitea",
       "image": "gitea/gitea:1.21",
-      "subdomain": "git",
       "type": "container",
       "status": "running",
       "volumes": [
-        { "container": "/data", "host": "/var/piccolo/storage/gitea/data" }
+        {
+          "container": "/data",
+          "host": "/var/piccolo/storage/gitea/data"
+        }
       ],
       "environment": {}
     }
   ],
   "message": "Found 2 apps"
 }
-

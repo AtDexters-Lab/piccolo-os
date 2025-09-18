@@ -1,7 +1,6 @@
 name: simple-nginx-integration
 image: docker.io/library/nginx:alpine
 type: user
-subdomain: nginx-test
 listeners:
   - name: web
     guest_port: 80

@@ -39,8 +39,15 @@ func NewServiceManager() *ServiceManager {
 	}
 }
 
+func defaultRemotePorts(listener api.AppListener) []int {
+	if len(listener.RemotePorts) == 0 {
+		return []int{80, 443}
+	}
+	return append([]int(nil), listener.RemotePorts...)
+}
+
 // RestoreFromPodman rebuilds proxies for an app using existing host-bind ports.
-func (m *ServiceManager) RestoreFromPodman(appName, subdomain string, listeners []api.AppListener, hostByGuest map[int]int) ([]ServiceEndpoint, error) {
+func (m *ServiceManager) RestoreFromPodman(appName string, listeners []api.AppListener, hostByGuest map[int]int) ([]ServiceEndpoint, error) {
 	// Stop any existing proxies first
 	m.RemoveApp(appName)
 
@@ -67,15 +74,15 @@ func (m *ServiceManager) RestoreFromPodman(appName, subdomain string, listeners 
 			return endpoints, err
 		}
 		ep := ServiceEndpoint{
-			App:        appName,
-			Subdomain:  subdomain,
-			Name:       l.Name,
-			GuestPort:  l.GuestPort,
-			HostBind:   host,
-			PublicPort: public,
-			Flow:       l.Flow,
-			Protocol:   l.Protocol,
-			Middleware: l.Middleware,
+			App:         appName,
+			Name:        l.Name,
+			GuestPort:   l.GuestPort,
+			HostBind:    host,
+			PublicPort:  public,
+			Flow:        l.Flow,
+			Protocol:    l.Protocol,
+			Middleware:  l.Middleware,
+			RemotePorts: defaultRemotePorts(l),
 		}
 		registry[l.Name] = ep
 		endpoints = append(endpoints, ep)
@@ -89,7 +96,7 @@ func (m *ServiceManager) RestoreFromPodman(appName, subdomain string, listeners 
 }
 
 // AllocateForApp allocates ports for all listeners of an app and starts proxies
-func (m *ServiceManager) AllocateForApp(appName, subdomain string, listeners []api.AppListener) ([]ServiceEndpoint, error) {
+func (m *ServiceManager) AllocateForApp(appName string, listeners []api.AppListener) ([]ServiceEndpoint, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -101,15 +108,15 @@ func (m *ServiceManager) AllocateForApp(appName, subdomain string, listeners []a
 			return nil, err
 		}
 		ep := ServiceEndpoint{
-			App:        appName,
-			Subdomain:  subdomain,
-			Name:       l.Name,
-			GuestPort:  l.GuestPort,
-			HostBind:   hb,
-			PublicPort: pp,
-			Flow:       l.Flow,
-			Protocol:   l.Protocol,
-			Middleware: l.Middleware,
+			App:         appName,
+			Name:        l.Name,
+			GuestPort:   l.GuestPort,
+			HostBind:    hb,
+			PublicPort:  pp,
+			Flow:        l.Flow,
+			Protocol:    l.Protocol,
+			Middleware:  l.Middleware,
+			RemotePorts: defaultRemotePorts(l),
 		}
 		endpoints = append(endpoints, ep)
 		if _, ok := m.registry[appName]; !ok {
@@ -305,7 +312,7 @@ type ReconcileResult struct {
 }
 
 // Reconcile synchronizes listeners for an app in-place. Returns final endpoints and whether container changes are required.
-func (m *ServiceManager) Reconcile(appName, subdomain string, listeners []api.AppListener) (ReconcileResult, bool, error) {
+func (m *ServiceManager) Reconcile(appName string, listeners []api.AppListener) (ReconcileResult, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -326,19 +333,15 @@ func (m *ServiceManager) Reconcile(appName, subdomain string, listeners []api.Ap
 			// Detect guest port change
 			if ep.GuestPort != l.GuestPort {
 				containerChange = true
-				result.GuestPortChanged = append(result.GuestPortChanged, struct{ Old, New ServiceEndpoint }{Old: ep, New: ServiceEndpoint{App: appName, Subdomain: subdomain, Name: l.Name, GuestPort: l.GuestPort, HostBind: ep.HostBind, PublicPort: ep.PublicPort, Flow: l.Flow, Protocol: l.Protocol, Middleware: l.Middleware}})
+				result.GuestPortChanged = append(result.GuestPortChanged, struct{ Old, New ServiceEndpoint }{Old: ep, New: ServiceEndpoint{App: appName, Name: l.Name, GuestPort: l.GuestPort, HostBind: ep.HostBind, PublicPort: ep.PublicPort, Flow: l.Flow, Protocol: l.Protocol, Middleware: l.Middleware, RemotePorts: defaultRemotePorts(l)}})
 			}
 			ep.GuestPort = l.GuestPort
-			if ep.Subdomain == "" {
-				ep.Subdomain = subdomain
-			} else {
-				ep.Subdomain = subdomain
-			}
 			// Only restart proxy if proxy-related fields changed
 			proxyChanged := ep.Flow != l.Flow || ep.Protocol != l.Protocol || !middlewareEqual(ep.Middleware, l.Middleware)
 			ep.Flow = l.Flow
 			ep.Protocol = l.Protocol
 			ep.Middleware = l.Middleware
+			ep.RemotePorts = defaultRemotePorts(l)
 			newMap[l.Name] = ep
 			if proxyChanged {
 				m.proxyManager.StopPort(ep.PublicPort)
@@ -352,15 +355,15 @@ func (m *ServiceManager) Reconcile(appName, subdomain string, listeners []api.Ap
 				return ReconcileResult{}, false, err
 			}
 			ep := ServiceEndpoint{
-				App:        appName,
-				Subdomain:  subdomain,
-				Name:       l.Name,
-				GuestPort:  l.GuestPort,
-				HostBind:   hb,
-				PublicPort: pp,
-				Flow:       l.Flow,
-				Protocol:   l.Protocol,
-				Middleware: l.Middleware,
+				App:         appName,
+				Name:        l.Name,
+				GuestPort:   l.GuestPort,
+				HostBind:    hb,
+				PublicPort:  pp,
+				Flow:        l.Flow,
+				Protocol:    l.Protocol,
+				Middleware:  l.Middleware,
+				RemotePorts: defaultRemotePorts(l),
 			}
 			newMap[l.Name] = ep
 			m.proxyManager.StartListener(ep)

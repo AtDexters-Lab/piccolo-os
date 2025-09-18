@@ -119,14 +119,12 @@ Applications are defined in `app.yaml` files with:
 **Legacy Structure (current):**
 - `name` - Application identifier
 - `image` - Container image
-- `subdomain` - For remote access routing
 - `type` - `system` or `user` (determines boot order)
 - `ports` - Port mappings (host:container)
 
 **Service-Oriented Structure (planned):**
 ```yaml
 name: myapp
-subdomain: myapp
 listeners:
   - name: frontend        # Service name
     guest_port: 80        # Port inside container

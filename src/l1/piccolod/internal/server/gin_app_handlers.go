@@ -184,17 +184,17 @@ func (s *GinServer) handleGinAppGet(c *gin.Context) {
 	serviceStatus := make([]gin.H, 0, len(services))
 	for _, ep := range services {
 		serviceStatus = append(serviceStatus, gin.H{
-			"app":         ep.App,
-			"subdomain":   ep.Subdomain,
-			"name":        ep.Name,
-			"guest_port":  ep.GuestPort,
-			"host_port":   ep.HostBind,
-			"public_port": ep.PublicPort,
-			"flow":        ep.Flow,
-			"protocol":    ep.Protocol,
-			"middleware":  ep.Middleware,
-			"scheme":      determineScheme(ep.Flow, ep.Protocol),
-					})
+			"app":          ep.App,
+			"name":         ep.Name,
+			"guest_port":   ep.GuestPort,
+			"host_port":    ep.HostBind,
+			"public_port":  ep.PublicPort,
+			"remote_ports": ep.RemotePorts,
+			"flow":         ep.Flow,
+			"protocol":     ep.Protocol,
+			"middleware":   ep.Middleware,
+			"scheme":       determineScheme(ep.Flow, ep.Protocol),
+		})
 	}
 	writeGinSuccess(c, gin.H{"app": appInstance, "services": serviceStatus}, "")
 }

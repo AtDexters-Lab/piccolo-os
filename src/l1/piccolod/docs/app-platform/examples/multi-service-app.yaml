@@ -16,15 +16,12 @@
 # Layer 2: Security bindings (127.0.0.1:auto-allocated)
 # Layer 3: Public proxy listeners (0.0.0.0:auto-allocated) 
 #
-# Access via: https://shop.user.piccolospace.com:8080 (storefront)
-#            https://shop.user.piccolospace.com:8443 (admin)
-#            etc.
+# Access via: https://storefront.<user-domain> (defaults to 80/443)
+#            https://admin-panel.<user-domain>
+#            https://api-backend.<user-domain>:9443 (if remote_ports include 9443)
 
 name: e-commerce-platform
 image: my-company/ecommerce:v2.1
-
-# Global subdomain for the main service
-subdomain: shop
 
 listeners:
   # =============================================================================
@@ -34,6 +31,7 @@ listeners:
     guest_port: 8080       # App serves on port 8080 (Layer 1)
     flow: tcp              # Piccolo handles TLS termination
     protocol: http         # Enable HTTP-specific processing
+    remote_ports: [80, 443]
     protocol_middleware:
       - name: public_rate_limit
         params:
@@ -63,6 +61,7 @@ listeners:
     guest_port: 8080       # Same container, different routes
     flow: tcp              # Piccolo handles TLS
     protocol: http
+    remote_ports: [443]
     protocol_middleware:
       - name: enforce_private_auth
         params:
@@ -98,6 +97,7 @@ listeners:
     guest_port: 9443       # App handles TLS directly
     flow: tls              # Direct passthrough - zero processing overhead
     protocol: http         # Hint for monitoring only
+    remote_ports: [9443]
     # No middleware - app optimizes its own TLS and auth for performance
 
   # =============================================================================
@@ -107,6 +107,7 @@ listeners:
     guest_port: 7000
     flow: tls              # Payment processor needs direct TLS
     protocol: http
+    remote_ports: [7000]
     # External payment processors connect here
     # App validates webhook signatures internally
 
@@ -117,6 +118,7 @@ listeners:
     guest_port: 6000
     flow: tcp              # Piccolo handles TLS for WebSocket
     protocol: websocket    # Enable WebSocket-specific optimizations
+    remote_ports: [6000]
     protocol_middleware:
       - name: websocket_rate_limit
         params:
