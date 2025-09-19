@@ -453,11 +453,10 @@
         device_secret: deviceSecret,
         tld,
         portal_hostname: portalHost,
-        hostname: portalHost
       };
 
       const payload = solver === 'dns-01'
-        ? { ...basePayload, provider: dnsForm.provider, credentials: dnsForm.credentials }
+        ? { ...basePayload, dns_provider: dnsForm.provider, dns_credentials: dnsForm.credentials }
         : basePayload;
 
       await apiProd('/remote/configure', {

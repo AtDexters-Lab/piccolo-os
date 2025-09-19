@@ -22,10 +22,12 @@ func TestRemote_Configure_Status_Disable_Rotate(t *testing.T) {
 	}
 
 	// Configure
-	payload := map[string]string{
-		"endpoint":  "https://nexus.example.com",
-		"device_id": "dev123",
-		"hostname":  "host.example.com",
+	payload := map[string]interface{}{
+		"endpoint":        "wss://nexus.example.com/connect",
+		"device_secret":   "super-secret",
+		"solver":          "http-01",
+		"tld":             "example.com",
+		"portal_hostname": "portal.example.com",
 	}
 	body, _ := json.Marshal(payload)
 	w = httptest.NewRecorder()
@@ -46,14 +48,22 @@ func TestRemote_Configure_Status_Disable_Rotate(t *testing.T) {
 		t.Fatalf("status2 %d", w.Code)
 	}
 	var st struct {
-		Enabled   bool    `json:"enabled"`
-		PublicURL *string `json:"public_url"`
+		Enabled        bool   `json:"enabled"`
+		PortalHostname string `json:"portal_hostname"`
+		TLD            string `json:"tld"`
+		State          string `json:"state"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
 		t.Fatal(err)
 	}
-	if !st.Enabled || st.PublicURL == nil {
-		t.Fatalf("expected enabled remote with url")
+	if !st.Enabled {
+		t.Fatalf("expected enabled remote")
+	}
+	if st.PortalHostname != "portal.example.com" {
+		t.Fatalf("unexpected portal hostname %s", st.PortalHostname)
+	}
+	if st.TLD != "example.com" {
+		t.Fatalf("unexpected tld %s", st.TLD)
 	}
 
 	// Rotate
@@ -63,6 +73,15 @@ func TestRemote_Configure_Status_Disable_Rotate(t *testing.T) {
 	srv.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("rotate %d", w.Code)
+	}
+	var rotateResp struct {
+		DeviceSecret string `json:"device_secret"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &rotateResp); err != nil {
+		t.Fatalf("rotate decode: %v", err)
+	}
+	if rotateResp.DeviceSecret == "" {
+		t.Fatalf("expected rotated secret in response")
 	}
 
 	// Disable

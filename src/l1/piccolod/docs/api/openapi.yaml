@@ -396,25 +396,210 @@ paths:
             schema:
               type: object
               properties:
-                endpoint: { type: string }
-                device_id: { type: string }
-                device_secret: { type: string }
-                hostname: { type: string }
-                acme_directory: { type: string, description: ACME directory URL for staging/tests }
+                endpoint: { type: string, description: Nexus websocket endpoint (wss://...) }
+                device_secret: { type: string, description: Shared JWT signing secret for backend clients }
+                solver:
+                  type: string
+                  enum: [http-01, dns-01]
+                tld: { type: string, description: Piccolo remote domain (e.g. example.com or piccolo.example.com) }
+                portal_hostname: { type: string, description: Optional explicit portal hostname }
+                dns_provider: { type: string, description: Required when solver=dns-01 }
+                dns_credentials:
+                  type: object
+                  additionalProperties: { type: string }
+              required: [endpoint, tld]
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
         '400': { description: Bad Request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '429': { description: Too Many Requests }
   /remote/disable:
     post:
       summary: Disable remote access
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
   /remote/rotate:
     post:
       summary: Rotate remote credentials
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_secret: { type: string }
+  /remote/preflight:
+    post:
+      summary: Run remote preflight validation
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ran_at: { type: string, format: date-time }
+                  checks:
+                    type: array
+                    items: { $ref: '#/components/schemas/RemotePreflightCheck' }
+        '400': { description: Bad Request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /remote/aliases:
+    get:
+      summary: List remote aliases
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  aliases:
+                    type: array
+                    items: { $ref: '#/components/schemas/RemoteAlias' }
+    post:
+      summary: Add a remote alias
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hostname: { type: string }
+                listener: { type: string }
+              required: [hostname]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteAlias' }
+  /remote/aliases/{id}:
+    delete:
+      summary: Remove remote alias
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+  /remote/certificates:
+    get:
+      summary: List issued certificates
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  certificates:
+                    type: array
+                    items: { $ref: '#/components/schemas/RemoteCertificate' }
+  /remote/certificates/{id}/renew:
+    post:
+      summary: Trigger manual certificate renewal
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+  /remote/events:
+    get:
+      summary: Remote activity log
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/RemoteEvent' }
+  /remote/dns/providers:
+    get:
+      summary: Supported DNS-01 providers
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items: { $ref: '#/components/schemas/RemoteDNSProvider' }
+  /remote/nexus-guide:
+    get:
+      summary: Nexus provisioning helper
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteGuideInfo' }
+  /remote/nexus-guide/verify:
+    post:
+      summary: Mark guide as verified
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                endpoint: { type: string }
+                tld: { type: string }
+                portal_hostname: { type: string }
+                jwt_secret: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified_at: { type: string, format: date-time }
+                  message: { type: string }
 
   /backup/list:
     get:
@@ -804,13 +989,100 @@ components:
       type: object
       properties:
         enabled: { type: boolean }
-        public_url: { type: string, nullable: true }
+        state: { type: string }
+        solver: { type: string }
+        endpoint: { type: string, nullable: true }
+        tld: { type: string, nullable: true }
+        portal_hostname: { type: string, nullable: true }
+        latency_ms: { type: integer, nullable: true }
+        last_handshake: { type: string, format: date-time, nullable: true }
+        next_renewal: { type: string, format: date-time, nullable: true }
         issuer: { type: string, nullable: true }
         expires_at: { type: string, format: date-time, nullable: true }
-        next_renewal: { type: string, format: date-time, nullable: true }
         warnings:
           type: array
           items: { type: string }
+        guide_verified_at: { type: string, format: date-time, nullable: true }
+        listeners:
+          type: array
+          items: { $ref: '#/components/schemas/RemoteListener' }
+        aliases:
+          type: array
+          items: { $ref: '#/components/schemas/RemoteAlias' }
+        certificates:
+          type: array
+          items: { $ref: '#/components/schemas/RemoteCertificate' }
+    RemoteListener:
+      type: object
+      properties:
+        name: { type: string }
+        remote_host: { type: string }
+    RemoteAlias:
+      type: object
+      properties:
+        id: { type: string }
+        hostname: { type: string }
+        listener: { type: string }
+        status: { type: string }
+        last_checked: { type: string, format: date-time, nullable: true }
+        message: { type: string, nullable: true }
+    RemoteCertificate:
+      type: object
+      properties:
+        id: { type: string }
+        domains:
+          type: array
+          items: { type: string }
+        solver: { type: string, nullable: true }
+        issued_at: { type: string, format: date-time, nullable: true }
+        expires_at: { type: string, format: date-time, nullable: true }
+        next_renewal: { type: string, format: date-time, nullable: true }
+        status: { type: string, nullable: true }
+        failure_reason: { type: string, nullable: true }
+    RemotePreflightCheck:
+      type: object
+      properties:
+        name: { type: string }
+        status: { type: string }
+        detail: { type: string, nullable: true }
+        next_step: { type: string, nullable: true }
+    RemoteEvent:
+      type: object
+      properties:
+        ts: { type: string, format: date-time }
+        level: { type: string }
+        source: { type: string }
+        message: { type: string }
+        next_step: { type: string, nullable: true }
+    RemoteDNSProviderField:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+        secret: { type: boolean }
+        placeholder: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+    RemoteDNSProvider:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        docs_url: { type: string, nullable: true }
+        fields:
+          type: array
+          items: { $ref: '#/components/schemas/RemoteDNSProviderField' }
+    RemoteGuideInfo:
+      type: object
+      properties:
+        command: { type: string }
+        requirements:
+          type: array
+          items: { type: string }
+        notes:
+          type: array
+          items: { type: string }
+        docs_url: { type: string }
+        verified_at: { type: string, format: date-time, nullable: true }
     StorageMounts:
       type: object
       properties:

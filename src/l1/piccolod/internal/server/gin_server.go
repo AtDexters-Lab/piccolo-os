@@ -242,6 +242,16 @@ func (s *GinServer) setupGinRoutes() {
 		authed.POST("/remote/configure", s.handleRemoteConfigure)
 		authed.POST("/remote/disable", s.handleRemoteDisable)
 		authed.POST("/remote/rotate", s.handleRemoteRotate)
+		authed.POST("/remote/preflight", s.handleRemotePreflight)
+		authed.GET("/remote/aliases", s.handleRemoteAliasesList)
+		authed.POST("/remote/aliases", s.handleRemoteAliasesCreate)
+		authed.DELETE("/remote/aliases/:id", s.handleRemoteAliasesDelete)
+		authed.GET("/remote/certificates", s.handleRemoteCertificatesList)
+		authed.POST("/remote/certificates/:id/renew", s.handleRemoteCertificateRenew)
+		authed.GET("/remote/events", s.handleRemoteEvents)
+		authed.GET("/remote/dns/providers", s.handleRemoteDNSProviders)
+		authed.GET("/remote/nexus-guide", s.handleRemoteGuideInfo)
+		authed.POST("/remote/nexus-guide/verify", s.handleRemoteGuideVerify)
 
 		// Catalog (read-only) and services require auth
 		authed.GET("/catalog", s.handleGinCatalog)
