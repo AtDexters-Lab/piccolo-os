@@ -1,1 +1,0 @@
-/home/abhishek-borar/projects/piccolo/org-context/02_product/piccolo_os_prd.md
