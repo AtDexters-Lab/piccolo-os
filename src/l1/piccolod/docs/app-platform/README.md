@@ -65,13 +65,11 @@ Runtime:
 
 ## Examples by Use Case
 
-| Use Case | Example | Key Features |
-|----------|---------|--------------|
-| **Simple app** | [minimal.yaml](./examples/minimal.yaml) | Just name + image |
-| **Custom code** | [custom-build.yaml](./examples/custom-build.yaml) | Inline Containerfile |
-| **Database** | [database.yaml](./examples/database.yaml) | System service, no internet |
-| **Development** | [development.yaml](./examples/development.yaml) | Filesystem persistence |
-| **Web service** | [web-service.yaml](./examples/web-service.yaml) | Health checks, dependencies |
+| Use Case | Example | Highlights |
+|----------|---------|------------|
+| **Custom code** | [custom-build.yaml](./examples/custom-build.yaml) | Inline Containerfile + build args |
+| **Developer workstation** | [development.yaml](./examples/development.yaml) | Multiple listeners, persistent volumes |
+| **Web service** | [web-service.yaml](./examples/web-service.yaml) | Health checks and remote publish |
 
 ## API Integration
 
@@ -103,4 +101,4 @@ The app platform is implemented in the `piccolod` daemon using:
 - **SQLite** for app metadata persistence
 - **Federated storage** for cross-device data sync
 
-See [../../CLAUDE.md](../../CLAUDE.md) for development setup and architecture details.
+See [../../pre-beta-prd.md](../../pre-beta-prd.md) for current scope and architecture notes.

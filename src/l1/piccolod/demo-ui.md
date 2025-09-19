@@ -38,7 +38,7 @@ A **clean, functional web interface** that showcases Piccolo OS's unique capabil
 
 3. **Try Installing an App**:
    - Click "➕ Install App"
-   - Paste contents from `example-apps/nginx.yaml`
+   - Paste contents from `docs/app-platform/examples/web-service.yaml`
    - Watch it install and show the global URL
 
 ## Key Files Created
