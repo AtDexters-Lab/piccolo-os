@@ -1,10 +1,12 @@
 package remote
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -26,6 +28,7 @@ type Config struct {
 	ExpiresAt       time.Time         `json:"expires_at,omitempty"`
 	NextRenewal     time.Time         `json:"next_renewal,omitempty"`
 	LastHandshake   time.Time         `json:"last_handshake,omitempty"`
+	LatencyMS       int               `json:"latency_ms,omitempty"`
 	GuideVerifiedAt *time.Time        `json:"guide_verified_at,omitempty"`
 	LastPreflight   *time.Time        `json:"last_preflight,omitempty"`
 	Aliases         []Alias           `json:"aliases,omitempty"`
@@ -108,13 +111,29 @@ type PreflightResult struct {
 	RanAt  time.Time        `json:"ran_at"`
 }
 
+type dialer interface {
+	DialTimeout(network, address string, timeout time.Duration) (net.Conn, error)
+}
+
+type resolver interface {
+	LookupHost(ctx context.Context, host string) ([]string, error)
+	LookupCNAME(ctx context.Context, host string) (string, error)
+}
+
 type Manager struct {
-	dir  string
-	path string
-	cfg  *Config
+	dir      string
+	path     string
+	cfg      *Config
+	dialer   dialer
+	resolver resolver
+	now      func() time.Time
 }
 
 func NewManager(stateDir string) (*Manager, error) {
+	return newManagerWithDeps(stateDir, netDialer{}, netResolver{}, func() time.Time { return time.Now().UTC() })
+}
+
+func newManagerWithDeps(stateDir string, d dialer, r resolver, now func() time.Time) (*Manager, error) {
 	if stateDir == "" {
 		stateDir = "/var/lib/piccolod"
 	}
@@ -122,9 +141,40 @@ func NewManager(stateDir string) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	m := &Manager{dir: dir, path: filepath.Join(dir, "config.json")}
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
+	m := &Manager{
+		dir:      dir,
+		path:     filepath.Join(dir, "config.json"),
+		dialer:   d,
+		resolver: r,
+		now:      now,
+	}
 	_ = m.load()
 	return m, nil
+}
+
+type netDialer struct{}
+
+type persistentConn struct{ net.Conn }
+
+func (netDialer) DialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
+	var d net.Dialer
+	d.Timeout = timeout
+	return d.Dial(network, address)
+}
+
+type netResolver struct{}
+
+func (netResolver) LookupHost(ctx context.Context, host string) ([]string, error) {
+	var r net.Resolver
+	return r.LookupHost(ctx, host)
+}
+
+func (netResolver) LookupCNAME(ctx context.Context, host string) (string, error) {
+	var r net.Resolver
+	return r.LookupCNAME(ctx, host)
 }
 
 func (m *Manager) load() error {
@@ -144,7 +194,6 @@ func (m *Manager) save(cfg *Config) error {
 	if cfg == nil {
 		return errors.New("config cannot be nil")
 	}
-	// ensure deterministic ordering for credentials map
 	if cfg.DNSCredentials == nil {
 		cfg.DNSCredentials = map[string]string{}
 	}
@@ -166,47 +215,32 @@ func (m *Manager) currentConfig() *Config {
 	return m.cfg
 }
 
-// Status returns the synthesized remote status for the API.
 func (m *Manager) Status() Status {
 	cfg := m.currentConfig()
-	if !cfg.Enabled {
-		state := "disabled"
-		if cfg.Endpoint != "" && cfg.DeviceSecret != "" && cfg.TLD != "" {
-			state = "provisioning"
-		}
-		return Status{
-			Enabled:         cfg.Enabled,
-			State:           state,
-			Solver:          cfg.Solver,
-			Endpoint:        cfg.Endpoint,
-			TLD:             cfg.TLD,
-			PortalHostname:  cfg.PortalHostname,
-			GuideVerifiedAt: cfg.GuideVerifiedAt,
-			Listeners:       buildListeners(cfg),
-			Aliases:         cloneAliases(cfg.Aliases),
-			Certificates:    cloneCertificates(cfg.Certificates),
-			Warnings:        []string{},
-		}
-	}
-
 	warnings := computeWarnings(cfg)
-	state := "active"
-	if cfg.LastPreflight == nil {
-		state = "preflight_required"
-	} else if len(warnings) > 0 {
-		state = "warning"
-	}
-	if cfg.ExpiresAt.Before(time.Now()) {
-		state = "error"
+
+	var latency *int
+	if cfg.LatencyMS > 0 {
+		latency = intPtr(cfg.LatencyMS)
 	}
 
-	latency := intPtr(42) // placeholder latency until real metrics land
-	issuer := cfg.Issuer
-	exp := cfg.ExpiresAt
-	next := cfg.NextRenewal
+	state := "disabled"
+	if cfg.Enabled {
+		state = "active"
+		if cfg.LastPreflight == nil {
+			state = "preflight_required"
+		} else if len(warnings) > 0 {
+			state = "warning"
+		}
+		if !cfg.ExpiresAt.IsZero() && cfg.ExpiresAt.Before(m.now()) {
+			state = "error"
+		}
+	} else if cfg.Endpoint != "" || cfg.DeviceSecret != "" || cfg.TLD != "" {
+		state = "provisioning"
+	}
 
 	return Status{
-		Enabled:         true,
+		Enabled:         cfg.Enabled,
 		State:           state,
 		Solver:          cfg.Solver,
 		Endpoint:        cfg.Endpoint,
@@ -214,9 +248,9 @@ func (m *Manager) Status() Status {
 		PortalHostname:  cfg.PortalHostname,
 		LatencyMS:       latency,
 		LastHandshake:   timePtr(cfg.LastHandshake),
-		NextRenewal:     &next,
-		Issuer:          &issuer,
-		ExpiresAt:       &exp,
+		NextRenewal:     timePtr(cfg.NextRenewal),
+		Issuer:          stringPtr(cfg.Issuer),
+		ExpiresAt:       timePtr(cfg.ExpiresAt),
 		Warnings:        warnings,
 		GuideVerifiedAt: cfg.GuideVerifiedAt,
 		Listeners:       buildListeners(cfg),
@@ -268,7 +302,7 @@ func (m *Manager) Configure(req ConfigureRequest) error {
 		return errors.New("dns_provider required for dns-01")
 	}
 
-	now := time.Now().UTC()
+	now := m.now()
 	expires := now.Add(90 * 24 * time.Hour)
 	nextRenewal := now.Add(60 * 24 * time.Hour)
 
@@ -285,9 +319,9 @@ func (m *Manager) Configure(req ConfigureRequest) error {
 	cfg.ExpiresAt = expires
 	cfg.NextRenewal = nextRenewal
 	cfg.LastHandshake = now
+	cfg.LatencyMS = 0
 	cfg.LastPreflight = nil
-
-	cfg.Certificates = defaultCertificates(cfg)
+	cfg.Certificates = defaultCertificates(cfg, now)
 	cfg.Events = append(cfg.Events, Event{
 		Timestamp: now,
 		Level:     "info",
@@ -296,17 +330,14 @@ func (m *Manager) Configure(req ConfigureRequest) error {
 		NextStep:  "Run preflight",
 	})
 
-	if err := m.save(cfg); err != nil {
-		return err
-	}
-	return nil
+	return m.save(cfg)
 }
 
 // Disable switches remote access off but retains configuration.
 func (m *Manager) Disable() error {
 	cfg := m.currentConfig()
 	cfg.Enabled = false
-	now := time.Now().UTC()
+	now := m.now()
 	cfg.Events = append(cfg.Events, Event{
 		Timestamp: now,
 		Level:     "info",
@@ -325,7 +356,7 @@ func (m *Manager) Rotate() (string, error) {
 	newSecret := fmt.Sprintf("secret-%d", time.Now().UnixNano())
 	cfg.DeviceSecret = newSecret
 	cfg.Events = append(cfg.Events, Event{
-		Timestamp: time.Now().UTC(),
+		Timestamp: m.now(),
 		Level:     "info",
 		Source:    "remote",
 		Message:   "Remote device secret rotated",
@@ -351,9 +382,8 @@ func (m *Manager) AddAlias(listener, hostname string) (Alias, error) {
 		listener = "portal"
 	}
 	cfg := m.currentConfig()
-	id := fmt.Sprintf("alias-%d", time.Now().UnixNano()+rand.Int63n(1000))
 	alias := Alias{
-		ID:       id,
+		ID:       fmt.Sprintf("alias-%d", time.Now().UnixNano()+rand.Int63n(1000)),
 		Hostname: hostname,
 		Listener: listener,
 		Status:   "pending",
@@ -361,7 +391,7 @@ func (m *Manager) AddAlias(listener, hostname string) (Alias, error) {
 	}
 	cfg.Aliases = append(cfg.Aliases, alias)
 	cfg.Events = append(cfg.Events, Event{
-		Timestamp: time.Now().UTC(),
+		Timestamp: m.now(),
 		Level:     "info",
 		Source:    "remote",
 		Message:   fmt.Sprintf("Alias %s queued for listener %s", hostname, listener),
@@ -388,7 +418,7 @@ func (m *Manager) RemoveAlias(id string) error {
 	removed := cfg.Aliases[idx]
 	cfg.Aliases = append(cfg.Aliases[:idx], cfg.Aliases[idx+1:]...)
 	cfg.Events = append(cfg.Events, Event{
-		Timestamp: time.Now().UTC(),
+		Timestamp: m.now(),
 		Level:     "info",
 		Source:    "remote",
 		Message:   fmt.Sprintf("Alias %s removed", removed.Hostname),
@@ -406,12 +436,12 @@ func (m *Manager) RenewCertificate(id string) error {
 	cfg := m.currentConfig()
 	for i := range cfg.Certificates {
 		if cfg.Certificates[i].ID == id {
-			now := time.Now().UTC()
+			now := m.now()
 			exp := now.Add(90 * 24 * time.Hour)
 			next := now.Add(60 * 24 * time.Hour)
-			cfg.Certificates[i].IssuedAt = &now
-			cfg.Certificates[i].ExpiresAt = &exp
-			cfg.Certificates[i].NextRenewal = &next
+			cfg.Certificates[i].IssuedAt = timePtr(now)
+			cfg.Certificates[i].ExpiresAt = timePtr(exp)
+			cfg.Certificates[i].NextRenewal = timePtr(next)
 			cfg.Certificates[i].Status = "ok"
 			cfg.Certificates[i].FailureReason = ""
 			cfg.Events = append(cfg.Events, Event{
@@ -426,30 +456,37 @@ func (m *Manager) RenewCertificate(id string) error {
 	return errors.New("certificate not found")
 }
 
-// RunPreflight performs a stubbed validation run.
+// RunPreflight performs validation checks for the remote configuration.
 func (m *Manager) RunPreflight() (PreflightResult, error) {
 	cfg := m.currentConfig()
-	if cfg.Endpoint == "" || cfg.TLD == "" {
+	if cfg.Endpoint == "" || cfg.TLD == "" || cfg.PortalHostname == "" {
 		return PreflightResult{}, errors.New("remote not configured")
 	}
-	now := time.Now().UTC()
-	checks := []PreflightCheck{
-		{Name: "Nexus endpoint reachable", Status: "pass"},
-		{Name: "DNS records", Status: "pass", Detail: fmt.Sprintf("CNAME *.%s → %s", cfg.TLD, extractHost(cfg.Endpoint))},
-		{Name: "ACME solver", Status: "pass", Detail: fmt.Sprintf("Using %s", strings.ToUpper(cfg.Solver))},
-	}
+
+	now := m.now()
+	var checks []PreflightCheck
+
+	endpointCheck := m.checkEndpoint(cfg)
+	checks = append(checks, endpointCheck)
+
+	dnsStatus, dnsDetail := m.checkDNS(cfg)
+	checks = append(checks, PreflightCheck{Name: "DNS records", Status: dnsStatus, Detail: dnsDetail})
+
+	checks = append(checks, PreflightCheck{Name: "ACME solver", Status: "pass", Detail: fmt.Sprintf("Using %s", strings.ToUpper(cfg.Solver))})
+
 	if len(cfg.Aliases) > 0 {
 		status := "pass"
-		detail := "All aliases pending verification"
+		detail := "All aliases verified"
 		for _, alias := range cfg.Aliases {
 			if alias.Status != "active" {
 				status = "warn"
-				detail = "One or more aliases still pending"
+				detail = "One or more aliases pending verification"
 				break
 			}
 		}
 		checks = append(checks, PreflightCheck{Name: "Alias coverage", Status: status, Detail: detail})
 	}
+
 	cfg.LastPreflight = &now
 	cfg.Events = append(cfg.Events, Event{
 		Timestamp: now,
@@ -466,14 +503,13 @@ func (m *Manager) RunPreflight() (PreflightResult, error) {
 // ListEvents returns the persisted remote-related events.
 func (m *Manager) ListEvents() []Event {
 	events := append([]Event(nil), m.currentConfig().Events...)
-	// order newest first for readability
 	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
 		events[i], events[j] = events[j], events[i]
 	}
 	return events
 }
 
-// MarkGuideVerified stores the helper verification timestamp and optional seed data.
+// GuideVerification carries helper verification metadata.
 type GuideVerification struct {
 	Endpoint       string `json:"endpoint"`
 	TLD            string `json:"tld"`
@@ -481,6 +517,7 @@ type GuideVerification struct {
 	JWTSecret      string `json:"jwt_secret"`
 }
 
+// MarkGuideVerified stores the helper verification timestamp and optional seed data.
 func (m *Manager) MarkGuideVerified(info GuideVerification) error {
 	cfg := m.currentConfig()
 	if info.Endpoint != "" {
@@ -495,7 +532,7 @@ func (m *Manager) MarkGuideVerified(info GuideVerification) error {
 	if info.PortalHostname != "" {
 		cfg.PortalHostname = normalizePortalHost(cfg.TLD, info.PortalHostname)
 	}
-	now := time.Now().UTC()
+	now := m.now()
 	cfg.GuideVerifiedAt = &now
 	cfg.Events = append(cfg.Events, Event{
 		Timestamp: now,
@@ -506,7 +543,7 @@ func (m *Manager) MarkGuideVerified(info GuideVerification) error {
 	return m.save(cfg)
 }
 
-// GuideInfo returns the static helper information along with verification metadata.
+// GuideInfo returns static helper information along with verification timestamp.
 type GuideInfo struct {
 	Command      string     `json:"command"`
 	Requirements []string   `json:"requirements"`
@@ -533,19 +570,75 @@ func (m *Manager) GuideInfo() GuideInfo {
 	}
 }
 
+func (m *Manager) checkEndpoint(cfg *Config) PreflightCheck {
+	host, port := endpointHostPort(cfg.Endpoint)
+	if host == "" {
+		return PreflightCheck{Name: "Nexus endpoint reachable", Status: "fail", Detail: "invalid endpoint"}
+	}
+	if port == "" {
+		port = "443"
+	}
+	address := net.JoinHostPort(host, port)
+	start := time.Now()
+	conn, err := m.dialer.DialTimeout("tcp", address, 5*time.Second)
+	if err != nil {
+		return PreflightCheck{Name: "Nexus endpoint reachable", Status: "fail", Detail: err.Error(), NextStep: "Verify firewall and DNS"}
+	}
+	latency := int(time.Since(start).Milliseconds())
+	_ = conn.Close()
+	cfg.LastHandshake = m.now()
+	cfg.LatencyMS = latency
+	return PreflightCheck{Name: "Nexus endpoint reachable", Status: "pass", Detail: fmt.Sprintf("Latency %d ms", latency)}
+}
+
+func (m *Manager) checkDNS(cfg *Config) (string, string) {
+	host := cfg.PortalHostname
+	if host == "" {
+		return "fail", "portal hostname not configured"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cname, cnameErr := m.resolver.LookupCNAME(ctx, host)
+	addresses, addrErr := m.resolver.LookupHost(ctx, host)
+
+	detail := fmt.Sprintf("%s resolves to %v", host, addresses)
+	if cnameErr == nil && cname != "" {
+		detail = fmt.Sprintf("%s CNAME %s", host, strings.TrimSuffix(cname, "."))
+	}
+
+	status := "pass"
+	if addrErr != nil {
+		status = "warn"
+		detail = fmt.Sprintf("portal host lookup failed: %v", addrErr)
+	}
+
+	if cfg.TLD != "" && cfg.PortalHostname != cfg.TLD {
+		sample := fmt.Sprintf("app.%s", cfg.TLD)
+		if _, err := m.resolver.LookupHost(ctx, sample); err != nil {
+			status = "warn"
+			detail = detail + "; wildcard host unresolved"
+		} else {
+			detail = detail + "; wildcard host resolves"
+		}
+	}
+	return status, detail
+}
+
 func buildListeners(cfg *Config) []ListenerSummary {
 	if cfg.PortalHostname == "" {
 		return []ListenerSummary{}
 	}
-	return []ListenerSummary{
-		{Name: "portal", RemoteHost: cfg.PortalHostname},
-	}
+	return []ListenerSummary{{Name: "portal", RemoteHost: cfg.PortalHostname}}
 }
 
 func computeWarnings(cfg *Config) []string {
-	warnings := []string{}
-	if cfg.NextRenewal.Before(time.Now().Add(7 * 24 * time.Hour)) {
+	var warnings []string
+	if !cfg.NextRenewal.IsZero() && cfg.NextRenewal.Before(time.Now().Add(7*24*time.Hour)) {
 		warnings = append(warnings, "Certificate renewal due soon")
+	}
+	if cfg.PortalHostname == "" {
+		warnings = append(warnings, "Portal hostname missing")
 	}
 	for _, alias := range cfg.Aliases {
 		if alias.Status != "active" {
@@ -555,34 +648,29 @@ func computeWarnings(cfg *Config) []string {
 	return warnings
 }
 
-func defaultCertificates(cfg *Config) []Certificate {
-	now := time.Now().UTC()
+func defaultCertificates(cfg *Config, now time.Time) []Certificate {
 	exp := now.Add(90 * 24 * time.Hour)
 	next := now.Add(60 * 24 * time.Hour)
-	wildcard := ""
-	if cfg.TLD != "" {
-		wildcard = fmt.Sprintf("*.%s", cfg.TLD)
-	}
 	certificates := []Certificate{}
 	if cfg.PortalHostname != "" {
 		certificates = append(certificates, Certificate{
 			ID:          "portal",
 			Domains:     []string{cfg.PortalHostname},
 			Solver:      cfg.Solver,
-			IssuedAt:    &now,
-			ExpiresAt:   &exp,
-			NextRenewal: &next,
+			IssuedAt:    timePtr(now),
+			ExpiresAt:   timePtr(exp),
+			NextRenewal: timePtr(next),
 			Status:      "ok",
 		})
 	}
-	if wildcard != "" {
+	if cfg.TLD != "" {
 		certificates = append(certificates, Certificate{
 			ID:          "wildcard",
-			Domains:     []string{wildcard},
+			Domains:     []string{fmt.Sprintf("*.%s", cfg.TLD)},
 			Solver:      cfg.Solver,
-			IssuedAt:    &now,
-			ExpiresAt:   &exp,
-			NextRenewal: &next,
+			IssuedAt:    timePtr(now),
+			ExpiresAt:   timePtr(exp),
+			NextRenewal: timePtr(next),
 			Status:      "ok",
 		})
 	}
@@ -603,9 +691,7 @@ func cloneCertificates(in []Certificate) []Certificate {
 		return []Certificate{}
 	}
 	out := make([]Certificate, len(in))
-	for i := range in {
-		out[i] = in[i]
-	}
+	copy(out, in)
 	return out
 }
 
@@ -620,42 +706,58 @@ func cloneCredentials(in map[string]string) map[string]string {
 	return out
 }
 
-func extractHost(endpoint string) string {
+func endpointHostPort(endpoint string) (string, string) {
 	if endpoint == "" {
-		return ""
+		return "", ""
 	}
-	if u, err := url.Parse(endpoint); err == nil && u.Hostname() != "" {
-		return u.Hostname()
+	if u, err := url.Parse(endpoint); err == nil {
+		host := u.Hostname()
+		port := u.Port()
+		if port == "" {
+			if u.Scheme == "http" || u.Scheme == "ws" {
+				port = "80"
+			} else {
+				port = "443"
+			}
+		}
+		return host, port
 	}
-	stripped := strings.TrimPrefix(endpoint, "https://")
-	stripped = strings.TrimPrefix(stripped, "http://")
-	stripped = strings.TrimPrefix(stripped, "wss://")
+	stripped := strings.TrimPrefix(endpoint, "wss://")
+	stripped = strings.TrimPrefix(stripped, "https://")
 	stripped = strings.TrimPrefix(stripped, "ws://")
-	stripped = strings.SplitN(stripped, "/", 2)[0]
-	stripped = strings.SplitN(stripped, ":", 2)[0]
-	return stripped
+	stripped = strings.TrimPrefix(stripped, "http://")
+	parts := strings.SplitN(stripped, "/", 2)
+	hostPort := parts[0]
+	host, port, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return hostPort, ""
+	}
+	return host, port
 }
 
 func normalizePortalHost(tld, portal string) string {
 	tld = strings.TrimSpace(tld)
 	portal = strings.TrimSpace(portal)
-	if portal == "" {
-		if tld == "" {
-			return ""
-		}
-		return fmt.Sprintf("portal.%s", tld)
-	}
 	if tld == "" {
 		return portal
+	}
+	if portal == "" {
+		return fmt.Sprintf("portal.%s", tld)
 	}
 	if portal == tld || strings.HasSuffix(portal, "."+tld) {
 		return portal
 	}
-	// allow prefix only
 	if !strings.Contains(portal, ".") {
 		return fmt.Sprintf("%s.%s", portal, tld)
 	}
 	return portal
+}
+
+func stringPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func intPtr(v int) *int { return &v }
