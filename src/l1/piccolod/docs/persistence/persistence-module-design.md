@@ -18,7 +18,7 @@ RootService
 └── ExportManager       (control-only + full-data export/import)
 ```
 
-All components communicate via an internal event bus. The consensus/leader-election layer feeds a Leadership Registry that surfaces current roles (`Leader`, `FollowerCold`, `FollowerWarm`). App and service managers subscribe to these events to start/stop workloads and remount volumes.
+All components share a core event bus. The consensus/leader-election layer feeds a Leadership Registry that surfaces `Leader`/`Follower` state for each resource. Persistence subscribes to remount volumes appropriately, while app and service managers apply policy (e.g., warm vs cold followers) based on the app specification.
 
 ## Volume Classes & Replication
 - `VolumeClassBootstrap` – device-local, no cluster replication. Rebuilt after admin unlock using secrets from the control store. Holds TPM-sealed rewraps when available.
@@ -31,7 +31,12 @@ VolumeManager handles encryption (gocryptfs-style), mount lifecycle, AionFS inte
 - `stateful` (default): single elected writer per service. Followers stay cold-standby by default; warm replicas allowed only when the workload tolerates read-only mounts.
 - `stateless_read_only`: active-active replicas on every node; volumes are exposed read-only everywhere and the app must not mutate external state. No leader election is required for these services.
 
-VolumeManager consults the app’s cluster mode when allocating volumes and emitting role changes. For `stateless_read_only` apps it publishes a fixed `FollowerWarm` role on every node and skips container stop/start churn.
+VolumeManager consults the app’s cluster mode when allocating volumes and relays leader/follower state to consumers. App orchestration decides whether followers remain attached read-only or fully detached. Control-store readiness also emits lock/unlock events (`TopicLockStateChanged`) on the shared bus so other modules can react (e.g., gate API actions).
+
+### Command Interface
+- Runtime components dispatch typed commands via the shared dispatcher (`internal/runtime/commands`).
+- Initial commands: `persistence.ensure_volume`, `persistence.attach_volume`, `persistence.run_control_export`, `persistence.run_full_export`.
+- Responses carry structured payloads (e.g., `VolumeHandle`, `ExportArtifact`). Future commands (import, status, repair) will extend this surface.
 
 ## ControlStore
 - Physical store: SQLite in WAL mode with `synchronous=FULL`, mounted on the control volume.
@@ -57,8 +62,8 @@ VolumeManager consults the app’s cluster mode when allocating volumes and emit
 - Public ACME certificates serve end-user traffic only.
 
 ## Event Bus
-- Topics include: `LockStateChanged`, `VolumeRoleChanged`, `DiskEvent`, `ExportResult`, `ControlStoreHealth`.
-- Modules subscribe to react (e.g., app manager stops followers on role downgrade, portal surfaces export failures).
+- Topics include: `LockStateChanged`, `LeadershipRoleChanged`, `DeviceEvent`, `ExportResult`, `ControlStoreHealth`.
+- Modules subscribe to react (e.g., persistence remounts volumes on role change, app manager stops followers for stateful workloads, portal surfaces export failures).
 
 ## Open Tasks
 1. Define Go interfaces for repositories and event bus topics/payloads.

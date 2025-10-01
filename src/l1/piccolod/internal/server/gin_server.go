@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdfs "io/fs"
 	"log"
@@ -12,10 +13,16 @@ import (
 
 	"piccolod/internal/app"
 	authpkg "piccolod/internal/auth"
+	"piccolod/internal/cluster"
+	"piccolod/internal/consensus"
 	"piccolod/internal/container"
 	crypt "piccolod/internal/crypt"
+	"piccolod/internal/events"
 	"piccolod/internal/mdns"
+	"piccolod/internal/persistence"
 	"piccolod/internal/remote"
+	"piccolod/internal/runtime/commands"
+	"piccolod/internal/runtime/supervisor"
 	"piccolod/internal/services"
 	"piccolod/internal/storage"
 
@@ -30,10 +37,15 @@ type GinServer struct {
 	appManager     *app.FSManager
 	serviceManager *services.ServiceManager
 	storageManager *storage.Manager
+	persistence    persistence.Service
 	mdnsManager    *mdns.Manager
 	remoteManager  *remote.Manager
 	router         *gin.Engine
 	version        string
+	events         *events.Bus
+	leadership     *cluster.Registry
+	supervisor     *supervisor.Supervisor
+	dispatcher     *commands.Dispatcher
 
 	// Optional OpenAPI request validation (Phase 0)
 	apiValidator *openAPIValidator
@@ -63,11 +75,29 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// Create Podman CLI for app management
 	podmanCLI := &container.PodmanCLI{}
 
+	// Initialize shared infrastructure
+	eventsBus := events.NewBus()
+	leadershipReg := cluster.NewRegistry()
+	sup := supervisor.New()
+	dispatch := commands.NewDispatcher()
+	consensusMgr := consensus.NewStub(leadershipReg, eventsBus)
+
 	// Initialize app manager with filesystem state management
 	svcMgr := services.NewServiceManager()
 	appMgr, err := app.NewFSManagerWithServices(podmanCLI, "", svcMgr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init app manager: %w", err)
+	}
+
+	// Initialize persistence module (skeleton; concrete components wired later)
+	persist, err := persistence.NewService(persistence.Options{
+		Events:     eventsBus,
+		Leadership: leadershipReg,
+		Consensus:  consensusMgr,
+		Dispatcher: dispatch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to init persistence module: %w", err)
 	}
 
 	// Set Gin to release mode for production (can be overridden by GIN_MODE env var)
@@ -77,8 +107,30 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		appManager:     appMgr,
 		serviceManager: svcMgr,
 		storageManager: storage.NewManager(),
+		persistence:    persist,
 		mdnsManager:    mdns.NewManager(),
+		events:         eventsBus,
+		leadership:     leadershipReg,
+		supervisor:     sup,
+		dispatcher:     dispatch,
 	}
+
+	s.supervisor.Register(supervisor.NewComponent("mdns", func(ctx context.Context) error {
+		return s.mdnsManager.Start()
+	}, func(ctx context.Context) error {
+		return s.mdnsManager.Stop()
+	}))
+
+	s.supervisor.Register(supervisor.NewComponent("service-manager", func(ctx context.Context) error {
+		s.serviceManager.StartBackground()
+		return nil
+	}, func(ctx context.Context) error {
+		s.serviceManager.Stop()
+		return nil
+	}))
+
+	s.supervisor.Register(supervisor.NewComponent("consensus", consensusMgr.Start, consensusMgr.Stop))
+	s.supervisor.Register(newLeadershipObserver(eventsBus))
 
 	for _, opt := range opts {
 		opt(s)
@@ -121,13 +173,9 @@ func (s *GinServer) Start() error {
 		port = "80"
 	}
 
-	// Start mDNS advertising - this must succeed
-	if err := s.mdnsManager.Start(); err != nil {
-		return fmt.Errorf("FATAL: mDNS server failed to start: %w", err)
+	if err := s.supervisor.Start(context.Background()); err != nil {
+		return fmt.Errorf("failed to start runtime components: %w", err)
 	}
-
-	// Start background service watcher and proxies
-	s.serviceManager.StartBackground()
 
 	log.Printf("INFO: Starting piccolod server with Gin on http://localhost:%s", port)
 
@@ -144,10 +192,10 @@ func (s *GinServer) Start() error {
 
 // Stop gracefully shuts down the server and all its components.
 func (s *GinServer) Stop() error {
-	if err := s.mdnsManager.Stop(); err != nil {
-		log.Printf("WARN: Failed to stop mDNS server: %v", err)
+	if err := s.supervisor.Stop(context.Background()); err != nil {
+		log.Printf("WARN: Failed to stop components cleanly: %v", err)
+		return err
 	}
-	s.serviceManager.Stop()
 	return nil
 }
 
@@ -253,6 +301,10 @@ func (s *GinServer) setupGinRoutes() {
 		authed.GET("/remote/nexus-guide", s.handleRemoteGuideInfo)
 		authed.POST("/remote/nexus-guide/verify", s.handleRemoteGuideVerify)
 
+		// Persistence exports (prototype)
+		authed.POST("/exports/control", s.requireUnlocked(), s.handlePersistenceControlExport)
+		authed.POST("/exports/full", s.requireUnlocked(), s.handlePersistenceFullExport)
+
 		// Catalog (read-only) and services require auth
 		authed.GET("/catalog", s.handleGinCatalog)
 		authed.GET("/catalog/:name/template", s.handleGinCatalogTemplate)
@@ -341,6 +393,50 @@ func (s *GinServer) handleGinServicesByApp(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"services": out})
+}
+
+func (s *GinServer) handlePersistenceControlExport(c *gin.Context) {
+	if s.dispatcher == nil {
+		writeGinError(c, http.StatusInternalServerError, "command dispatcher not available")
+		return
+	}
+	resp, err := s.dispatcher.Dispatch(c.Request.Context(), persistence.RunControlExportCommand{})
+	if err != nil {
+		if errors.Is(err, persistence.ErrNotImplemented) {
+			writeGinError(c, http.StatusNotImplemented, "control-plane export not implemented yet")
+		} else {
+			writeGinError(c, http.StatusInternalServerError, "failed to start control export: "+err.Error())
+		}
+		return
+	}
+	artifact, ok := resp.(persistence.ExportArtifact)
+	if !ok {
+		writeGinError(c, http.StatusInternalServerError, "unexpected response from persistence")
+		return
+	}
+	writeGinSuccess(c, gin.H{"artifact": artifact}, "control-plane export started")
+}
+
+func (s *GinServer) handlePersistenceFullExport(c *gin.Context) {
+	if s.dispatcher == nil {
+		writeGinError(c, http.StatusInternalServerError, "command dispatcher not available")
+		return
+	}
+	resp, err := s.dispatcher.Dispatch(c.Request.Context(), persistence.RunFullExportCommand{})
+	if err != nil {
+		if errors.Is(err, persistence.ErrNotImplemented) {
+			writeGinError(c, http.StatusNotImplemented, "full export not implemented yet")
+		} else {
+			writeGinError(c, http.StatusInternalServerError, "failed to start full export: "+err.Error())
+		}
+		return
+	}
+	artifact, ok := resp.(persistence.ExportArtifact)
+	if !ok {
+		writeGinError(c, http.StatusInternalServerError, "unexpected response from persistence")
+		return
+	}
+	writeGinSuccess(c, gin.H{"artifact": artifact}, "full export started")
 }
 
 func (s *GinServer) handleGinVersion(c *gin.Context) {
