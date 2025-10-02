@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"piccolod/internal/state/paths"
 )
 
 // Config holds the persisted remote (Nexus) configuration and runtime state.
@@ -135,7 +137,7 @@ func NewManager(stateDir string) (*Manager, error) {
 
 func newManagerWithDeps(stateDir string, d dialer, r resolver, now func() time.Time) (*Manager, error) {
 	if stateDir == "" {
-		stateDir = "/var/lib/piccolod"
+		stateDir = paths.Root()
 	}
 	dir := filepath.Join(stateDir, "remote")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

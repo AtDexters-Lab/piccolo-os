@@ -1,6 +1,6 @@
 # Piccolod Persistence Module Design (checkpoint)
 
-_Last updated: 2025-09-30_
+_Last updated: 2025-10-01_
 
 ## Goals
 - Provide an embedded, encrypted persistence layer for the piccolod control plane and application data.
@@ -20,6 +20,11 @@ RootService
 
 All components share a core event bus. The consensus/leader-election layer feeds a Leadership Registry that surfaces `Leader`/`Follower` state for each resource. Persistence subscribes to remount volumes appropriately, while app and service managers apply policy (e.g., warm vs cold followers) based on the app specification.
 
+### Bootstrap mount (`PICCOLO_STATE_DIR`)
+- `PICCOLO_STATE_DIR` points to the mount of the bootstrap volume. The volume manager is responsible for provisioning and mounting it before any control-plane writes occur.
+- All durable data (crypto keyset, control-store snapshot, export manifests, volume metadata) must live under this mount. Modules resolve paths via `internal/state/paths` so no package hard-codes `/var/lib/piccolod`.
+- If the bootstrap volume is unavailable, persistence refuses to unlock/control-store writes; bootstrap provisioning is retried end-to-end instead of writing to the host filesystem.
+
 ## Volume Classes & Replication
 - `VolumeClassBootstrap` – device-local, no cluster replication. Rebuilt after admin unlock using secrets from the control store. Holds TPM-sealed rewraps when available.
 - `VolumeClassControl` – replicated to all cluster peers (hot tier). Only the elected leader mounts read/write; followers mount read-only.
@@ -35,8 +40,14 @@ VolumeManager consults the app’s cluster mode when allocating volumes and rela
 
 ### Command Interface
 - Runtime components dispatch typed commands via the shared dispatcher (`internal/runtime/commands`).
-- Initial commands: `persistence.ensure_volume`, `persistence.attach_volume`, `persistence.run_control_export`, `persistence.run_full_export`.
+- Initial commands: `persistence.ensure_volume`, `persistence.attach_volume`, `persistence.record_lock_state`, `persistence.run_control_export`, `persistence.run_full_export`.
+- Lock/unlock flows use `persistence.record_lock_state` so that the module rebroadcasts control-store readiness on the event bus before other components proceed.
 - Responses carry structured payloads (e.g., `VolumeHandle`, `ExportArtifact`). Future commands (import, status, repair) will extend this surface.
+
+### Lock-state propagation
+- Crypto APIs dispatch lock/unlock events through the dispatcher; the persistence module publishes `TopicLockStateChanged` with the new state.
+- Service manager and app manager subscribe to the topic (current implementation logs transitions to confirm wiring; enforcement hooks will follow).
+- API middleware can eventually rely on the event stream instead of polled crypto checks to gate mutating requests.
 
 ## ControlStore
 - Physical store: SQLite in WAL mode with `synchronous=FULL`, mounted on the control volume.
@@ -63,11 +74,12 @@ VolumeManager consults the app’s cluster mode when allocating volumes and rela
 
 ## Event Bus
 - Topics include: `LockStateChanged`, `LeadershipRoleChanged`, `DeviceEvent`, `ExportResult`, `ControlStoreHealth`.
+- Persistence publishes lock-state updates via the dispatcher; service manager and app manager already subscribe and log receipt to verify propagation.
 - Modules subscribe to react (e.g., persistence remounts volumes on role change, app manager stops followers for stateful workloads, portal surfaces export failures).
 
 ## Open Tasks
-1. Define Go interfaces for repositories and event bus topics/payloads.
-2. Implement Leadership Registry glue between Raft and VolumeManager/App manager.
-3. Specify export manifest schema (control-only vs full-data) with checksums and metadata.
-4. Build ControlStore repair utilities and TPM reseal workflows.
-5. Update reference docs (PRD/persistence guide) with the new PCV + bootstrap behavior and cluster-auth model.
+1. Replace placeholder export artifacts with deterministic bundles, upload/download wiring, and integration tests.
+2. Teach service/app managers to enforce leadership policy (stop followers, gate proxies) instead of only logging events.
+3. Connect VolumeManager to a real storage adapter (encrypted mounts, device discovery) and integrate with lock-state gating.
+4. Specify export manifest schema (control-only vs full-data) with checksums, metadata, and reseal hooks.
+5. Build ControlStore repair utilities (quick-check, WAL compaction, TPM reseal) and document operational runbooks.

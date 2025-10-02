@@ -6,8 +6,11 @@ import (
 )
 
 var (
-	ErrNotImplemented = errors.New("persistence: not implemented")
-	ErrInvalidCommand = errors.New("persistence: invalid command payload")
+	ErrNotImplemented    = errors.New("persistence: not implemented")
+	ErrInvalidCommand    = errors.New("persistence: invalid command payload")
+	ErrLocked            = errors.New("persistence: locked")
+	ErrCryptoUnavailable = errors.New("persistence: crypto unavailable")
+	ErrNotFound          = errors.New("persistence: not found")
 )
 
 // Bootstrap -----------------------------------------------------------------

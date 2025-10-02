@@ -2,6 +2,7 @@ package services
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"piccolod/internal/api"
+	"piccolod/internal/events"
 )
 
 // ServiceManager coordinates listener allocation, registry, and proxy startup
@@ -23,6 +25,8 @@ type ServiceManager struct {
 	stopCh       chan struct{}
 	wg           sync.WaitGroup
 	containerIDs map[string]string // app -> containerID (optional)
+	eventsMu     sync.Mutex
+	eventCancel  context.CancelFunc
 }
 
 func NewServiceManager() *ServiceManager {
@@ -44,6 +48,77 @@ func defaultRemotePorts(listener api.AppListener) []int {
 		return []int{80, 443}
 	}
 	return append([]int(nil), listener.RemotePorts...)
+}
+
+// ObserveRuntimeEvents subscribes to leadership and lock-state events for logging.
+func (m *ServiceManager) ObserveRuntimeEvents(bus *events.Bus) {
+	if bus == nil {
+		return
+	}
+	m.eventsMu.Lock()
+	if m.eventCancel != nil {
+		m.eventCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.eventCancel = cancel
+	m.eventsMu.Unlock()
+
+	leaders := bus.Subscribe(events.TopicLeadershipRoleChanged, 16)
+	locks := bus.Subscribe(events.TopicLockStateChanged, 8)
+
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		for {
+			select {
+			case evt, ok := <-leaders:
+				if !ok {
+					leaders = nil
+					if leaders == nil && locks == nil {
+						return
+					}
+					continue
+				}
+				payload, ok := evt.Payload.(events.LeadershipChanged)
+				if !ok {
+					log.Printf("WARN: service-manager received unexpected leadership payload: %#v", evt.Payload)
+					continue
+				}
+				log.Printf("INFO: service-manager observed leadership change resource=%s role=%s", payload.Resource, payload.Role)
+			case evt, ok := <-locks:
+				if !ok {
+					locks = nil
+					if leaders == nil && locks == nil {
+						return
+					}
+					continue
+				}
+				payload, ok := evt.Payload.(events.LockStateChanged)
+				if !ok {
+					log.Printf("WARN: service-manager received unexpected lock payload: %#v", evt.Payload)
+					continue
+				}
+				state := "unlocked"
+				if payload.Locked {
+					state = "locked"
+				}
+				log.Printf("INFO: service-manager observed control lock state=%s", state)
+			case <-ctx.Done():
+				return
+			case <-m.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (m *ServiceManager) stopEventObservers() {
+	m.eventsMu.Lock()
+	if m.eventCancel != nil {
+		m.eventCancel()
+		m.eventCancel = nil
+	}
+	m.eventsMu.Unlock()
 }
 
 // RestoreFromPodman rebuilds proxies for an app using existing host-bind ports.
@@ -198,6 +273,7 @@ func (m *ServiceManager) StartBackground() {
 
 // Stop stops background tasks and proxies
 func (m *ServiceManager) Stop() {
+	m.stopEventObservers()
 	close(m.stopCh)
 	m.wg.Wait()
 	m.StopAll()

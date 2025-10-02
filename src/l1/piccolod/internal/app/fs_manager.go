@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"piccolod/internal/api"
 	"piccolod/internal/container"
+	"piccolod/internal/events"
 	"piccolod/internal/services"
 )
 
@@ -19,6 +21,9 @@ type FSManager struct {
 	containerManager ContainerManager
 	stateManager     *FilesystemStateManager
 	serviceManager   *services.ServiceManager
+	eventsMu         sync.Mutex
+	eventCancel      context.CancelFunc
+	eventsWG         sync.WaitGroup
 }
 
 // NewFSManagerWithServices creates a new filesystem-based app manager with an injected ServiceManager
@@ -33,6 +38,80 @@ func NewFSManagerWithServices(containerManager ContainerManager, stateDir string
 		stateManager:     stateManager,
 		serviceManager:   serviceManager,
 	}, nil
+}
+
+// ObserveRuntimeEvents subscribes to leadership and lock-state events for logging.
+func (m *FSManager) ObserveRuntimeEvents(bus *events.Bus) {
+	if bus == nil {
+		return
+	}
+	m.eventsMu.Lock()
+	if m.eventCancel != nil {
+		m.eventCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.eventCancel = cancel
+	m.eventsMu.Unlock()
+
+	leaders := bus.Subscribe(events.TopicLeadershipRoleChanged, 16)
+	locks := bus.Subscribe(events.TopicLockStateChanged, 8)
+
+	m.eventsWG.Add(1)
+	go func() {
+		defer m.eventsWG.Done()
+		for {
+			select {
+			case evt, ok := <-leaders:
+				if !ok {
+					leaders = nil
+					if leaders == nil && locks == nil {
+						return
+					}
+					continue
+				}
+				payload, ok := evt.Payload.(events.LeadershipChanged)
+				if !ok {
+					log.Printf("WARN: app-manager received unexpected leadership payload: %#v", evt.Payload)
+					continue
+				}
+				log.Printf("INFO: app-manager observed leadership change resource=%s role=%s", payload.Resource, payload.Role)
+			case evt, ok := <-locks:
+				if !ok {
+					locks = nil
+					if leaders == nil && locks == nil {
+						return
+					}
+					continue
+				}
+				payload, ok := evt.Payload.(events.LockStateChanged)
+				if !ok {
+					log.Printf("WARN: app-manager received unexpected lock payload: %#v", evt.Payload)
+					continue
+				}
+				state := "unlocked"
+				if payload.Locked {
+					state = "locked"
+				}
+				log.Printf("INFO: app-manager observed control lock state=%s", state)
+			case <-ctx.Done():
+				return
+			}
+			if leaders == nil && locks == nil {
+				return
+			}
+		}
+	}()
+}
+
+// StopRuntimeEvents stops event observers and waits for goroutines to exit.
+func (m *FSManager) StopRuntimeEvents() {
+	m.eventsMu.Lock()
+	if m.eventCancel != nil {
+		m.eventCancel()
+		m.eventCancel = nil
+	}
+	m.eventsMu.Unlock()
+	m.eventsWG.Wait()
 }
 
 // NewFSManager creates a new filesystem-based app manager with default ServiceManager

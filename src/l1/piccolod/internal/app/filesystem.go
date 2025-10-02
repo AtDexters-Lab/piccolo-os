@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"piccolod/internal/api"
+	"piccolod/internal/state/paths"
 )
 
 const (
-	DefaultStateDir = "/var/lib/piccolod"
-	AppsDir         = "apps"
-	EnabledDir      = "enabled"
-	CacheDir        = "cache"
+	AppsDir    = "apps"
+	EnabledDir = "enabled"
+	CacheDir   = "cache"
 )
 
 // FilesystemStateManager manages app state using filesystem as source of truth
@@ -46,7 +46,7 @@ type AppMetadata struct {
 // NewFilesystemStateManager creates a new filesystem state manager
 func NewFilesystemStateManager(stateDir string) (*FilesystemStateManager, error) {
 	if stateDir == "" {
-		stateDir = DefaultStateDir
+		stateDir = paths.Root()
 	}
 
 	fsm := &FilesystemStateManager{

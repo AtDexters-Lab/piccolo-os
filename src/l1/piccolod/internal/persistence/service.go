@@ -5,8 +5,10 @@ import (
 	"log"
 
 	"piccolod/internal/cluster"
+	"piccolod/internal/crypt"
 	"piccolod/internal/events"
 	"piccolod/internal/runtime/commands"
+	"piccolod/internal/state/paths"
 )
 
 // Options captures construction parameters for the persistence service.
@@ -21,6 +23,8 @@ type Options struct {
 	Events         *events.Bus
 	Leadership     *cluster.Registry
 	Dispatcher     *commands.Dispatcher
+	Crypto         *crypt.Manager
+	StateDir       string
 }
 
 // Module implements the Service interface using pluggable sub-components.
@@ -34,6 +38,8 @@ type Module struct {
 	leadership *cluster.Registry
 	storage    StorageAdapter
 	consensus  ConsensusManager
+	crypto     *crypt.Manager
+	stateDir   string
 }
 
 // Ensure Module satisfies the Service interface.
@@ -42,6 +48,13 @@ var _ Service = (*Module)(nil)
 // NewService builds a persistence module with no-op implementations. Concrete
 // components can be supplied by replacing the defaults on the returned module.
 func NewService(opts Options) (*Module, error) {
+	stateDir := opts.StateDir
+	if stateDir == "" {
+		stateDir = paths.Root()
+	}
+	if err := ensureBootstrapRoot(stateDir); err != nil {
+		return nil, err
+	}
 	mod := &Module{
 		bootstrap:  opts.Bootstrap,
 		control:    opts.Control,
@@ -52,6 +65,8 @@ func NewService(opts Options) (*Module, error) {
 		consensus:  opts.Consensus,
 		events:     opts.Events,
 		leadership: opts.Leadership,
+		crypto:     opts.Crypto,
+		stateDir:   stateDir,
 	}
 
 	if mod.events == nil {
@@ -64,7 +79,14 @@ func NewService(opts Options) (*Module, error) {
 		mod.bootstrap = newNoopBootstrapStore()
 	}
 	if mod.control == nil {
-		mod.control = newNoopControlStore()
+		if mod.crypto == nil {
+			return nil, ErrCryptoUnavailable
+		}
+		store, err := newEncryptedControlStore(mod.stateDir, mod.crypto)
+		if err != nil {
+			return nil, err
+		}
+		mod.control = store
 	}
 	if mod.volumes == nil {
 		mod.volumes = newNoopVolumeManager()
@@ -87,6 +109,9 @@ func NewService(opts Options) (*Module, error) {
 	}
 
 	mod.observeLeadership()
+	if err := mod.setLockState(context.Background(), true); err != nil {
+		return nil, err
+	}
 	mod.publishLockState(true)
 
 	return mod, nil
@@ -96,8 +121,14 @@ func NewService(opts Options) (*Module, error) {
 func (m *Module) registerHandlers(dispatcher *commands.Dispatcher) {
 	dispatcher.Register(CommandEnsureVolume, commands.HandlerFunc(m.handleEnsureVolume))
 	dispatcher.Register(CommandAttachVolume, commands.HandlerFunc(m.handleAttachVolume))
+	dispatcher.Register(CommandRecordLockState, commands.HandlerFunc(m.handleRecordLockState))
 	dispatcher.Register(CommandRunControlExport, commands.HandlerFunc(m.handleRunControlExport))
 	dispatcher.Register(CommandRunFullExport, commands.HandlerFunc(m.handleRunFullExport))
+}
+
+type lockableControlStore interface {
+	Lock()
+	Unlock(context.Context) error
 }
 
 func (m *Module) observeLeadership() {
@@ -145,6 +176,21 @@ func (m *Module) StorageAdapter() StorageAdapter {
 
 func (m *Module) Consensus() ConsensusManager {
 	return m.consensus
+}
+
+func (m *Module) setLockState(ctx context.Context, locked bool) error {
+	store, ok := m.control.(lockableControlStore)
+	if !ok {
+		if locked {
+			return nil
+		}
+		return ErrNotImplemented
+	}
+	if locked {
+		store.Lock()
+		return nil
+	}
+	return store.Unlock(ctx)
 }
 
 // SwapBootstrap allows wiring a real bootstrap store after construction.

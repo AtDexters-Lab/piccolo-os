@@ -24,6 +24,7 @@ import (
 	"piccolod/internal/runtime/commands"
 	"piccolod/internal/runtime/supervisor"
 	"piccolod/internal/services"
+	"piccolod/internal/state/paths"
 	"piccolod/internal/storage"
 
 	"github.com/coreos/go-systemd/v22/daemon"
@@ -81,13 +82,20 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	sup := supervisor.New()
 	dispatch := commands.NewDispatcher()
 	consensusMgr := consensus.NewStub(leadershipReg, eventsBus)
+	stateDir := paths.Root()
+	cmgr, err := crypt.NewManager(stateDir)
+	if err != nil {
+		return nil, fmt.Errorf("crypto manager init: %w", err)
+	}
 
 	// Initialize app manager with filesystem state management
 	svcMgr := services.NewServiceManager()
+	svcMgr.ObserveRuntimeEvents(eventsBus)
 	appMgr, err := app.NewFSManagerWithServices(podmanCLI, "", svcMgr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init app manager: %w", err)
 	}
+	appMgr.ObserveRuntimeEvents(eventsBus)
 
 	// Initialize persistence module (skeleton; concrete components wired later)
 	persist, err := persistence.NewService(persistence.Options{
@@ -95,6 +103,8 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		Leadership: leadershipReg,
 		Consensus:  consensusMgr,
 		Dispatcher: dispatch,
+		Crypto:     cmgr,
+		StateDir:   stateDir,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to init persistence module: %w", err)
@@ -113,6 +123,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		leadership:     leadershipReg,
 		supervisor:     sup,
 		dispatcher:     dispatch,
+		cryptoManager:  cmgr,
 	}
 
 	s.supervisor.Register(supervisor.NewComponent("mdns", func(ctx context.Context) error {
@@ -137,20 +148,12 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	}
 
 	// Initialize auth & sessions
-	stateDir := os.Getenv("PICCOLO_STATE_DIR")
 	am, err := authpkg.NewManager(stateDir)
 	if err != nil {
 		return nil, fmt.Errorf("auth manager init: %w", err)
 	}
 	s.authManager = am
 	s.sessions = authpkg.NewSessionStore()
-
-	// Initialize crypto manager
-	cmgr, err := crypt.NewManager(stateDir)
-	if err != nil {
-		return nil, fmt.Errorf("crypto manager init: %w", err)
-	}
-	s.cryptoManager = cmgr
 
 	// Remote manager
 	rm, err := remote.NewManager(stateDir)
@@ -192,6 +195,9 @@ func (s *GinServer) Start() error {
 
 // Stop gracefully shuts down the server and all its components.
 func (s *GinServer) Stop() error {
+	if s.appManager != nil {
+		s.appManager.StopRuntimeEvents()
+	}
 	if err := s.supervisor.Stop(context.Background()); err != nil {
 		log.Printf("WARN: Failed to stop components cleanly: %v", err)
 		return err
