@@ -9,8 +9,8 @@ import (
 	"piccolod/internal/api"
 )
 
-// TestFSManager_Install tests app installation with filesystem persistence
-func TestFSManager_Install(t *testing.T) {
+// TestAppManager_Install tests app installation with filesystem persistence
+func TestAppManager_Install(t *testing.T) {
 	// Create temporary directory for test
 	tempDir, err := os.MkdirTemp("", "fs_manager_test")
 	if err != nil {
@@ -20,9 +20,9 @@ func TestFSManager_Install(t *testing.T) {
 
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
-	manager, err := NewFSManager(mockContainer, tempDir)
+	manager, err := NewAppManager(mockContainer, tempDir)
 	if err != nil {
-		t.Fatalf("Failed to create FSManager: %v", err)
+		t.Fatalf("Failed to create AppManager: %v", err)
 	}
 
 	ctx := context.Background()
@@ -83,8 +83,8 @@ func TestFSManager_Install(t *testing.T) {
 	}
 }
 
-// TestFSManager_List tests listing apps from filesystem
-func TestFSManager_List(t *testing.T) {
+// TestAppManager_List tests listing apps from filesystem
+func TestAppManager_List(t *testing.T) {
 	// Create temporary directory for test
 	tempDir, err := os.MkdirTemp("", "fs_manager_test")
 	if err != nil {
@@ -94,9 +94,9 @@ func TestFSManager_List(t *testing.T) {
 
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
-	manager, err := NewFSManager(mockContainer, tempDir)
+	manager, err := NewAppManager(mockContainer, tempDir)
 	if err != nil {
-		t.Fatalf("Failed to create FSManager: %v", err)
+		t.Fatalf("Failed to create AppManager: %v", err)
 	}
 
 	ctx := context.Background()
@@ -146,8 +146,8 @@ func TestFSManager_List(t *testing.T) {
 	}
 }
 
-// TestFSManager_Get tests getting specific app
-func TestFSManager_Get(t *testing.T) {
+// TestAppManager_Get tests getting specific app
+func TestAppManager_Get(t *testing.T) {
 	// Create temporary directory for test
 	tempDir, err := os.MkdirTemp("", "fs_manager_test")
 	if err != nil {
@@ -157,9 +157,9 @@ func TestFSManager_Get(t *testing.T) {
 
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
-	manager, err := NewFSManager(mockContainer, tempDir)
+	manager, err := NewAppManager(mockContainer, tempDir)
 	if err != nil {
-		t.Fatalf("Failed to create FSManager: %v", err)
+		t.Fatalf("Failed to create AppManager: %v", err)
 	}
 
 	ctx := context.Background()
@@ -193,8 +193,8 @@ func TestFSManager_Get(t *testing.T) {
 	}
 }
 
-// TestFSManager_StartStop tests starting and stopping apps with status updates
-func TestFSManager_StartStop(t *testing.T) {
+// TestAppManager_StartStop tests starting and stopping apps with status updates
+func TestAppManager_StartStop(t *testing.T) {
 	// Create temporary directory for test
 	tempDir, err := os.MkdirTemp("", "fs_manager_test")
 	if err != nil {
@@ -204,9 +204,9 @@ func TestFSManager_StartStop(t *testing.T) {
 
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
-	manager, err := NewFSManager(mockContainer, tempDir)
+	manager, err := NewAppManager(mockContainer, tempDir)
 	if err != nil {
-		t.Fatalf("Failed to create FSManager: %v", err)
+		t.Fatalf("Failed to create AppManager: %v", err)
 	}
 
 	ctx := context.Background()
@@ -284,8 +284,8 @@ func TestFSManager_StartStop(t *testing.T) {
 	}
 }
 
-// TestFSManager_Uninstall tests app uninstallation
-func TestFSManager_Uninstall(t *testing.T) {
+// TestAppManager_Uninstall tests app uninstallation
+func TestAppManager_Uninstall(t *testing.T) {
 	// Create temporary directory for test
 	tempDir, err := os.MkdirTemp("", "fs_manager_test")
 	if err != nil {
@@ -295,9 +295,9 @@ func TestFSManager_Uninstall(t *testing.T) {
 
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
-	manager, err := NewFSManager(mockContainer, tempDir)
+	manager, err := NewAppManager(mockContainer, tempDir)
 	if err != nil {
-		t.Fatalf("Failed to create FSManager: %v", err)
+		t.Fatalf("Failed to create AppManager: %v", err)
 	}
 
 	ctx := context.Background()
@@ -348,8 +348,8 @@ func TestFSManager_Uninstall(t *testing.T) {
 	}
 }
 
-// TestFSManager_EnableDisable tests systemctl-style enable/disable functionality
-func TestFSManager_EnableDisable(t *testing.T) {
+// TestAppManager_EnableDisable tests systemctl-style enable/disable functionality
+func TestAppManager_EnableDisable(t *testing.T) {
 	// Create temporary directory for test
 	tempDir, err := os.MkdirTemp("", "fs_manager_test")
 	if err != nil {
@@ -359,9 +359,9 @@ func TestFSManager_EnableDisable(t *testing.T) {
 
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
-	manager, err := NewFSManager(mockContainer, tempDir)
+	manager, err := NewAppManager(mockContainer, tempDir)
 	if err != nil {
-		t.Fatalf("Failed to create FSManager: %v", err)
+		t.Fatalf("Failed to create AppManager: %v", err)
 	}
 
 	ctx := context.Background()
@@ -448,8 +448,8 @@ func TestFSManager_EnableDisable(t *testing.T) {
 	}
 }
 
-// TestFSManager_PersistenceAcrossRestarts tests that state persists across manager restarts
-func TestFSManager_PersistenceAcrossRestarts(t *testing.T) {
+// TestAppManager_PersistenceAcrossRestarts tests that state persists across manager restarts
+func TestAppManager_PersistenceAcrossRestarts(t *testing.T) {
 	// Create temporary directory for test
 	tempDir, err := os.MkdirTemp("", "fs_manager_test")
 	if err != nil {
@@ -459,9 +459,9 @@ func TestFSManager_PersistenceAcrossRestarts(t *testing.T) {
 
 	// Create first filesystem manager instance
 	mockContainer1 := &MockContainerManager{}
-	manager1, err := NewFSManager(mockContainer1, tempDir)
+	manager1, err := NewAppManager(mockContainer1, tempDir)
 	if err != nil {
-		t.Fatalf("Failed to create FSManager: %v", err)
+		t.Fatalf("Failed to create AppManager: %v", err)
 	}
 
 	ctx := context.Background()
@@ -502,9 +502,9 @@ func TestFSManager_PersistenceAcrossRestarts(t *testing.T) {
 
 	// Simulate restart by creating new manager instance with same state dir
 	mockContainer2 := &MockContainerManager{}
-	manager2, err := NewFSManager(mockContainer2, tempDir)
+	manager2, err := NewAppManager(mockContainer2, tempDir)
 	if err != nil {
-		t.Fatalf("Failed to create second FSManager: %v", err)
+		t.Fatalf("Failed to create second AppManager: %v", err)
 	}
 
 	// Verify app still exists and has correct state

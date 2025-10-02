@@ -6,7 +6,6 @@ import (
 	"log"
 
 	"piccolod/internal/runtime/commands"
-	"piccolod/internal/state/paths"
 )
 
 const (
@@ -15,17 +14,6 @@ const (
 	CommandRecordLockState  = "persistence.record_lock_state"
 	CommandRunControlExport = "persistence.run_control_export"
 	CommandRunFullExport    = "persistence.run_full_export"
-)
-
-var (
-	placeholderControlArtifact = ExportArtifact{
-		Path: paths.Join("exports", "control-placeholder.pcv"),
-		Kind: ExportKindControlOnly,
-	}
-	placeholderFullArtifact = ExportArtifact{
-		Path: paths.Join("exports", "full-placeholder.tar"),
-		Kind: ExportKindFullData,
-	}
 )
 
 // EnsureVolumeCommand requests creation (or retrieval) of a volume matching
@@ -108,17 +96,14 @@ func (m *Module) handleRunControlExport(ctx context.Context, cmd commands.Comman
 	}
 	artifact, err := m.exports.RunControlPlane(ctx)
 	if err != nil {
-		if errors.Is(err, ErrNotImplemented) {
-			log.Printf("INFO: returning placeholder control-plane export artifact")
-			return placeholderControlArtifact, nil
-		}
 		return nil, err
 	}
 	if artifact.Kind == "" {
 		artifact.Kind = ExportKindControlOnly
 	}
 	if artifact.Path == "" {
-		artifact.Path = placeholderControlArtifact.Path
+		log.Printf("WARN: export artifact missing path; ExportManager should supply absolute path")
+		return nil, errors.New("persistence: export artifact missing path")
 	}
 	return artifact, nil
 }
@@ -129,17 +114,14 @@ func (m *Module) handleRunFullExport(ctx context.Context, cmd commands.Command) 
 	}
 	artifact, err := m.exports.RunFullData(ctx)
 	if err != nil {
-		if errors.Is(err, ErrNotImplemented) {
-			log.Printf("INFO: returning placeholder full data export artifact")
-			return placeholderFullArtifact, nil
-		}
 		return nil, err
 	}
 	if artifact.Kind == "" {
 		artifact.Kind = ExportKindFullData
 	}
 	if artifact.Path == "" {
-		artifact.Path = placeholderFullArtifact.Path
+		log.Printf("WARN: full export artifact missing path; ExportManager should supply absolute path")
+		return nil, errors.New("persistence: full export artifact missing path")
 	}
 	return artifact, nil
 }

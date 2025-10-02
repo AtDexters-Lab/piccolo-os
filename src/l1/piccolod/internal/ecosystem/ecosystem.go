@@ -3,13 +3,12 @@ package ecosystem
 import (
 	"fmt"
 	"os"
+
 	"piccolod/internal/app"
 	"piccolod/internal/backup"
 	"piccolod/internal/container"
-	"piccolod/internal/federation"
 	"piccolod/internal/installer"
 	"piccolod/internal/network"
-	"piccolod/internal/storage"
 	"piccolod/internal/trust"
 	"piccolod/internal/update"
 
@@ -40,38 +39,32 @@ type ReadinessResponse struct {
 }
 
 type Manager struct {
-	containerManager  *container.Manager
-	appManager        *app.FSManager
-	storageManager    *storage.Manager
-	trustAgent        *trust.Agent
-	installer         *installer.Installer
-	updateManager     *update.Manager
-	networkManager    *network.Manager
-	backupManager     *backup.Manager
-	federationManager *federation.Manager
+	containerManager *container.Manager
+	appManager       *app.AppManager
+	trustAgent       *trust.Agent
+	installer        *installer.Installer
+	updateManager    *update.Manager
+	networkManager   *network.Manager
+	backupManager    *backup.Manager
 }
 
 func NewManager(
 	containerManager *container.Manager,
-	appManager *app.FSManager,
-	storageManager *storage.Manager,
+	appManager *app.AppManager,
 	trustAgent *trust.Agent,
 	installer *installer.Installer,
 	updateManager *update.Manager,
 	networkManager *network.Manager,
 	backupManager *backup.Manager,
-	federationManager *federation.Manager,
 ) *Manager {
 	return &Manager{
-		containerManager:  containerManager,
-		appManager:        appManager,
-		storageManager:    storageManager,
-		trustAgent:        trustAgent,
-		installer:         installer,
-		updateManager:     updateManager,
-		networkManager:    networkManager,
-		backupManager:     backupManager,
-		federationManager: federationManager,
+		containerManager: containerManager,
+		appManager:       appManager,
+		trustAgent:       trustAgent,
+		installer:        installer,
+		updateManager:    updateManager,
+		networkManager:   networkManager,
+		backupManager:    backupManager,
 	}
 }
 
@@ -344,14 +337,12 @@ func (s *Manager) checkManagerComponents() EcosystemCheck {
 
 	// Check each manager component
 	managers := map[string]interface{}{
-		"Container":  s.containerManager,
-		"Storage":    s.storageManager,
-		"Trust":      s.trustAgent,
-		"Installer":  s.installer,
-		"Update":     s.updateManager,
-		"Network":    s.networkManager,
-		"Backup":     s.backupManager,
-		"Federation": s.federationManager,
+		"Container": s.containerManager,
+		"Trust":     s.trustAgent,
+		"Installer": s.installer,
+		"Update":    s.updateManager,
+		"Network":   s.networkManager,
+		"Backup":    s.backupManager,
 	}
 
 	for name, manager := range managers {

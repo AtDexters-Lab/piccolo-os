@@ -95,7 +95,7 @@ func NewService(opts Options) (*Module, error) {
 		mod.devices = newNoopDeviceManager()
 	}
 	if mod.exports == nil {
-		mod.exports = newNoopExportManager()
+		mod.exports = newFileExportManager(mod.stateDir)
 	}
 	if mod.storage == nil {
 		mod.storage = newNoopStorageAdapter()

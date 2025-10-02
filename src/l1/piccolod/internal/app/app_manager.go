@@ -16,8 +16,8 @@ import (
 	"piccolod/internal/services"
 )
 
-// FSManager manages application lifecycle with filesystem-based state storage
-type FSManager struct {
+// AppManager manages application lifecycle with filesystem-based state storage
+type AppManager struct {
 	containerManager ContainerManager
 	stateManager     *FilesystemStateManager
 	serviceManager   *services.ServiceManager
@@ -26,14 +26,14 @@ type FSManager struct {
 	eventsWG         sync.WaitGroup
 }
 
-// NewFSManagerWithServices creates a new filesystem-based app manager with an injected ServiceManager
-func NewFSManagerWithServices(containerManager ContainerManager, stateDir string, serviceManager *services.ServiceManager) (*FSManager, error) {
+// NewAppManagerWithServices creates a new filesystem-based app manager with an injected ServiceManager
+func NewAppManagerWithServices(containerManager ContainerManager, stateDir string, serviceManager *services.ServiceManager) (*AppManager, error) {
 	stateManager, err := NewFilesystemStateManager(stateDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create state manager: %w", err)
 	}
 
-	return &FSManager{
+	return &AppManager{
 		containerManager: containerManager,
 		stateManager:     stateManager,
 		serviceManager:   serviceManager,
@@ -41,7 +41,7 @@ func NewFSManagerWithServices(containerManager ContainerManager, stateDir string
 }
 
 // ObserveRuntimeEvents subscribes to leadership and lock-state events for logging.
-func (m *FSManager) ObserveRuntimeEvents(bus *events.Bus) {
+func (m *AppManager) ObserveRuntimeEvents(bus *events.Bus) {
 	if bus == nil {
 		return
 	}
@@ -104,7 +104,7 @@ func (m *FSManager) ObserveRuntimeEvents(bus *events.Bus) {
 }
 
 // StopRuntimeEvents stops event observers and waits for goroutines to exit.
-func (m *FSManager) StopRuntimeEvents() {
+func (m *AppManager) StopRuntimeEvents() {
 	m.eventsMu.Lock()
 	if m.eventCancel != nil {
 		m.eventCancel()
@@ -114,13 +114,13 @@ func (m *FSManager) StopRuntimeEvents() {
 	m.eventsWG.Wait()
 }
 
-// NewFSManager creates a new filesystem-based app manager with default ServiceManager
-func NewFSManager(containerManager ContainerManager, stateDir string) (*FSManager, error) {
-	return NewFSManagerWithServices(containerManager, stateDir, services.NewServiceManager())
+// NewAppManager creates a new filesystem-based app manager with default ServiceManager
+func NewAppManager(containerManager ContainerManager, stateDir string) (*AppManager, error) {
+	return NewAppManagerWithServices(containerManager, stateDir, services.NewServiceManager())
 }
 
 // RestoreServices rebuilds service proxies for running apps based on current container port bindings.
-func (m *FSManager) RestoreServices(ctx context.Context) {
+func (m *AppManager) RestoreServices(ctx context.Context) {
 	apps := m.stateManager.ListApps()
 	for _, app := range apps {
 		if app.ContainerID == "" {
@@ -149,7 +149,7 @@ func (m *FSManager) RestoreServices(ctx context.Context) {
 }
 
 // Install installs a new application from its definition
-func (m *FSManager) Install(ctx context.Context, appDef *api.AppDefinition) (*AppInstance, error) {
+func (m *AppManager) Install(ctx context.Context, appDef *api.AppDefinition) (*AppInstance, error) {
 	// Set defaults then validate
 	SetDefaults(appDef)
 	if err := ValidateAppDefinition(appDef); err != nil {
@@ -206,7 +206,7 @@ func (m *FSManager) Install(ctx context.Context, appDef *api.AppDefinition) (*Ap
 }
 
 // Upsert installs or updates an application by name. If the app exists, it is uninstalled and reinstalled.
-func (m *FSManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*AppInstance, error) {
+func (m *AppManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*AppInstance, error) {
 	if existing, exists := m.stateManager.GetApp(appDef.Name); exists {
 		// Reconcile listeners first
 		rec, containerChange, err := m.serviceManager.Reconcile(appDef.Name, appDef.Listeners)
@@ -243,12 +243,12 @@ func (m *FSManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*App
 }
 
 // List returns all installed applications
-func (m *FSManager) List(ctx context.Context) ([]*AppInstance, error) {
+func (m *AppManager) List(ctx context.Context) ([]*AppInstance, error) {
 	return m.stateManager.ListApps(), nil
 }
 
 // Get returns a specific application by name
-func (m *FSManager) Get(ctx context.Context, name string) (*AppInstance, error) {
+func (m *AppManager) Get(ctx context.Context, name string) (*AppInstance, error) {
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return nil, fmt.Errorf("app not found: %s", name)
@@ -258,7 +258,7 @@ func (m *FSManager) Get(ctx context.Context, name string) (*AppInstance, error) 
 }
 
 // Start starts an application
-func (m *FSManager) Start(ctx context.Context, name string) error {
+func (m *AppManager) Start(ctx context.Context, name string) error {
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -301,7 +301,7 @@ func (m *FSManager) Start(ctx context.Context, name string) error {
 }
 
 // Stop stops an application
-func (m *FSManager) Stop(ctx context.Context, name string) error {
+func (m *AppManager) Stop(ctx context.Context, name string) error {
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -328,12 +328,12 @@ func (m *FSManager) Stop(ctx context.Context, name string) error {
 }
 
 // Uninstall removes an application completely
-func (m *FSManager) Uninstall(ctx context.Context, name string) error {
+func (m *AppManager) Uninstall(ctx context.Context, name string) error {
 	return m.UninstallWithOptions(ctx, name, false)
 }
 
 // UninstallWithOptions removes an application; when purge is true, also deletes app data directories
-func (m *FSManager) UninstallWithOptions(ctx context.Context, name string, purge bool) error {
+func (m *AppManager) UninstallWithOptions(ctx context.Context, name string, purge bool) error {
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -366,7 +366,7 @@ func (m *FSManager) UninstallWithOptions(ctx context.Context, name string, purge
 }
 
 // Enable enables an application (systemctl-style)
-func (m *FSManager) Enable(ctx context.Context, name string) error {
+func (m *AppManager) Enable(ctx context.Context, name string) error {
 	if _, exists := m.stateManager.GetApp(name); !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
@@ -375,7 +375,7 @@ func (m *FSManager) Enable(ctx context.Context, name string) error {
 }
 
 // Disable disables an application (systemctl-style)
-func (m *FSManager) Disable(ctx context.Context, name string) error {
+func (m *AppManager) Disable(ctx context.Context, name string) error {
 	if _, exists := m.stateManager.GetApp(name); !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
@@ -384,7 +384,7 @@ func (m *FSManager) Disable(ctx context.Context, name string) error {
 }
 
 // IsEnabled checks if an application is enabled
-func (m *FSManager) IsEnabled(ctx context.Context, name string) (bool, error) {
+func (m *AppManager) IsEnabled(ctx context.Context, name string) (bool, error) {
 	if _, exists := m.stateManager.GetApp(name); !exists {
 		return false, fmt.Errorf("app not found: %s", name)
 	}
@@ -393,12 +393,12 @@ func (m *FSManager) IsEnabled(ctx context.Context, name string) (bool, error) {
 }
 
 // ListEnabled returns names of all enabled apps
-func (m *FSManager) ListEnabled(ctx context.Context) ([]string, error) {
+func (m *AppManager) ListEnabled(ctx context.Context) ([]string, error) {
 	return m.stateManager.ListEnabledApps()
 }
 
 // UpdateImage updates an app's container image tag and recreates the container preserving services
-func (m *FSManager) UpdateImage(ctx context.Context, name string, tag *string) error {
+func (m *AppManager) UpdateImage(ctx context.Context, name string, tag *string) error {
 	appInst, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -472,7 +472,7 @@ func (m *FSManager) UpdateImage(ctx context.Context, name string, tag *string) e
 }
 
 // Revert reverts an app to the previous app.yaml (if available) and recreates container
-func (m *FSManager) Revert(ctx context.Context, name string) error {
+func (m *AppManager) Revert(ctx context.Context, name string) error {
 	appInst, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -519,7 +519,7 @@ func (m *FSManager) Revert(ctx context.Context, name string) error {
 }
 
 // Logs fetches recent container logs for an app
-func (m *FSManager) Logs(ctx context.Context, name string, lines int) ([]string, error) {
+func (m *AppManager) Logs(ctx context.Context, name string, lines int) ([]string, error) {
 	appInst, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return nil, fmt.Errorf("app not found: %s", name)
@@ -531,7 +531,7 @@ func (m *FSManager) Logs(ctx context.Context, name string, lines int) ([]string,
 }
 
 // appDefToContainerSpec converts an AppDefinition to a ContainerCreateSpec
-func (m *FSManager) appDefToContainerSpec(appDef *api.AppDefinition, endpoints []services.ServiceEndpoint) (container.ContainerCreateSpec, error) {
+func (m *AppManager) appDefToContainerSpec(appDef *api.AppDefinition, endpoints []services.ServiceEndpoint) (container.ContainerCreateSpec, error) {
 	spec := container.ContainerCreateSpec{
 		Name:        appDef.Name,
 		Image:       appDef.Image,
@@ -575,7 +575,7 @@ func (m *FSManager) appDefToContainerSpec(appDef *api.AppDefinition, endpoints [
 }
 
 // purgeAppData attempts to remove persistent and temporary storage directories for an app
-func (m *FSManager) purgeAppData(name string) error {
+func (m *AppManager) purgeAppData(name string) error {
 	appDef, err := m.stateManager.GetAppDefinition(name)
 	if err != nil {
 		// If we cannot read app.yaml, fall back to default base deletion
@@ -609,7 +609,7 @@ func (m *FSManager) purgeAppData(name string) error {
 	return nil
 }
 
-func (m *FSManager) purgeDefaultPaths(name string) error {
+func (m *AppManager) purgeDefaultPaths(name string) error {
 	const persistentBase = "/var/piccolo/storage"
 	const temporaryBase = "/tmp/piccolo/apps"
 	_ = os.RemoveAll(filepath.Join(persistentBase, name))

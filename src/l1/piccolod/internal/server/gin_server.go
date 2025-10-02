@@ -18,6 +18,7 @@ import (
 	"piccolod/internal/container"
 	crypt "piccolod/internal/crypt"
 	"piccolod/internal/events"
+	"piccolod/internal/health"
 	"piccolod/internal/mdns"
 	"piccolod/internal/persistence"
 	"piccolod/internal/remote"
@@ -25,7 +26,6 @@ import (
 	"piccolod/internal/runtime/supervisor"
 	"piccolod/internal/services"
 	"piccolod/internal/state/paths"
-	"piccolod/internal/storage"
 
 	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/gin-gonic/gin"
@@ -35,9 +35,8 @@ import (
 
 // GinServer holds all the core components for our application using Gin framework.
 type GinServer struct {
-	appManager     *app.FSManager
+	appManager     *app.AppManager
 	serviceManager *services.ServiceManager
-	storageManager *storage.Manager
 	persistence    persistence.Service
 	mdnsManager    *mdns.Manager
 	remoteManager  *remote.Manager
@@ -59,6 +58,7 @@ type GinServer struct {
 
 	// Crypto manager for lock/unlock of app data volumes
 	cryptoManager *crypt.Manager
+	healthTracker *health.Tracker
 }
 
 // GinServerOption is a function that configures a GinServer.
@@ -87,11 +87,12 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("crypto manager init: %w", err)
 	}
+	healthTracker := health.NewTracker()
 
 	// Initialize app manager with filesystem state management
 	svcMgr := services.NewServiceManager()
 	svcMgr.ObserveRuntimeEvents(eventsBus)
-	appMgr, err := app.NewFSManagerWithServices(podmanCLI, "", svcMgr)
+	appMgr, err := app.NewAppManagerWithServices(podmanCLI, "", svcMgr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init app manager: %w", err)
 	}
@@ -116,7 +117,6 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	s := &GinServer{
 		appManager:     appMgr,
 		serviceManager: svcMgr,
-		storageManager: storage.NewManager(),
 		persistence:    persist,
 		mdnsManager:    mdns.NewManager(),
 		events:         eventsBus,
@@ -124,7 +124,15 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		supervisor:     sup,
 		dispatcher:     dispatch,
 		cryptoManager:  cmgr,
+		healthTracker:  healthTracker,
 	}
+	// Seed baseline health statuses
+	healthTracker.Setf("http", health.LevelOK, "HTTP server initialized")
+	healthTracker.Setf("app-manager", health.LevelOK, "app manager running")
+	healthTracker.Setf("service-manager", health.LevelOK, "service manager running")
+	healthTracker.Setf("mdns", health.LevelOK, "mdns supervisor registered")
+	healthTracker.Setf("remote", health.LevelWarn, "remote manager initializing")
+	healthTracker.Setf("persistence", health.LevelWarn, "control store locked")
 
 	s.supervisor.Register(supervisor.NewComponent("mdns", func(ctx context.Context) error {
 		return s.mdnsManager.Start()
@@ -142,6 +150,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 
 	s.supervisor.Register(supervisor.NewComponent("consensus", consensusMgr.Start, consensusMgr.Stop))
 	s.supervisor.Register(newLeadershipObserver(eventsBus))
+	s.observeLockState(eventsBus)
 
 	for _, opt := range opts {
 		opt(s)
@@ -161,6 +170,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		return nil, fmt.Errorf("remote manager init: %w", err)
 	}
 	s.remoteManager = rm
+	s.healthTracker.Setf("remote", health.LevelOK, "remote manager ready")
 
 	// Rehydrate proxies for containers that survived restarts
 	appMgr.RestoreServices(context.Background())
@@ -263,7 +273,9 @@ func (s *GinServer) setupGinRoutes() {
 		v1.GET("/updates/os", s.handleOSUpdateStatus)
 		v1.GET("/remote/status", s.handleRemoteStatus)
 		v1.GET("/storage/disks", s.handleStorageDisks)
+		v1.GET("/health/live", s.handleHealthLive)
 		v1.GET("/health/ready", s.handleGinReadinessCheck)
+		v1.GET("/health/detail", s.handleHealthDetail)
 
 		// All other API endpoints require session + CSRF
 		authed := v1.Group("/")
@@ -452,11 +464,77 @@ func (s *GinServer) handleGinVersion(c *gin.Context) {
 	})
 }
 
+func (s *GinServer) observeLockState(bus *events.Bus) {
+	if bus == nil || s.healthTracker == nil {
+		return
+	}
+	ch := bus.Subscribe(events.TopicLockStateChanged, 8)
+	go func() {
+		for evt := range ch {
+			payload, ok := evt.Payload.(events.LockStateChanged)
+			if !ok {
+				continue
+			}
+			if payload.Locked {
+				s.healthTracker.Setf("persistence", health.LevelWarn, "control store locked")
+			} else {
+				s.healthTracker.Setf("persistence", health.LevelOK, "control store unlocked")
+			}
+		}
+	}()
+}
+
 func (s *GinServer) handleGinReadinessCheck(c *gin.Context) {
+	if s.healthTracker == nil {
+		c.JSON(http.StatusOK, gin.H{"ready": true, "status": "unknown"})
+		return
+	}
+	required := []string{"persistence", "app-manager", "service-manager"}
+	ready, snapshot := s.healthTracker.Ready(required...)
+	payload := gin.H{
+		"ready":      ready,
+		"status":     s.healthTracker.Overall().String(),
+		"components": flattenHealth(snapshot),
+	}
+	// TODO(ballast): once the health tracker distinguishes fatal states (e.g. control
+	// store cannot unlock due to corruption), emit 503 here so MicroOS can roll
+	// back automatically. For now we always return 200 to stay compatible with
+	// piccolod-health-check-prod.sh which only inspects the status code.
+	c.JSON(http.StatusOK, payload)
+}
+
+func (s *GinServer) handleHealthLive(c *gin.Context) {
+	overall := "unknown"
+	if s.healthTracker != nil {
+		overall = s.healthTracker.Overall().String()
+	}
+	c.JSON(http.StatusOK, gin.H{"status": overall})
+}
+
+func (s *GinServer) handleHealthDetail(c *gin.Context) {
+	if s.healthTracker == nil {
+		c.JSON(http.StatusOK, gin.H{"overall": "unknown", "components": []gin.H{}})
+		return
+	}
+	snapshot := s.healthTracker.Snapshot()
 	c.JSON(http.StatusOK, gin.H{
-		"ready":  true,
-		"status": "healthy",
+		"overall":    s.healthTracker.Overall().String(),
+		"components": flattenHealth(snapshot),
 	})
+}
+
+func flattenHealth(snapshot map[string]health.Status) []gin.H {
+	components := make([]gin.H, 0, len(snapshot))
+	for name, st := range snapshot {
+		components = append(components, gin.H{
+			"name":       name,
+			"level":      st.Level.String(),
+			"message":    st.Message,
+			"details":    st.Details,
+			"updated_at": st.UpdatedAt,
+		})
+	}
+	return components
 }
 
 // setupStaticRoutes configures static file serving for web UI

@@ -17,10 +17,10 @@ import (
 	authpkg "piccolod/internal/auth"
 	"piccolod/internal/container"
 	crypt "piccolod/internal/crypt"
+	"piccolod/internal/health"
 	"piccolod/internal/mdns"
 	"piccolod/internal/remote"
 	"piccolod/internal/services"
-	"piccolod/internal/storage"
 )
 
 // TestGinAppAPI_Install tests POST /api/v1/apps endpoint with Gin
@@ -622,7 +622,7 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 
 	// Create filesystem app manager with service manager
 	svcMgr := services.NewServiceManager()
-	appMgr, err := app.NewFSManagerWithServices(mockContainer, tempDir, svcMgr)
+	appMgr, err := app.NewAppManagerWithServices(mockContainer, tempDir, svcMgr)
 	if err != nil {
 		t.Fatalf("Failed to create app manager: %v", err)
 	}
@@ -645,14 +645,19 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 	server := &GinServer{
 		appManager:     appMgr,
 		serviceManager: svcMgr,
-		storageManager: storage.NewManager(),
 		mdnsManager:    mdns.NewManager(),
 		remoteManager:  rm,
 		authManager:    authMgr,
 		sessions:       authpkg.NewSessionStore(),
 		cryptoManager:  cryptoMgr,
 		version:        "test-gin",
+		healthTracker:  health.NewTracker(),
 	}
+	server.healthTracker.Setf("app-manager", health.LevelOK, "test app manager ready")
+	server.healthTracker.Setf("service-manager", health.LevelOK, "test service manager ready")
+	server.healthTracker.Setf("mdns", health.LevelOK, "mdns stub")
+	server.healthTracker.Setf("remote", health.LevelOK, "remote stub")
+	server.healthTracker.Setf("persistence", health.LevelOK, "stub persistence ready")
 
 	// Setup Gin routes
 	server.setupGinRoutes()
