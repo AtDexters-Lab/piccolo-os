@@ -71,6 +71,8 @@ type ConsensusManager interface {
 type AuthRepo interface {
 	IsInitialized(ctx context.Context) (bool, error)
 	SetInitialized(ctx context.Context) error
+	PasswordHash(ctx context.Context) (string, error)
+	SavePasswordHash(ctx context.Context, hash string) error
 }
 
 type RemoteRepo interface {
@@ -160,7 +162,7 @@ type ImportOptions struct {
 }
 
 type RemoteConfig struct {
-	Endpoint string
+	Payload []byte
 }
 
 type AppRecord struct {

@@ -1,13 +1,17 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"piccolod/internal/api"
 	"piccolod/internal/app"
+	"piccolod/internal/persistence"
 )
 
 func determineScheme(flow, protocol string) string {
@@ -140,9 +144,17 @@ func (s *GinServer) handleGinAppInstall(c *gin.Context) {
 		return
 	}
 
+	if err := s.ensureAppVolume(c.Request.Context(), appDef); err != nil {
+		writeGinError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	// Install or update (upsert) the app
 	appInstance, err := s.appManager.Upsert(c.Request.Context(), appDef)
 	if err != nil {
+		if handleAppManagerError(c, err, "install app") {
+			return
+		}
 		writeGinError(c, http.StatusInternalServerError, "Failed to install app: "+err.Error())
 		return
 	}
@@ -211,6 +223,9 @@ func (s *GinServer) handleGinAppUninstall(c *gin.Context) {
 
 	err := s.appManager.UninstallWithOptions(c.Request.Context(), appName, purge)
 	if err != nil {
+		if handleAppManagerError(c, err, "uninstall app") {
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			writeGinError(c, http.StatusNotFound, err.Error())
 		} else {
@@ -237,6 +252,9 @@ func (s *GinServer) handleGinAppStart(c *gin.Context) {
 
 	err := s.appManager.Start(c.Request.Context(), appName)
 	if err != nil {
+		if handleAppManagerError(c, err, "start app") {
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			writeGinError(c, http.StatusNotFound, err.Error())
 		} else {
@@ -259,6 +277,9 @@ func (s *GinServer) handleGinAppStop(c *gin.Context) {
 
 	err := s.appManager.Stop(c.Request.Context(), appName)
 	if err != nil {
+		if handleAppManagerError(c, err, "stop app") {
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			writeGinError(c, http.StatusNotFound, err.Error())
 		} else {
@@ -281,4 +302,29 @@ func (s *GinServer) handleGinCatalog(c *gin.Context) {
 		},
 	}
 	c.JSON(http.StatusOK, gin.H{"apps": apps})
+}
+
+func handleAppManagerError(c *gin.Context, err error, action string) bool {
+	if errors.Is(err, app.ErrLocked) {
+		msg := fmt.Sprintf("Unable to %s while storage is locked. Unlock Piccolo to continue.", action)
+		writeGinError(c, http.StatusLocked, msg)
+		return true
+	}
+	return false
+}
+
+func (s *GinServer) ensureAppVolume(ctx context.Context, appDef *api.AppDefinition) error {
+	if s.dispatcher == nil || appDef == nil {
+		return nil
+	}
+	volID := fmt.Sprintf("app-%s", appDef.Name)
+	req := persistence.VolumeRequest{ID: volID, Class: persistence.VolumeClassApplication, ClusterMode: persistence.ClusterModeStateful}
+	resp, err := s.dispatcher.Dispatch(ctx, persistence.EnsureVolumeCommand{Req: req})
+	if err != nil {
+		return fmt.Errorf("failed to ensure app volume: %w", err)
+	}
+	if _, ok := resp.(persistence.EnsureVolumeResponse); !ok {
+		return fmt.Errorf("unexpected response from persistence for volume %s", volID)
+	}
+	return nil
 }

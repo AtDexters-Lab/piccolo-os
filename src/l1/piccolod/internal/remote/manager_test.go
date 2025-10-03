@@ -57,7 +57,11 @@ func TestRunPreflightSuccess(t *testing.T) {
 		},
 	}
 
-	m, err := newManagerWithDeps(dir, dial, res, fixedNow(time.Unix(1, 0)))
+	storage, err := newFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := newManagerWithDeps(storage, dial, res, fixedNow(time.Unix(1, 0)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +98,11 @@ func TestRunPreflightFailures(t *testing.T) {
 	dir := t.TempDir()
 	dial := &stubDialer{err: errors.New("dial failed")}
 	res := &stubResolver{}
-	m, err := newManagerWithDeps(dir, dial, res, fixedNow(time.Unix(2, 0)))
+	storage, err := newFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := newManagerWithDeps(storage, dial, res, fixedNow(time.Unix(2, 0)))
 	if err != nil {
 		t.Fatal(err)
 	}

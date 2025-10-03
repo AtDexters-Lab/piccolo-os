@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"piccolod/internal/api"
+	"piccolod/internal/cluster"
 	"piccolod/internal/container"
 	"piccolod/internal/events"
 	"piccolod/internal/services"
@@ -24,7 +26,13 @@ type AppManager struct {
 	eventsMu         sync.Mutex
 	eventCancel      context.CancelFunc
 	eventsWG         sync.WaitGroup
+	stateMu          sync.RWMutex
+	locked           bool
+	leadershipMu     sync.RWMutex
+	leadershipState  map[string]cluster.Role
 }
+
+var ErrLocked = errors.New("app manager: persistence locked")
 
 // NewAppManagerWithServices creates a new filesystem-based app manager with an injected ServiceManager
 func NewAppManagerWithServices(containerManager ContainerManager, stateDir string, serviceManager *services.ServiceManager) (*AppManager, error) {
@@ -37,6 +45,8 @@ func NewAppManagerWithServices(containerManager ContainerManager, stateDir strin
 		containerManager: containerManager,
 		stateManager:     stateManager,
 		serviceManager:   serviceManager,
+		locked:           true,
+		leadershipState:  make(map[string]cluster.Role),
 	}, nil
 }
 
@@ -74,6 +84,9 @@ func (m *AppManager) ObserveRuntimeEvents(bus *events.Bus) {
 					log.Printf("WARN: app-manager received unexpected leadership payload: %#v", evt.Payload)
 					continue
 				}
+				m.leadershipMu.Lock()
+				m.leadershipState[string(payload.Resource)] = payload.Role
+				m.leadershipMu.Unlock()
 				log.Printf("INFO: app-manager observed leadership change resource=%s role=%s", payload.Resource, payload.Role)
 			case evt, ok := <-locks:
 				if !ok {
@@ -88,6 +101,7 @@ func (m *AppManager) ObserveRuntimeEvents(bus *events.Bus) {
 					log.Printf("WARN: app-manager received unexpected lock payload: %#v", evt.Payload)
 					continue
 				}
+				m.setLocked(payload.Locked)
 				state := "unlocked"
 				if payload.Locked {
 					state = "locked"
@@ -112,6 +126,45 @@ func (m *AppManager) StopRuntimeEvents() {
 	}
 	m.eventsMu.Unlock()
 	m.eventsWG.Wait()
+}
+
+func (m *AppManager) setLocked(val bool) {
+	m.stateMu.Lock()
+	m.locked = val
+	m.stateMu.Unlock()
+}
+
+func (m *AppManager) isLocked() bool {
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+	return m.locked
+}
+
+// LastObservedRole returns the most recently observed leadership role for the provided resource.
+func (m *AppManager) LastObservedRole(resource string) cluster.Role {
+	m.leadershipMu.RLock()
+	defer m.leadershipMu.RUnlock()
+	if role, ok := m.leadershipState[resource]; ok {
+		return role
+	}
+	return cluster.RoleUnknown
+}
+
+func (m *AppManager) ensureUnlocked() error {
+	if m.isLocked() {
+		return ErrLocked
+	}
+	return nil
+}
+
+// Locked reports the last observed lock state.
+func (m *AppManager) Locked() bool {
+	return m.isLocked()
+}
+
+// ForceLockState allows tests or orchestration code to override the lock flag directly.
+func (m *AppManager) ForceLockState(lock bool) {
+	m.setLocked(lock)
 }
 
 // NewAppManager creates a new filesystem-based app manager with default ServiceManager
@@ -150,6 +203,9 @@ func (m *AppManager) RestoreServices(ctx context.Context) {
 
 // Install installs a new application from its definition
 func (m *AppManager) Install(ctx context.Context, appDef *api.AppDefinition) (*AppInstance, error) {
+	if err := m.ensureUnlocked(); err != nil {
+		return nil, err
+	}
 	// Set defaults then validate
 	SetDefaults(appDef)
 	if err := ValidateAppDefinition(appDef); err != nil {
@@ -207,6 +263,9 @@ func (m *AppManager) Install(ctx context.Context, appDef *api.AppDefinition) (*A
 
 // Upsert installs or updates an application by name. If the app exists, it is uninstalled and reinstalled.
 func (m *AppManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*AppInstance, error) {
+	if err := m.ensureUnlocked(); err != nil {
+		return nil, err
+	}
 	if existing, exists := m.stateManager.GetApp(appDef.Name); exists {
 		// Reconcile listeners first
 		rec, containerChange, err := m.serviceManager.Reconcile(appDef.Name, appDef.Listeners)
@@ -259,6 +318,9 @@ func (m *AppManager) Get(ctx context.Context, name string) (*AppInstance, error)
 
 // Start starts an application
 func (m *AppManager) Start(ctx context.Context, name string) error {
+	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -302,6 +364,9 @@ func (m *AppManager) Start(ctx context.Context, name string) error {
 
 // Stop stops an application
 func (m *AppManager) Stop(ctx context.Context, name string) error {
+	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -329,11 +394,17 @@ func (m *AppManager) Stop(ctx context.Context, name string) error {
 
 // Uninstall removes an application completely
 func (m *AppManager) Uninstall(ctx context.Context, name string) error {
+	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
 	return m.UninstallWithOptions(ctx, name, false)
 }
 
 // UninstallWithOptions removes an application; when purge is true, also deletes app data directories
 func (m *AppManager) UninstallWithOptions(ctx context.Context, name string, purge bool) error {
+	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -367,6 +438,9 @@ func (m *AppManager) UninstallWithOptions(ctx context.Context, name string, purg
 
 // Enable enables an application (systemctl-style)
 func (m *AppManager) Enable(ctx context.Context, name string) error {
+	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
 	if _, exists := m.stateManager.GetApp(name); !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
@@ -376,6 +450,9 @@ func (m *AppManager) Enable(ctx context.Context, name string) error {
 
 // Disable disables an application (systemctl-style)
 func (m *AppManager) Disable(ctx context.Context, name string) error {
+	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
 	if _, exists := m.stateManager.GetApp(name); !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
@@ -399,6 +476,9 @@ func (m *AppManager) ListEnabled(ctx context.Context) ([]string, error) {
 
 // UpdateImage updates an app's container image tag and recreates the container preserving services
 func (m *AppManager) UpdateImage(ctx context.Context, name string, tag *string) error {
+	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
 	appInst, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -473,6 +553,9 @@ func (m *AppManager) UpdateImage(ctx context.Context, name string, tag *string) 
 
 // Revert reverts an app to the previous app.yaml (if available) and recreates container
 func (m *AppManager) Revert(ctx context.Context, name string) error {
+	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
 	appInst, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -576,6 +659,9 @@ func (m *AppManager) appDefToContainerSpec(appDef *api.AppDefinition, endpoints 
 
 // purgeAppData attempts to remove persistent and temporary storage directories for an app
 func (m *AppManager) purgeAppData(name string) error {
+	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
 	appDef, err := m.stateManager.GetAppDefinition(name)
 	if err != nil {
 		// If we cannot read app.yaml, fall back to default base deletion
@@ -610,6 +696,9 @@ func (m *AppManager) purgeAppData(name string) error {
 }
 
 func (m *AppManager) purgeDefaultPaths(name string) error {
+	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
 	const persistentBase = "/var/piccolo/storage"
 	const temporaryBase = "/tmp/piccolo/apps"
 	_ = os.RemoveAll(filepath.Join(persistentBase, name))

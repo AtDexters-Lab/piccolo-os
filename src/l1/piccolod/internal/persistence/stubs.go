@@ -50,6 +50,12 @@ func (n *noopAuthRepo) IsInitialized(ctx context.Context) (bool, error) {
 	return false, ErrNotImplemented
 }
 func (n *noopAuthRepo) SetInitialized(ctx context.Context) error { return ErrNotImplemented }
+func (n *noopAuthRepo) PasswordHash(ctx context.Context) (string, error) {
+	return "", ErrNotImplemented
+}
+func (n *noopAuthRepo) SavePasswordHash(ctx context.Context, hash string) error {
+	return ErrNotImplemented
+}
 
 type noopRemoteRepo struct{}
 

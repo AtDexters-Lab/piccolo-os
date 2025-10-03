@@ -17,6 +17,7 @@ import (
 	authpkg "piccolod/internal/auth"
 	"piccolod/internal/container"
 	crypt "piccolod/internal/crypt"
+	"piccolod/internal/events"
 	"piccolod/internal/health"
 	"piccolod/internal/mdns"
 	"piccolod/internal/remote"
@@ -626,6 +627,10 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 	if err != nil {
 		t.Fatalf("Failed to create app manager: %v", err)
 	}
+	eventsBus := events.NewBus()
+	appMgr.ObserveRuntimeEvents(eventsBus)
+	eventsBus.Publish(events.Event{Topic: events.TopicLockStateChanged, Payload: events.LockStateChanged{Locked: false}})
+	appMgr.ForceLockState(false)
 
 	// Supporting managers for auth and crypto
 	authMgr, err := authpkg.NewManager(tempDir)
@@ -653,6 +658,7 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 		version:        "test-gin",
 		healthTracker:  health.NewTracker(),
 	}
+	server.events = eventsBus
 	server.healthTracker.Setf("app-manager", health.LevelOK, "test app manager ready")
 	server.healthTracker.Setf("service-manager", health.LevelOK, "test service manager ready")
 	server.healthTracker.Setf("mdns", health.LevelOK, "mdns stub")

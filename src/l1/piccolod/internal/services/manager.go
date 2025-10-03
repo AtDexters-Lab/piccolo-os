@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"piccolod/internal/api"
+	"piccolod/internal/cluster"
 	"piccolod/internal/events"
 )
 
@@ -27,6 +28,9 @@ type ServiceManager struct {
 	containerIDs map[string]string // app -> containerID (optional)
 	eventsMu     sync.Mutex
 	eventCancel  context.CancelFunc
+	statusMu     sync.RWMutex
+	leadership   map[string]cluster.Role
+	locked       bool
 }
 
 func NewServiceManager() *ServiceManager {
@@ -40,6 +44,7 @@ func NewServiceManager() *ServiceManager {
 		proxyManager: NewProxyManager(),
 		stopCh:       make(chan struct{}),
 		containerIDs: make(map[string]string),
+		leadership:   make(map[string]cluster.Role),
 	}
 }
 
@@ -84,6 +89,9 @@ func (m *ServiceManager) ObserveRuntimeEvents(bus *events.Bus) {
 					log.Printf("WARN: service-manager received unexpected leadership payload: %#v", evt.Payload)
 					continue
 				}
+				m.statusMu.Lock()
+				m.leadership[payload.Resource] = payload.Role
+				m.statusMu.Unlock()
 				log.Printf("INFO: service-manager observed leadership change resource=%s role=%s", payload.Resource, payload.Role)
 			case evt, ok := <-locks:
 				if !ok {
@@ -98,10 +106,13 @@ func (m *ServiceManager) ObserveRuntimeEvents(bus *events.Bus) {
 					log.Printf("WARN: service-manager received unexpected lock payload: %#v", evt.Payload)
 					continue
 				}
+				m.statusMu.Lock()
+				m.locked = payload.Locked
 				state := "unlocked"
 				if payload.Locked {
 					state = "locked"
 				}
+				m.statusMu.Unlock()
 				log.Printf("INFO: service-manager observed control lock state=%s", state)
 			case <-ctx.Done():
 				return
@@ -119,6 +130,29 @@ func (m *ServiceManager) stopEventObservers() {
 		m.eventCancel = nil
 	}
 	m.eventsMu.Unlock()
+}
+
+// StopRuntimeEvents cancels leadership/lock subscriptions and waits for handlers to exit.
+func (m *ServiceManager) StopRuntimeEvents() {
+	m.stopEventObservers()
+	m.wg.Wait()
+}
+
+// LastObservedRole reports the most recent leadership role seen for a resource.
+func (m *ServiceManager) LastObservedRole(resource string) cluster.Role {
+	m.statusMu.RLock()
+	defer m.statusMu.RUnlock()
+	if role, ok := m.leadership[resource]; ok {
+		return role
+	}
+	return cluster.RoleUnknown
+}
+
+// Locked reports the last observed lock state propagated from persistence.
+func (m *ServiceManager) Locked() bool {
+	m.statusMu.RLock()
+	defer m.statusMu.RUnlock()
+	return m.locked
 }
 
 // RestoreFromPodman rebuilds proxies for an app using existing host-bind ports.

@@ -45,3 +45,7 @@ func TestNoHardcodedStateDir(t *testing.T) {
 		t.Fatalf("walk failed: %v", err)
 	}
 }
+
+// TODO(persistence): Extend this guard (or add a companion test) to ensure
+// storage-bearing modules do not call os.WriteFile/os.OpenFile directly once
+// remote manager and others migrate to the persistence volume APIs.

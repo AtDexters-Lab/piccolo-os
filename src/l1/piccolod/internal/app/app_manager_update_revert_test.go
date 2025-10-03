@@ -19,6 +19,7 @@ func TestAppManager_UpdateImage_And_Revert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fs manager: %v", err)
 	}
+	mgr.ForceLockState(false)
 	ctx := context.Background()
 
 	// Install initial app
@@ -80,6 +81,7 @@ func TestAppManager_Logs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fs manager: %v", err)
 	}
+	mgr.ForceLockState(false)
 	ctx := context.Background()
 
 	def := &api.AppDefinition{Name: "demo", Image: "alpine:latest", Type: "user", Listeners: []api.AppListener{{Name: "web", GuestPort: 80}}}

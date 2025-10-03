@@ -2,11 +2,15 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"piccolod/internal/api"
+	"piccolod/internal/cluster"
+	"piccolod/internal/events"
 )
 
 // TestAppManager_Install tests app installation with filesystem persistence
@@ -24,6 +28,11 @@ func TestAppManager_Install(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
 
 	ctx := context.Background()
 
@@ -98,6 +107,11 @@ func TestAppManager_List(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
 
 	ctx := context.Background()
 
@@ -161,6 +175,11 @@ func TestAppManager_Get(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
+	manager.ForceLockState(false)
 
 	ctx := context.Background()
 
@@ -193,6 +212,57 @@ func TestAppManager_Get(t *testing.T) {
 	}
 }
 
+func TestAppManagerLeadershipTracking(t *testing.T) {
+	tempDir := t.TempDir()
+	mockContainer := NewMockContainerManager()
+	manager, err := NewAppManager(mockContainer, tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create AppManager: %v", err)
+	}
+	bus := events.NewBus()
+	manager.ObserveRuntimeEvents(bus)
+	defer manager.StopRuntimeEvents()
+
+	// Unlock event should flip the locked flag
+	bus.Publish(events.Event{Topic: events.TopicLockStateChanged, Payload: events.LockStateChanged{Locked: false}})
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if !manager.Locked() {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if manager.Locked() {
+		t.Fatalf("expected manager to report unlocked after event")
+	}
+
+	// Leadership event should be recorded
+	bus.Publish(events.Event{Topic: events.TopicLeadershipRoleChanged, Payload: events.LeadershipChanged{Resource: "control", Role: cluster.RoleLeader}})
+	deadline = time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if manager.LastObservedRole("control") == cluster.RoleLeader {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if manager.LastObservedRole("control") != cluster.RoleLeader {
+		t.Fatalf("expected control role=leader, got %s", manager.LastObservedRole("control"))
+	}
+
+	// Relock event should set locked to true
+	bus.Publish(events.Event{Topic: events.TopicLockStateChanged, Payload: events.LockStateChanged{Locked: true}})
+	deadline = time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if manager.Locked() {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !manager.Locked() {
+		t.Fatalf("expected manager to report locked after event")
+	}
+}
+
 // TestAppManager_StartStop tests starting and stopping apps with status updates
 func TestAppManager_StartStop(t *testing.T) {
 	// Create temporary directory for test
@@ -205,6 +275,7 @@ func TestAppManager_StartStop(t *testing.T) {
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
 	manager, err := NewAppManager(mockContainer, tempDir)
+	manager.ForceLockState(false)
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
@@ -296,6 +367,7 @@ func TestAppManager_Uninstall(t *testing.T) {
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
 	manager, err := NewAppManager(mockContainer, tempDir)
+	manager.ForceLockState(false)
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
@@ -360,6 +432,7 @@ func TestAppManager_EnableDisable(t *testing.T) {
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
 	manager, err := NewAppManager(mockContainer, tempDir)
+	manager.ForceLockState(false)
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
@@ -463,6 +536,7 @@ func TestAppManager_PersistenceAcrossRestarts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	manager1.ForceLockState(false)
 
 	ctx := context.Background()
 
@@ -506,6 +580,7 @@ func TestAppManager_PersistenceAcrossRestarts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create second AppManager: %v", err)
 	}
+	manager2.ForceLockState(false)
 
 	// Verify app still exists and has correct state
 	apps, err := manager2.List(ctx)
@@ -551,5 +626,23 @@ func TestAppManager_PersistenceAcrossRestarts(t *testing.T) {
 
 	if !enabled {
 		t.Error("Enabled state was not preserved across restart")
+	}
+}
+
+func TestAppManager_BlockedWhenLocked(t *testing.T) {
+	mock := NewMockContainerManager()
+	tempDir := t.TempDir()
+	mgr, err := NewAppManager(mock, tempDir)
+	if err != nil {
+		t.Fatalf("NewAppManager: %v", err)
+	}
+	mgr.setLocked(true)
+	ctx := context.Background()
+	_, err = mgr.Install(ctx, &api.AppDefinition{
+		Name: "locked-app", Image: "nginx:latest", Type: "user",
+		Listeners: []api.AppListener{{Name: "web", GuestPort: 80}},
+	})
+	if !errors.Is(err, ErrLocked) {
+		t.Fatalf("expected ErrLocked, got %v", err)
 	}
 }

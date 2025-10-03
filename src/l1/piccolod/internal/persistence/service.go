@@ -89,7 +89,7 @@ func NewService(opts Options) (*Module, error) {
 		mod.control = store
 	}
 	if mod.volumes == nil {
-		mod.volumes = newNoopVolumeManager()
+		mod.volumes = newFileVolumeManager(mod.stateDir)
 	}
 	if mod.devices == nil {
 		mod.devices = newNoopDeviceManager()
@@ -114,7 +114,26 @@ func NewService(opts Options) (*Module, error) {
 	}
 	mod.publishLockState(true)
 
+	if err := mod.ensureCoreVolumes(context.Background()); err != nil {
+		return nil, err
+	}
+
 	return mod, nil
+}
+
+func (m *Module) ensureCoreVolumes(ctx context.Context) error {
+	if m.volumes == nil {
+		return nil
+	}
+	bootstrapReq := VolumeRequest{ID: "bootstrap", Class: VolumeClassBootstrap, ClusterMode: ClusterModeStateful}
+	if _, err := m.volumes.EnsureVolume(ctx, bootstrapReq); err != nil {
+		return err
+	}
+	controlReq := VolumeRequest{ID: "control", Class: VolumeClassControl, ClusterMode: ClusterModeStateful}
+	if _, err := m.volumes.EnsureVolume(ctx, controlReq); err != nil {
+		return err
+	}
+	return nil
 }
 
 // registerHandlers wires persistence commands into the dispatcher.

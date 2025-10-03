@@ -33,6 +33,7 @@ type controlState struct {
 	authInitialized bool
 	remoteConfig    *RemoteConfig
 	apps            map[string]AppRecord
+	passwordHash    string
 }
 
 type controlPayload struct {
@@ -40,6 +41,7 @@ type controlPayload struct {
 	AuthInitialized bool          `json:"auth_initialized"`
 	Remote          *RemoteConfig `json:"remote,omitempty"`
 	Apps            []AppRecord   `json:"apps,omitempty"`
+	PasswordHash    string        `json:"password_hash,omitempty"`
 }
 
 type encryptedPayload struct {
@@ -124,8 +126,9 @@ func (s *encryptedControlStore) Unlock(ctx context.Context) error {
 			return err
 		}
 		data.authInitialized = payload.AuthInitialized
+		data.passwordHash = payload.PasswordHash
 		if payload.Remote != nil {
-			rc := *payload.Remote
+			rc := cloneRemoteConfig(*payload.Remote)
 			data.remoteConfig = &rc
 		}
 		if len(payload.Apps) > 0 {
@@ -148,9 +151,10 @@ func (s *encryptedControlStore) saveLocked() error {
 	payload := controlPayload{
 		Version:         controlPayloadVersion,
 		AuthInitialized: s.state.authInitialized,
+		PasswordHash:    s.state.passwordHash,
 	}
 	if s.state.remoteConfig != nil {
-		rc := *s.state.remoteConfig
+		rc := cloneRemoteConfig(*s.state.remoteConfig)
 		payload.Remote = &rc
 	}
 	if len(s.state.apps) > 0 {
@@ -183,6 +187,12 @@ func (s *encryptedControlStore) saveLocked() error {
 	return os.Rename(tmp, s.filePath)
 }
 
+func cloneRemoteConfig(cfg RemoteConfig) RemoteConfig {
+	dup := make([]byte, len(cfg.Payload))
+	copy(dup, cfg.Payload)
+	return RemoteConfig{Payload: dup}
+}
+
 // Repository implementations -------------------------------------------------
 
 type authRepo struct{ store *encryptedControlStore }
@@ -213,6 +223,25 @@ func (r *authRepo) SetInitialized(ctx context.Context) error {
 	return r.store.saveLocked()
 }
 
+func (r *authRepo) PasswordHash(ctx context.Context) (string, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+	if !r.store.loaded {
+		return "", ErrLocked
+	}
+	return r.store.state.passwordHash, nil
+}
+
+func (r *authRepo) SavePasswordHash(ctx context.Context, hash string) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	if !r.store.loaded {
+		return ErrLocked
+	}
+	r.store.state.passwordHash = hash
+	return r.store.saveLocked()
+}
+
 func (r *remoteRepo) CurrentConfig(ctx context.Context) (RemoteConfig, error) {
 	r.store.mu.RLock()
 	defer r.store.mu.RUnlock()
@@ -222,8 +251,7 @@ func (r *remoteRepo) CurrentConfig(ctx context.Context) (RemoteConfig, error) {
 	if r.store.state.remoteConfig == nil {
 		return RemoteConfig{}, ErrNotFound
 	}
-	cfg := *r.store.state.remoteConfig
-	return cfg, nil
+	return cloneRemoteConfig(*r.store.state.remoteConfig), nil
 }
 
 func (r *remoteRepo) SaveConfig(ctx context.Context, cfg RemoteConfig) error {
@@ -232,7 +260,7 @@ func (r *remoteRepo) SaveConfig(ctx context.Context, cfg RemoteConfig) error {
 	if !r.store.loaded {
 		return ErrLocked
 	}
-	copyCfg := cfg
+	copyCfg := cloneRemoteConfig(cfg)
 	r.store.state.remoteConfig = &copyCfg
 	return r.store.saveLocked()
 }

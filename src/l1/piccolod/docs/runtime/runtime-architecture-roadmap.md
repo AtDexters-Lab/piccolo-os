@@ -1,6 +1,6 @@
 # Piccolod Runtime Architecture Roadmap
 
-_Last updated: 2025-10-01_
+_Last updated: 2025-10-03_
 
 ## Vision
 Piccolod is evolving from a single Go binary into a platform runtime akin to a mini operating system. Subsystems (persistence, app orchestration, networking, remote access, telemetry) should run semi-independently, communicate through shared infrastructure, and reconcile desired state without a monolithic procedural flow.
@@ -36,11 +36,11 @@ This document captures the architectural patterns we are adopting and the breadt
 7. **Job scheduling (future)**  
    - Background work (exports, parity rebuilds, cold-tier flushes) runs via a shared job runner with prioritization and telemetry hooks.
 
-## Current Status (2025-10-01)
+## Current Status (2025-10-03)
 - Shared event bus and leadership registry extracted to `internal/events` and `internal/cluster`.  
 - Command dispatcher skeleton (`internal/runtime/commands`) and supervisor (`internal/runtime/supervisor`) landed; server now instantiates both, registers mDNS/service manager components, and routes control exports plus lock-state transitions through the dispatcher.  
 - Stub consensus manager (`internal/consensus.Stub`) publishes leadership events, supervised alongside an observer that currently logs transitions. Persistence listens to those events to track control-plane role.  
-- Persistence module consumes bus/registry via constructor options, registers command handlers (volumes, exports, lock-state), emits placeholder export artifacts, and still uses stubs for the storage/volume backends.  
+- Persistence module consumes bus/registry via constructor options, registers command handlers (volumes, exports, lock-state), emits placeholder export artifacts, and still uses stubs for the storage/volume backends. Control-store repos now persist the admin credential hash inside the encrypted dataset, auth HTTP endpoints surface `423 Locked` while the control store is sealed, and remote configuration writes are routed through the same encrypted repo so Nexus setup is gated until unlock.  
 - Crypto unlock/lock APIs dispatch `persistence.record_lock_state` so lock transitions hit the event bus before other modules act.  
 - Service manager and app manager attach to the shared bus—current wiring logs leadership and lock-state changes to validate propagation; policy hooks (warm vs cold, proxy gating) come next.  
 - Gin server bootstraps the shared bus/registry, supervisor, dispatcher, and passes them to persistence.  

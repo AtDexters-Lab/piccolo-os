@@ -122,9 +122,15 @@ type resolver interface {
 	LookupCNAME(ctx context.Context, host string) (string, error)
 }
 
+var ErrLocked = errors.New("remote: storage locked")
+
+type Storage interface {
+	Load(ctx context.Context) (Config, error)
+	Save(ctx context.Context, cfg Config) error
+}
+
 type Manager struct {
-	dir      string
-	path     string
+	storage  Storage
 	cfg      *Config
 	dialer   dialer
 	resolver resolver
@@ -132,28 +138,40 @@ type Manager struct {
 }
 
 func NewManager(stateDir string) (*Manager, error) {
-	return newManagerWithDeps(stateDir, netDialer{}, netResolver{}, func() time.Time { return time.Now().UTC() })
-}
-
-func newManagerWithDeps(stateDir string, d dialer, r resolver, now func() time.Time) (*Manager, error) {
-	if stateDir == "" {
-		stateDir = paths.Root()
-	}
-	dir := filepath.Join(stateDir, "remote")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	storage, err := newFileStorage(stateDir)
+	if err != nil {
 		return nil, err
 	}
+	return newManagerWithDeps(storage, netDialer{}, netResolver{}, func() time.Time { return time.Now().UTC() })
+}
+
+func NewManagerWithStorage(storage Storage) (*Manager, error) {
+	return newManagerWithDeps(storage, netDialer{}, netResolver{}, func() time.Time { return time.Now().UTC() })
+}
+
+func newManagerWithDeps(storage Storage, d dialer, r resolver, now func() time.Time) (*Manager, error) {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	m := &Manager{
-		dir:      dir,
-		path:     filepath.Join(dir, "config.json"),
+		storage:  storage,
 		dialer:   d,
 		resolver: r,
 		now:      now,
 	}
-	_ = m.load()
+	if storage != nil {
+		cfg, err := storage.Load(context.Background())
+		if err != nil {
+			if !errors.Is(err, ErrLocked) {
+				return nil, err
+			}
+		} else {
+			m.cfg = &cfg
+		}
+	}
+	if m.cfg == nil {
+		m.cfg = &Config{}
+	}
 	return m, nil
 }
 
@@ -179,17 +197,47 @@ func (netResolver) LookupCNAME(ctx context.Context, host string) (string, error)
 	return r.LookupCNAME(ctx, host)
 }
 
-func (m *Manager) load() error {
-	data, err := os.ReadFile(m.path)
+type fileStorage struct {
+	path string
+}
+
+func newFileStorage(stateDir string) (*fileStorage, error) {
+	if stateDir == "" {
+		stateDir = paths.Root()
+	}
+	dir := filepath.Join(stateDir, "remote")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	return &fileStorage{path: filepath.Join(dir, "config.json")}, nil
+}
+
+func (s *fileStorage) Load(ctx context.Context) (Config, error) {
+	_ = ctx
+	data, err := os.ReadFile(s.path)
 	if err != nil {
-		return err
+		if errors.Is(err, os.ErrNotExist) {
+			return Config{}, nil
+		}
+		return Config{}, err
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func (s *fileStorage) Save(ctx context.Context, cfg Config) error {
+	_ = ctx
+	if cfg.DNSCredentials == nil {
+		cfg.DNSCredentials = map[string]string{}
+	}
+	payload, err := json.MarshalIndent(&cfg, "", "  ")
+	if err != nil {
 		return err
 	}
-	m.cfg = &cfg
-	return nil
+	return os.WriteFile(s.path, payload, 0o644)
 }
 
 func (m *Manager) save(cfg *Config) error {
@@ -199,12 +247,10 @@ func (m *Manager) save(cfg *Config) error {
 	if cfg.DNSCredentials == nil {
 		cfg.DNSCredentials = map[string]string{}
 	}
-	payload, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(m.path, payload, 0o644); err != nil {
-		return err
+	if m.storage != nil {
+		if err := m.storage.Save(context.Background(), *cfg); err != nil {
+			return err
+		}
 	}
 	m.cfg = cfg
 	return nil
@@ -212,7 +258,7 @@ func (m *Manager) save(cfg *Config) error {
 
 func (m *Manager) currentConfig() *Config {
 	if m.cfg == nil {
-		return &Config{}
+		m.cfg = &Config{}
 	}
 	return m.cfg
 }

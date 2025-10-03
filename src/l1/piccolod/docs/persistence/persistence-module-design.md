@@ -1,6 +1,6 @@
 # Piccolod Persistence Module Design (checkpoint)
 
-_Last updated: 2025-10-01_
+_Last updated: 2025-10-03_
 
 ## Goals
 - Provide an embedded, encrypted persistence layer for the piccolod control plane and application data.
@@ -22,7 +22,7 @@ All components share a core event bus. The consensus/leader-election layer feeds
 
 ### Bootstrap mount (`PICCOLO_STATE_DIR`)
 - `PICCOLO_STATE_DIR` points to the mount of the bootstrap volume. The volume manager is responsible for provisioning and mounting it before any control-plane writes occur.
-- All durable data (crypto keyset, control-store snapshot, export manifests, volume metadata) must live under this mount. Modules resolve paths via `internal/state/paths` so no package hard-codes `/var/lib/piccolod`.
+- All durable data (crypto keyset, control-store snapshot, export manifests, volume metadata, auth state) must live under this mount. Modules resolve paths via `internal/state/paths` so no package hard-codes `/var/lib/piccolod`.
 - If the bootstrap volume is unavailable, persistence refuses to unlock/control-store writes; bootstrap provisioning is retried end-to-end instead of writing to the host filesystem.
 
 ## Volume Classes & Replication
@@ -46,13 +46,14 @@ VolumeManager consults the app’s cluster mode when allocating volumes and rela
 
 ### Lock-state propagation
 - Crypto APIs dispatch lock/unlock events through the dispatcher; the persistence module publishes `TopicLockStateChanged` with the new state.
-- Service manager and app manager subscribe to the topic (current implementation logs transitions to confirm wiring; enforcement hooks will follow).
+- Service manager and app manager subscribe to the topic (current implementation logs transitions to confirm wiring; enforcement hooks will follow). Auth endpoints now surface HTTP 423 when control storage is sealed, matching the persistence event stream instead of relying on crypto manager polling.
 - API middleware can eventually rely on the event stream instead of polled crypto checks to gate mutating requests.
 
 ## ControlStore
-- Physical store: SQLite in WAL mode with `synchronous=FULL`, mounted on the control volume.
-- Exposes domain repositories (`AuthRepo`, `RemoteRepo`, `AppStateRepo`, `AuditRepo`, etc.) instead of raw SQL handles.
-- Only the leader performs writes. Transactions commit through the repositories; SQLite durability handles fsync.
+- Physical store: target design remains SQLite in WAL mode with `synchronous=FULL`, mounted on the control volume. The current checkpoint uses an AES-GCM sealed JSON payload persisted under `control/control.enc` so we can exercise encrypted repos before the SQLite schema lands.
+- Exposes domain repositories (`AuthRepo`, `RemoteRepo`, `AppStateRepo`, `AuditRepo`, etc.) instead of raw SQL handles. `AuthRepo` now persists the Argon2id admin password hash and initialization flag; reads/writes return `ErrLocked` until the control store is unlocked with the SDEK.
+- `RemoteRepo` stores the full remote-manager configuration as an encrypted blob so remote API calls are gated by the same lock semantics (HTTP 423 until unlock) and replicate cleanly with the control shard.
+- Only the leader performs writes. Transactions commit through the repositories; the interim JSON payload still flushes via fsync, and the upcoming SQLite layer will assume that role.
 - Health tooling: periodic `PRAGMA quick_check`, timer-based WAL checkpoints, automatic `VACUUM INTO`/`.recover` repair attempts. Failures emit events and block PCV exports until resolved.
 
 ## PCV & Recovery

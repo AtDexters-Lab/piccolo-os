@@ -128,7 +128,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	}
 	// Seed baseline health statuses
 	healthTracker.Setf("http", health.LevelOK, "HTTP server initialized")
-	healthTracker.Setf("app-manager", health.LevelOK, "app manager running")
+	healthTracker.Setf("app-manager", health.LevelWarn, "app manager gated by lock state")
 	healthTracker.Setf("service-manager", health.LevelOK, "service manager running")
 	healthTracker.Setf("mdns", health.LevelOK, "mdns supervisor registered")
 	healthTracker.Setf("remote", health.LevelWarn, "remote manager initializing")
@@ -157,7 +157,13 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	}
 
 	// Initialize auth & sessions
-	am, err := authpkg.NewManager(stateDir)
+	authStorage := newPersistenceAuthStorage(persist.Control().Auth())
+	var am *authpkg.Manager
+	if authStorage != nil {
+		am, err = authpkg.NewManagerWithStorage(authStorage)
+	} else {
+		am, err = authpkg.NewManager(stateDir)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("auth manager init: %w", err)
 	}
@@ -165,11 +171,18 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	s.sessions = authpkg.NewSessionStore()
 
 	// Remote manager
-	rm, err := remote.NewManager(stateDir)
+	remoteStorage := newPersistenceRemoteStorage(persist.Control().Remote())
+	var rm *remote.Manager
+	if remoteStorage != nil {
+		rm, err = remote.NewManagerWithStorage(remoteStorage)
+	} else {
+		rm, err = remote.NewManager(stateDir)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("remote manager init: %w", err)
 	}
 	s.remoteManager = rm
+	remote.RegisterHandlers(dispatch, rm)
 	s.healthTracker.Setf("remote", health.LevelOK, "remote manager ready")
 
 	// Rehydrate proxies for containers that survived restarts
@@ -477,8 +490,10 @@ func (s *GinServer) observeLockState(bus *events.Bus) {
 			}
 			if payload.Locked {
 				s.healthTracker.Setf("persistence", health.LevelWarn, "control store locked")
+				s.healthTracker.Setf("app-manager", health.LevelWarn, "app manager gated by lock state")
 			} else {
 				s.healthTracker.Setf("persistence", health.LevelOK, "control store unlocked")
+				s.healthTracker.Setf("app-manager", health.LevelOK, "app manager ready")
 			}
 		}
 	}()

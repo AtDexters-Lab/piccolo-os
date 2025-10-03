@@ -44,7 +44,21 @@ func TestEncryptedControlStoreLifecycle(t *testing.T) {
 		t.Fatalf("set initialized: %v", err)
 	}
 
-	if err := store.Remote().SaveConfig(context.Background(), RemoteConfig{Endpoint: "https://example"}); err != nil {
+	const hashValue = "argon2id$v=19$m=65536,t=3,p=1$c2FsdHNhbHQ$ZHVtbXlobGFo"
+	if err := store.Auth().SavePasswordHash(context.Background(), hashValue); err != nil {
+		t.Fatalf("save password hash: %v", err)
+	}
+
+	storedHash, err := store.Auth().PasswordHash(context.Background())
+	if err != nil {
+		t.Fatalf("password hash: %v", err)
+	}
+	if storedHash != hashValue {
+		t.Fatalf("expected password hash to persist, got %s", storedHash)
+	}
+
+	remotePayload := []byte(`{"endpoint":"https://example"}`)
+	if err := store.Remote().SaveConfig(context.Background(), RemoteConfig{Payload: remotePayload}); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
 
@@ -83,12 +97,20 @@ func TestEncryptedControlStoreLifecycle(t *testing.T) {
 		t.Fatalf("expected auth initialized to persist")
 	}
 
+	storedHash, err = store2.Auth().PasswordHash(context.Background())
+	if err != nil {
+		t.Fatalf("password hash after restart: %v", err)
+	}
+	if storedHash != hashValue {
+		t.Fatalf("expected password hash to persist after restart, got %s", storedHash)
+	}
+
 	cfg, err := store2.Remote().CurrentConfig(context.Background())
 	if err != nil {
 		t.Fatalf("current config: %v", err)
 	}
-	if cfg.Endpoint != "https://example" {
-		t.Fatalf("unexpected remote config: %#v", cfg)
+	if string(cfg.Payload) != string(remotePayload) {
+		t.Fatalf("unexpected remote config payload: %s", string(cfg.Payload))
 	}
 
 	apps, err = store2.AppState().ListApps(context.Background())
@@ -104,7 +126,7 @@ func TestEncryptedControlStoreLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read encrypted file: %v", err)
 	}
-	if strings.Contains(string(data), "app-alpha") || strings.Contains(string(data), "https://example") {
+	if strings.Contains(string(data), "app-alpha") || strings.Contains(string(data), "https://example") || strings.Contains(string(data), hashValue) {
 		t.Fatalf("encrypted file leaked plaintext: %s", data)
 	}
 }
