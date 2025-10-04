@@ -104,11 +104,11 @@ func TestAppManager_Install_NotLeader(t *testing.T) {
 	manager.ObserveRuntimeEvents(bus)
 	defer manager.StopRuntimeEvents()
 
-	bus.Publish(events.Event{Topic: events.TopicLeadershipRoleChanged, Payload: events.LeadershipChanged{Resource: cluster.ResourceControlPlane, Role: cluster.RoleFollower}})
+    bus.Publish(events.Event{Topic: events.TopicLeadershipRoleChanged, Payload: events.LeadershipChanged{Resource: cluster.ResourceForApp("nope"), Role: cluster.RoleFollower}})
 
 	deadline := time.Now().Add(100 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if manager.LastObservedRole(cluster.ResourceControlPlane) == cluster.RoleFollower {
+    if manager.LastObservedRole(cluster.ResourceForApp("nope")) == cluster.RoleFollower {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
