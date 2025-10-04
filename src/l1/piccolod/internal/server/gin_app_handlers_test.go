@@ -1,27 +1,29 @@
 package server
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"strings"
-	"testing"
+    "context"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "net/http/httptest"
+    "os"
+    "strings"
+    "testing"
+    "time"
 
-	"github.com/gin-gonic/gin"
+    "github.com/gin-gonic/gin"
 
-	"piccolod/internal/api"
-	"piccolod/internal/app"
-	authpkg "piccolod/internal/auth"
-	"piccolod/internal/container"
-	crypt "piccolod/internal/crypt"
-	"piccolod/internal/events"
-	"piccolod/internal/health"
-	"piccolod/internal/mdns"
-	"piccolod/internal/remote"
-	"piccolod/internal/services"
+    "piccolod/internal/api"
+    "piccolod/internal/app"
+    authpkg "piccolod/internal/auth"
+    "piccolod/internal/cluster"
+    "piccolod/internal/container"
+    crypt "piccolod/internal/crypt"
+    "piccolod/internal/events"
+    "piccolod/internal/health"
+    "piccolod/internal/mdns"
+    "piccolod/internal/remote"
+    "piccolod/internal/services"
 )
 
 // TestGinAppAPI_Install tests POST /api/v1/apps endpoint with Gin
@@ -669,6 +671,37 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 	server.setupGinRoutes()
 
 	return server
+}
+
+func TestLeadership_FollowerStopsApp(t *testing.T) {
+    srv := createGinTestServer(t, t.TempDir())
+    sessionCookie, csrf := setupTestAdminSession(t, srv)
+
+    // Install a simple app via API
+    payload := "name: blog\nimage: docker.io/library/nginx:alpine\ntype: user\nlisteners:\n  - name: web\n    guest_port: 80\n    flow: tcp\n    protocol: http\n"
+    w := httptest.NewRecorder()
+    req, _ := http.NewRequest(http.MethodPost, "/api/v1/apps", strings.NewReader(payload))
+    req.Header.Set("Content-Type", "application/x-yaml")
+    attachAuth(req, sessionCookie, csrf)
+    srv.router.ServeHTTP(w, req)
+    if w.Code != http.StatusCreated {
+        t.Fatalf("install status=%d body=%s", w.Code, w.Body.String())
+    }
+
+    // Publish follower role for this app
+    srv.events.Publish(events.Event{Topic: events.TopicLeadershipRoleChanged, Payload: events.LeadershipChanged{Resource: cluster.ResourceForApp("blog"), Role: cluster.RoleFollower}})
+
+    // Wait briefly for goroutine to act
+    deadline := time.Now().Add(200 * time.Millisecond)
+    for time.Now().Before(deadline) {
+        app, err := srv.appManager.Get(context.Background(), "blog")
+        if err == nil && app.Status == "stopped" {
+            return
+        }
+        time.Sleep(5 * time.Millisecond)
+    }
+    app, _ := srv.appManager.Get(context.Background(), "blog")
+    t.Fatalf("expected app to be stopped after follower event, got status=%v", app.Status)
 }
 
 // setupTestAdminSession provisions the admin password and returns session cookie/CSRF token.
