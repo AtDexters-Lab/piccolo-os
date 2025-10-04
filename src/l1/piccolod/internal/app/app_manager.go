@@ -162,12 +162,8 @@ func (m *AppManager) ensureUnlocked() error {
 	return nil
 }
 
-func (m *AppManager) ensureLeaderForApp(appName string) error {
-    if appName == "" {
-        return nil
-    }
-    res := cluster.ResourceForApp(appName)
-    role := m.LastObservedRole(res)
+func (m *AppManager) ensureKernelLeader() error {
+    role := m.LastObservedRole(cluster.ResourceControlPlane)
     if role == cluster.RoleFollower {
         return ErrNotLeader
     }
@@ -249,7 +245,7 @@ func (m *AppManager) Install(ctx context.Context, appDef *api.AppDefinition) (*A
 	if err := m.ensureUnlocked(); err != nil {
 		return nil, err
 	}
-    if err := m.ensureLeaderForApp(appDef.Name); err != nil {
+    if err := m.ensureKernelLeader(); err != nil {
         return nil, err
     }
 	// Set defaults then validate
@@ -312,7 +308,7 @@ func (m *AppManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*Ap
 	if err := m.ensureUnlocked(); err != nil {
 		return nil, err
 	}
-    if err := m.ensureLeaderForApp(appDef.Name); err != nil {
+    if err := m.ensureKernelLeader(); err != nil {
         return nil, err
     }
 	if existing, exists := m.stateManager.GetApp(appDef.Name); exists {
@@ -370,7 +366,7 @@ func (m *AppManager) Start(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureLeaderForApp(name); err != nil {
+    if err := m.ensureKernelLeader(); err != nil {
         return err
     }
 	app, exists := m.stateManager.GetApp(name)
@@ -419,7 +415,7 @@ func (m *AppManager) Stop(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureLeaderForApp(name); err != nil {
+    if err := m.ensureKernelLeader(); err != nil {
         return err
     }
 	return m.stopInternal(ctx, name)
@@ -452,7 +448,7 @@ func (m *AppManager) Uninstall(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureLeaderForApp(name); err != nil {
+    if err := m.ensureKernelLeader(); err != nil {
         return err
     }
 	return m.UninstallWithOptions(ctx, name, false)
@@ -463,7 +459,7 @@ func (m *AppManager) UninstallWithOptions(ctx context.Context, name string, purg
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureLeaderForApp(name); err != nil {
+    if err := m.ensureKernelLeader(); err != nil {
         return err
     }
 	app, exists := m.stateManager.GetApp(name)
@@ -502,7 +498,7 @@ func (m *AppManager) Enable(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureLeaderForApp(name); err != nil {
+    if err := m.ensureKernelLeader(); err != nil {
         return err
     }
 	if _, exists := m.stateManager.GetApp(name); !exists {
@@ -517,7 +513,7 @@ func (m *AppManager) Disable(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureLeaderForApp(name); err != nil {
+    if err := m.ensureKernelLeader(); err != nil {
         return err
     }
 	if _, exists := m.stateManager.GetApp(name); !exists {
@@ -546,7 +542,7 @@ func (m *AppManager) UpdateImage(ctx context.Context, name string, tag *string) 
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureLeaderForApp(name); err != nil {
+    if err := m.ensureKernelLeader(); err != nil {
         return err
     }
 	appInst, exists := m.stateManager.GetApp(name)
