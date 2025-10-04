@@ -114,6 +114,9 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// Set Gin to release mode for production (can be overridden by GIN_MODE env var)
 	gin.SetMode(gin.ReleaseMode)
 
+	// Dispatcher guard middleware (lock state)
+	dispatch.Use(guardMiddleware(cmgr))
+
 	s := &GinServer{
 		appManager:     appMgr,
 		serviceManager: svcMgr,
@@ -151,6 +154,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	s.supervisor.Register(supervisor.NewComponent("consensus", consensusMgr.Start, consensusMgr.Stop))
 	s.supervisor.Register(newLeadershipObserver(eventsBus))
 	s.observeLockState(eventsBus)
+	s.observeLeadership(eventsBus)
 
 	for _, opt := range opts {
 		opt(s)
@@ -494,6 +498,30 @@ func (s *GinServer) observeLockState(bus *events.Bus) {
 			} else {
 				s.healthTracker.Setf("persistence", health.LevelOK, "control store unlocked")
 				s.healthTracker.Setf("app-manager", health.LevelOK, "app manager ready")
+			}
+		}
+	}()
+}
+
+func (s *GinServer) observeLeadership(bus *events.Bus) {
+	if bus == nil || s.healthTracker == nil {
+		return
+	}
+	ch := bus.Subscribe(events.TopicLeadershipRoleChanged, 8)
+	go func() {
+		for evt := range ch {
+			payload, ok := evt.Payload.(events.LeadershipChanged)
+			if !ok {
+				continue
+			}
+			if payload.Resource != cluster.ResourceControlPlane {
+				continue
+			}
+			switch payload.Role {
+			case cluster.RoleLeader:
+				s.healthTracker.Setf("service-manager", health.LevelOK, "service manager leader")
+			case cluster.RoleFollower:
+				s.healthTracker.Setf("service-manager", health.LevelWarn, "service manager standby (follower)")
 			}
 		}
 	}()

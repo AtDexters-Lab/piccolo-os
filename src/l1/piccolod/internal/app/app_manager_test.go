@@ -92,6 +92,34 @@ func TestAppManager_Install(t *testing.T) {
 	}
 }
 
+func TestAppManager_Install_NotLeader(t *testing.T) {
+	tempDir := t.TempDir()
+	mockContainer := NewMockContainerManager()
+	manager, err := NewAppManager(mockContainer, tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create AppManager: %v", err)
+	}
+	manager.ForceLockState(false)
+	bus := events.NewBus()
+	manager.ObserveRuntimeEvents(bus)
+	defer manager.StopRuntimeEvents()
+
+	bus.Publish(events.Event{Topic: events.TopicLeadershipRoleChanged, Payload: events.LeadershipChanged{Resource: cluster.ResourceControlPlane, Role: cluster.RoleFollower}})
+
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if manager.LastObservedRole(cluster.ResourceControlPlane) == cluster.RoleFollower {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	appDef := &api.AppDefinition{Name: "nope", Image: "nginx:alpine", Type: "user", Listeners: []api.AppListener{{Name: "web", GuestPort: 80}}}
+	if _, err := manager.Install(context.Background(), appDef); !errors.Is(err, ErrNotLeader) {
+		t.Fatalf("expected ErrNotLeader, got %v", err)
+	}
+}
+
 // TestAppManager_List tests listing apps from filesystem
 func TestAppManager_List(t *testing.T) {
 	// Create temporary directory for test

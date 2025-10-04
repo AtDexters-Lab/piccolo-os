@@ -13,7 +13,12 @@ const (
 
 const (
 	ResourceControlPlane = "control-plane"
+	ResourceAppPrefix    = "app:"
 )
+
+func ResourceForApp(name string) string {
+	return ResourceAppPrefix + name
+}
 
 // Registry tracks the current leadership role per resource ID.
 type Registry struct {

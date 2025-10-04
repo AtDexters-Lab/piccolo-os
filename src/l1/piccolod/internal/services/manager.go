@@ -315,20 +315,8 @@ func (m *ServiceManager) Stop() {
 
 func (m *ServiceManager) checkBackends() {
 	// Snapshot under lock
-	m.mu.RLock()
-	snap := make(map[string]map[string]ServiceEndpoint)
-	for app, mapp := range m.registry {
-		mm := make(map[string]ServiceEndpoint)
-		for name, ep := range mapp {
-			mm[name] = ep
-		}
-		snap[app] = mm
-	}
-	ids := make(map[string]string)
-	for app, id := range m.containerIDs {
-		ids[app] = id
-	}
-	m.mu.RUnlock()
+	snap := m.snapshotRegistry()
+	ids := m.snapshotContainerIDs()
 
 	// TCP connectivity check per endpoint
 	for _, mapp := range snap {
@@ -352,6 +340,30 @@ func (m *ServiceManager) checkBackends() {
 			log.Printf("WARN: Podman port mapping mismatch for app %s (cid=%s): %v", app, id, err)
 		}
 	}
+}
+
+func (m *ServiceManager) snapshotRegistry() map[string]map[string]ServiceEndpoint {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	clone := make(map[string]map[string]ServiceEndpoint, len(m.registry))
+	for app, mapp := range m.registry {
+		mm := make(map[string]ServiceEndpoint, len(mapp))
+		for name, ep := range mapp {
+			mm[name] = ep
+		}
+		clone[app] = mm
+	}
+	return clone
+}
+
+func (m *ServiceManager) snapshotContainerIDs() map[string]string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	clone := make(map[string]string, len(m.containerIDs))
+	for app, id := range m.containerIDs {
+		clone[app] = id
+	}
+	return clone
 }
 
 // verifyPodmanPorts compares published ports via `podman port` with registry endpoints

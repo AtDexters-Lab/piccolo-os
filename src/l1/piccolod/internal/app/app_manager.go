@@ -32,7 +32,10 @@ type AppManager struct {
 	leadershipState  map[string]cluster.Role
 }
 
-var ErrLocked = errors.New("app manager: persistence locked")
+var (
+	ErrLocked    = errors.New("app manager: persistence locked")
+	ErrNotLeader = errors.New("app manager: not leader")
+)
 
 // NewAppManagerWithServices creates a new filesystem-based app manager with an injected ServiceManager
 func NewAppManagerWithServices(containerManager ContainerManager, stateDir string, serviceManager *services.ServiceManager) (*AppManager, error) {
@@ -65,6 +68,7 @@ func (m *AppManager) ObserveRuntimeEvents(bus *events.Bus) {
 
 	leaders := bus.Subscribe(events.TopicLeadershipRoleChanged, 16)
 	locks := bus.Subscribe(events.TopicLockStateChanged, 8)
+	loopCtx := ctx
 
 	m.eventsWG.Add(1)
 	go func() {
@@ -88,6 +92,7 @@ func (m *AppManager) ObserveRuntimeEvents(bus *events.Bus) {
 				m.leadershipState[string(payload.Resource)] = payload.Role
 				m.leadershipMu.Unlock()
 				log.Printf("INFO: app-manager observed leadership change resource=%s role=%s", payload.Resource, payload.Role)
+				m.handleLeadershipChange(loopCtx, payload)
 			case evt, ok := <-locks:
 				if !ok {
 					locks = nil
@@ -157,6 +162,42 @@ func (m *AppManager) ensureUnlocked() error {
 	return nil
 }
 
+func (m *AppManager) ensureLeader() error {
+	role := m.LastObservedRole(cluster.ResourceControlPlane)
+	if role == cluster.RoleFollower {
+		return ErrNotLeader
+	}
+	return nil
+}
+
+func (m *AppManager) handleLeadershipChange(ctx context.Context, change events.LeadershipChanged) {
+	switch {
+	case change.Resource == cluster.ResourceControlPlane:
+		if change.Role == cluster.RoleFollower {
+			m.enterFollower(ctx)
+		}
+	case strings.HasPrefix(change.Resource, cluster.ResourceAppPrefix):
+		appName := strings.TrimPrefix(change.Resource, cluster.ResourceAppPrefix)
+		if appName == "" {
+			return
+		}
+		if change.Role == cluster.RoleFollower {
+			if err := m.stopInternal(ctx, appName); err != nil {
+				log.Printf("WARN: follower transition stop app %s failed: %v", appName, err)
+			}
+		}
+	}
+}
+
+func (m *AppManager) enterFollower(ctx context.Context) {
+	apps := m.stateManager.ListApps()
+	for _, app := range apps {
+		if err := m.stopInternal(ctx, app.Name); err != nil {
+			log.Printf("WARN: follower transition stop app %s failed: %v", app.Name, err)
+		}
+	}
+}
+
 // Locked reports the last observed lock state.
 func (m *AppManager) Locked() bool {
 	return m.isLocked()
@@ -204,6 +245,9 @@ func (m *AppManager) RestoreServices(ctx context.Context) {
 // Install installs a new application from its definition
 func (m *AppManager) Install(ctx context.Context, appDef *api.AppDefinition) (*AppInstance, error) {
 	if err := m.ensureUnlocked(); err != nil {
+		return nil, err
+	}
+	if err := m.ensureLeader(); err != nil {
 		return nil, err
 	}
 	// Set defaults then validate
@@ -266,6 +310,9 @@ func (m *AppManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*Ap
 	if err := m.ensureUnlocked(); err != nil {
 		return nil, err
 	}
+	if err := m.ensureLeader(); err != nil {
+		return nil, err
+	}
 	if existing, exists := m.stateManager.GetApp(appDef.Name); exists {
 		// Reconcile listeners first
 		rec, containerChange, err := m.serviceManager.Reconcile(appDef.Name, appDef.Listeners)
@@ -321,6 +368,9 @@ func (m *AppManager) Start(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
+	if err := m.ensureLeader(); err != nil {
+		return err
+	}
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -367,24 +417,27 @@ func (m *AppManager) Stop(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
+	if err := m.ensureLeader(); err != nil {
+		return err
+	}
+	return m.stopInternal(ctx, name)
+}
+
+func (m *AppManager) stopInternal(ctx context.Context, name string) error {
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
 
-	// Stop the container
 	if err := m.containerManager.StopContainer(ctx, app.ContainerID); err != nil {
-		// Update status to error
 		_ = m.stateManager.UpdateAppStatus(name, "error")
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
-	// Update status to stopped
 	if err := m.stateManager.UpdateAppStatus(name, "stopped"); err != nil {
 		return fmt.Errorf("failed to update app status: %w", err)
 	}
 
-	// Tear down service proxies so dashboard/services reflect the stopped state
 	if m.serviceManager != nil {
 		m.serviceManager.RemoveApp(name)
 	}
@@ -397,12 +450,18 @@ func (m *AppManager) Uninstall(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
+	if err := m.ensureLeader(); err != nil {
+		return err
+	}
 	return m.UninstallWithOptions(ctx, name, false)
 }
 
 // UninstallWithOptions removes an application; when purge is true, also deletes app data directories
 func (m *AppManager) UninstallWithOptions(ctx context.Context, name string, purge bool) error {
 	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
+	if err := m.ensureLeader(); err != nil {
 		return err
 	}
 	app, exists := m.stateManager.GetApp(name)
@@ -441,6 +500,9 @@ func (m *AppManager) Enable(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
+	if err := m.ensureLeader(); err != nil {
+		return err
+	}
 	if _, exists := m.stateManager.GetApp(name); !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
@@ -451,6 +513,9 @@ func (m *AppManager) Enable(ctx context.Context, name string) error {
 // Disable disables an application (systemctl-style)
 func (m *AppManager) Disable(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
+	if err := m.ensureLeader(); err != nil {
 		return err
 	}
 	if _, exists := m.stateManager.GetApp(name); !exists {
@@ -477,6 +542,9 @@ func (m *AppManager) ListEnabled(ctx context.Context) ([]string, error) {
 // UpdateImage updates an app's container image tag and recreates the container preserving services
 func (m *AppManager) UpdateImage(ctx context.Context, name string, tag *string) error {
 	if err := m.ensureUnlocked(); err != nil {
+		return err
+	}
+	if err := m.ensureLeader(); err != nil {
 		return err
 	}
 	appInst, exists := m.stateManager.GetApp(name)
