@@ -7,8 +7,11 @@
 - `docs/`: Architecture, development, security, and operations guides.
 
 ## Runtime Architecture Notes
-- Piccolod is converging on a mini-OS style runtime with shared infrastructure (event bus, leadership registry, supervisors, command dispatcher).  
-  See `src/l1/piccolod/docs/runtime/runtime-architecture-roadmap.md` for the latest roadmap and `src/l1/piccolod/docs/persistence/persistence-module-design.md` for the persistence component checkpoint.
+- Piccolod is converging on a mini-OS style runtime with shared infrastructure (event bus, leadership registry, supervisors, command dispatcher).
+  - Roadmap: `src/l1/piccolod/docs/runtime/runtime-architecture-roadmap.md`
+  - Persistence design checkpoint: `src/l1/piccolod/docs/persistence/persistence-module-design.md`
+  - Kernel/app leadership design: `src/l1/piccolod/docs/runtime/kernel-and-leadership-design.md`
+  - Single-node remote milestone scope: `src/l1/piccolod/docs/runtime/single-node-remote-milestone.md`
 
 ## Build, Test, and Development Commands
 - Build OS image: `cd src/l0 && ./build.sh [dev|prod]` — builds `piccolod`, generates MicroOS image, and (dev) runs smoke tests. Artifacts: `src/l0/releases/<version>/`.
