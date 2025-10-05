@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 
 	"piccolod/internal/app"
 	authpkg "piccolod/internal/auth"
@@ -64,6 +66,76 @@ type GinServer struct {
 	healthTracker *health.Tracker
 }
 
+type serviceRemoteResolver struct {
+	services *services.ServiceManager
+	mu       sync.RWMutex
+	domain   string
+	portal   string
+	port     int
+}
+
+func newServiceRemoteResolver(svc *services.ServiceManager) *serviceRemoteResolver {
+	port := 80
+	if p := os.Getenv("PORT"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			port = v
+		}
+	}
+	return &serviceRemoteResolver{services: svc, port: port}
+}
+
+func (r *serviceRemoteResolver) UpdateConfig(cfg nexusclient.Config) {
+	r.mu.Lock()
+	r.portal = strings.TrimSuffix(strings.ToLower(cfg.PortalHostname), ".")
+	domain := strings.TrimSuffix(strings.ToLower(cfg.TLD), ".")
+	if domain == "" && r.portal != "" {
+		if idx := strings.Index(r.portal, "."); idx != -1 {
+			domain = r.portal[idx+1:]
+		}
+	}
+	r.domain = domain
+	r.mu.Unlock()
+}
+
+func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int) (int, bool) {
+	h := strings.TrimSuffix(strings.ToLower(hostname), ".")
+	r.mu.RLock()
+	portal := r.portal
+	domain := r.domain
+	portalPort := r.port
+	r.mu.RUnlock()
+
+	if portal != "" && h == portal {
+		return portalPort, true
+	}
+
+	listener := ""
+	if domain != "" {
+		suffix := "." + domain
+		if strings.HasSuffix(h, suffix) {
+			label := h[:len(h)-len(suffix)]
+			if idx := strings.Index(label, "."); idx != -1 {
+				label = label[:idx]
+			}
+			listener = label
+		}
+	} else if idx := strings.Index(h, "."); idx != -1 {
+		listener = h[:idx]
+	}
+
+	if listener != "" {
+		if ep, ok := r.services.ResolveListener(listener, remotePort); ok {
+			return ep.PublicPort, true
+		}
+	}
+
+	if ep, ok := r.services.ResolveByRemotePort(remotePort); ok {
+		return ep.PublicPort, true
+	}
+
+	return 0, false
+}
+
 // GinServerOption is a function that configures a GinServer.
 type GinServerOption func(*GinServer)
 
@@ -95,6 +167,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// Initialize app manager with filesystem state management
 	svcMgr := services.NewServiceManager()
 	routeMgr := router.NewManager()
+	remoteResolver := newServiceRemoteResolver(svcMgr)
 	svcMgr.ObserveRuntimeEvents(eventsBus)
 	appMgr, err := app.NewAppManagerWithServices(podmanCLI, "", svcMgr)
 	if err != nil {
@@ -192,7 +265,12 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		return nil, fmt.Errorf("remote manager init: %w", err)
 	}
 	s.remoteManager = rm
-	nexusAdapter := nexusclient.NewStub()
+	var nexusAdapter nexusclient.Adapter
+	if os.Getenv("PICCOLO_NEXUS_USE_STUB") == "1" {
+		nexusAdapter = nexusclient.NewStub()
+	} else {
+		nexusAdapter = nexusclient.NewBackendAdapter(routeMgr, remoteResolver)
+	}
 	rm.SetNexusAdapter(nexusAdapter)
 	remote.RegisterHandlers(dispatch, rm)
 	s.healthTracker.Setf("remote", health.LevelOK, "remote manager ready")

@@ -1,15 +1,15 @@
 package server
 
 import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "net/http"
-    "net/http/httptest"
-    "os"
-    "strings"
-    "testing"
-    "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
 
     "github.com/gin-gonic/gin"
 
@@ -22,7 +22,8 @@ import (
     "piccolod/internal/events"
     "piccolod/internal/health"
     "piccolod/internal/mdns"
-    "piccolod/internal/remote"
+	"piccolod/internal/remote"
+	"piccolod/internal/remote/nexusclient"
     "piccolod/internal/services"
 )
 
@@ -649,6 +650,7 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 	if err != nil {
 		t.Fatalf("remote mgr: %v", err)
 	}
+	rm.SetNexusAdapter(nexusclient.NewStub())
 	server := &GinServer{
 		appManager:     appMgr,
 		serviceManager: svcMgr,

@@ -282,6 +282,47 @@ func (m *ServiceManager) GetAppListener(appName, listener string) (ServiceEndpoi
 	return ep, ok
 }
 
+// ResolveByRemotePort locates a service endpoint matching the remote port hint.
+func (m *ServiceManager) ResolveByRemotePort(port int) (ServiceEndpoint, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, mapp := range m.registry {
+		for _, ep := range mapp {
+			if matchesRemotePort(ep, port) {
+				return ep, true
+			}
+		}
+	}
+	return ServiceEndpoint{}, false
+}
+
+// ResolveListener finds a listener by name and optional remote port.
+func (m *ServiceManager) ResolveListener(listener string, remotePort int) (ServiceEndpoint, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, mapp := range m.registry {
+		if ep, ok := mapp[listener]; ok && matchesRemotePort(ep, remotePort) {
+			return ep, true
+		}
+	}
+	return ServiceEndpoint{}, false
+}
+
+func matchesRemotePort(ep ServiceEndpoint, remotePort int) bool {
+	if remotePort <= 0 {
+		return true
+	}
+	if len(ep.RemotePorts) == 0 {
+		return remotePort == 80 || remotePort == 443
+	}
+	for _, rp := range ep.RemotePorts {
+		if rp == remotePort {
+			return true
+		}
+	}
+	return false
+}
+
 // StopAll stops all proxy listeners
 func (m *ServiceManager) StopAll() {
 	m.proxyManager.StopAll()

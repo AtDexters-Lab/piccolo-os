@@ -13,6 +13,7 @@ const (
 
 const (
 	ResourceControlPlane = "control-plane"
+	ResourceKernel       = ResourceControlPlane
 	ResourceAppPrefix    = "app:"
 )
 

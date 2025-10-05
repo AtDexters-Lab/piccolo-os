@@ -508,6 +508,7 @@ func (m *Manager) applyAdapterState() {
 		Endpoint:       cfg.Endpoint,
 		DeviceSecret:   cfg.DeviceSecret,
 		PortalHostname: cfg.PortalHostname,
+		TLD:            cfg.TLD,
 	}
 	if err := adapter.Configure(adapterCfg); err != nil {
 		log.Printf("WARN: remote: configure nexus adapter failed: %v", err)

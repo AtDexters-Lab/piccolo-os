@@ -159,6 +159,9 @@ func TestManager_NexusAdapterLifecycle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("configure: %v", err)
 	}
+	if adapter.config.TLD != "example.com" {
+		t.Fatalf("expected TLD to propagate, got %s", adapter.config.TLD)
+	}
 
 	select {
 	case <-adapter.startCh:
