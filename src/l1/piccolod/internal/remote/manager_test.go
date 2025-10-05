@@ -6,6 +6,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"piccolod/internal/remote/nexusclient"
 )
 
 type stubDialer struct {
@@ -91,6 +93,85 @@ func TestRunPreflightSuccess(t *testing.T) {
 	}
 	if st.PortalHostname != "portal.example.com" {
 		t.Fatalf("unexpected portal host %s", st.PortalHostname)
+	}
+}
+
+type fakeAdapter struct {
+	config  nexusclient.Config
+	startCh chan struct{}
+	stopCh  chan struct{}
+}
+
+func newFakeAdapter() *fakeAdapter {
+	return &fakeAdapter{startCh: make(chan struct{}, 1), stopCh: make(chan struct{}, 1)}
+}
+
+func (f *fakeAdapter) Configure(cfg nexusclient.Config) error {
+	f.config = cfg
+	return nil
+}
+
+func (f *fakeAdapter) Start(ctx context.Context) error {
+	select {
+	case f.startCh <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (f *fakeAdapter) Stop(ctx context.Context) error {
+	select {
+	case f.stopCh <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (f *fakeAdapter) awaitStop(timeout time.Duration) error {
+	select {
+	case <-f.stopCh:
+		return nil
+	case <-time.After(timeout):
+		return errors.New("adapter stop timeout")
+	}
+}
+
+func TestManager_NexusAdapterLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := newFileStorage(dir)
+	if err != nil {
+		t.Fatalf("storage: %v", err)
+	}
+	m, err := newManagerWithDeps(storage, &stubDialer{}, &stubResolver{}, fixedNow(time.Unix(3, 0)))
+	if err != nil {
+		t.Fatalf("manager: %v", err)
+	}
+	adapter := newFakeAdapter()
+	m.SetNexusAdapter(adapter)
+
+	if err := m.Configure(ConfigureRequest{
+		Endpoint:       "wss://nexus.example.com/connect",
+		DeviceSecret:   "secret",
+		Solver:         "http-01",
+		TLD:            "example.com",
+		PortalHostname: "portal.example.com",
+	}); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+
+	select {
+	case <-adapter.startCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("expected adapter start")
+	}
+
+	if err := m.Disable(); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	if err := adapter.awaitStop(500 * time.Millisecond); err != nil {
+		t.Fatalf("adapter stop: %v", err)
 	}
 }
 

@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"piccolod/internal/remote/nexusclient"
 	"piccolod/internal/state/paths"
 )
 
@@ -130,11 +133,14 @@ type Storage interface {
 }
 
 type Manager struct {
-	storage  Storage
-	cfg      *Config
-	dialer   dialer
-	resolver resolver
-	now      func() time.Time
+	storage       Storage
+	cfg           *Config
+	dialer        dialer
+	resolver      resolver
+	now           func() time.Time
+	adapter       nexusclient.Adapter
+	adapterMu     sync.Mutex
+	adapterCancel context.CancelFunc
 }
 
 func NewManager(stateDir string) (*Manager, error) {
@@ -173,6 +179,13 @@ func newManagerWithDeps(storage Storage, d dialer, r resolver, now func() time.T
 		m.cfg = &Config{}
 	}
 	return m, nil
+}
+
+// SetNexusAdapter injects the adapter responsible for proxy connectivity.
+func (m *Manager) SetNexusAdapter(adapter nexusclient.Adapter) {
+	m.adapterMu.Lock()
+	defer m.adapterMu.Unlock()
+	m.adapter = adapter
 }
 
 type netDialer struct{}
@@ -253,6 +266,7 @@ func (m *Manager) save(cfg *Config) error {
 		}
 	}
 	m.cfg = cfg
+	m.applyAdapterState()
 	return nil
 }
 
@@ -477,6 +491,68 @@ func (m *Manager) RemoveAlias(id string) error {
 // ListCertificates returns the synthetic certificate inventory.
 func (m *Manager) ListCertificates() []Certificate {
 	return cloneCertificates(m.currentConfig().Certificates)
+}
+
+func (m *Manager) applyAdapterState() {
+	m.adapterMu.Lock()
+	adapter := m.adapter
+	cfg := m.currentConfig()
+	cancel := m.adapterCancel
+	m.adapterMu.Unlock()
+
+	if adapter == nil {
+		return
+	}
+
+	adapterCfg := nexusclient.Config{
+		Endpoint:       cfg.Endpoint,
+		DeviceSecret:   cfg.DeviceSecret,
+		PortalHostname: cfg.PortalHostname,
+	}
+	if err := adapter.Configure(adapterCfg); err != nil {
+		log.Printf("WARN: remote: configure nexus adapter failed: %v", err)
+	}
+
+	if !cfg.Enabled || cfg.Endpoint == "" || cfg.DeviceSecret == "" || cfg.PortalHostname == "" {
+		m.stopAdapter()
+		return
+	}
+
+	if cancel != nil {
+		m.stopAdapter()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.adapterMu.Lock()
+	m.adapterCancel = cancel
+	adapterRun := m.adapter
+	m.adapterMu.Unlock()
+
+	go func() {
+		if err := adapterRun.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("WARN: remote: nexus adapter exited: %v", err)
+		}
+		m.adapterMu.Lock()
+		m.adapterCancel = nil
+		m.adapterMu.Unlock()
+	}()
+}
+
+func (m *Manager) stopAdapter() {
+	m.adapterMu.Lock()
+	cancel := m.adapterCancel
+	adapter := m.adapter
+	m.adapterCancel = nil
+	m.adapterMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if adapter != nil {
+		if err := adapter.Stop(context.Background()); err != nil {
+			log.Printf("WARN: remote: stopping nexus adapter: %v", err)
+		}
+	}
 }
 
 // RenewCertificate simulates a manual renewal.

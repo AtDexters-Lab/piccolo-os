@@ -22,6 +22,7 @@ import (
 	"piccolod/internal/mdns"
 	"piccolod/internal/persistence"
 	"piccolod/internal/remote"
+	"piccolod/internal/remote/nexusclient"
 	"piccolod/internal/router"
 	"piccolod/internal/runtime/commands"
 	"piccolod/internal/runtime/supervisor"
@@ -191,6 +192,8 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		return nil, fmt.Errorf("remote manager init: %w", err)
 	}
 	s.remoteManager = rm
+	nexusAdapter := nexusclient.NewStub()
+	rm.SetNexusAdapter(nexusAdapter)
 	remote.RegisterHandlers(dispatch, rm)
 	s.healthTracker.Setf("remote", health.LevelOK, "remote manager ready")
 
