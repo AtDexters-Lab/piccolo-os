@@ -5,9 +5,11 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -34,6 +36,8 @@ type controlState struct {
 	remoteConfig    *RemoteConfig
 	apps            map[string]AppRecord
 	passwordHash    string
+	revision        uint64
+	checksum        string
 }
 
 type controlPayload struct {
@@ -42,6 +46,8 @@ type controlPayload struct {
 	Remote          *RemoteConfig `json:"remote,omitempty"`
 	Apps            []AppRecord   `json:"apps,omitempty"`
 	PasswordHash    string        `json:"password_hash,omitempty"`
+	Revision        uint64        `json:"revision"`
+	Checksum        string        `json:"checksum"`
 }
 
 type encryptedPayload struct {
@@ -90,6 +96,16 @@ func (s *encryptedControlStore) Lock() {
 	s.state = controlState{apps: make(map[string]AppRecord)}
 }
 
+func (s *encryptedControlStore) Revision(ctx context.Context) (uint64, string, error) {
+	_ = ctx
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.loaded {
+		return 0, "", ErrLocked
+	}
+	return s.state.revision, s.state.checksum, nil
+}
+
 func (s *encryptedControlStore) Unlock(ctx context.Context) error {
 	_ = ctx
 	s.mu.Lock()
@@ -136,6 +152,8 @@ func (s *encryptedControlStore) Unlock(ctx context.Context) error {
 				data.apps[app.Name] = app
 			}
 		}
+		data.revision = payload.Revision
+		data.checksum = payload.Checksum
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -148,10 +166,12 @@ func (s *encryptedControlStore) saveLocked() error {
 	if !s.loaded {
 		return ErrLocked
 	}
+	s.state.revision++
 	payload := controlPayload{
 		Version:         controlPayloadVersion,
 		AuthInitialized: s.state.authInitialized,
 		PasswordHash:    s.state.passwordHash,
+		Revision:        s.state.revision,
 	}
 	if s.state.remoteConfig != nil {
 		rc := cloneRemoteConfig(*s.state.remoteConfig)
@@ -164,6 +184,13 @@ func (s *encryptedControlStore) saveLocked() error {
 		}
 		sort.Slice(payload.Apps, func(i, j int) bool { return payload.Apps[i].Name < payload.Apps[j].Name })
 	}
+	plainNoChecksum, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	checksum := fmt.Sprintf("%x", sha256.Sum256(plainNoChecksum))
+	s.state.checksum = checksum
+	payload.Checksum = checksum
 	plain, err := json.Marshal(payload)
 	if err != nil {
 		return err

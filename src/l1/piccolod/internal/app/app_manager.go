@@ -15,6 +15,7 @@ import (
 	"piccolod/internal/cluster"
 	"piccolod/internal/container"
 	"piccolod/internal/events"
+	"piccolod/internal/router"
 	"piccolod/internal/services"
 )
 
@@ -23,6 +24,7 @@ type AppManager struct {
 	containerManager ContainerManager
 	stateManager     *FilesystemStateManager
 	serviceManager   *services.ServiceManager
+	routeRegistrar   router.Registrar
 	eventsMu         sync.Mutex
 	eventCancel      context.CancelFunc
 	eventsWG         sync.WaitGroup
@@ -51,6 +53,19 @@ func NewAppManagerWithServices(containerManager ContainerManager, stateDir strin
 		locked:           true,
 		leadershipState:  make(map[string]cluster.Role),
 	}, nil
+}
+
+// SetRouter wires the router registrar for leadership-based routing decisions.
+func (m *AppManager) SetRouter(reg router.Registrar) {
+	m.stateMu.Lock()
+	m.routeRegistrar = reg
+	m.stateMu.Unlock()
+}
+
+func (m *AppManager) currentRouter() router.Registrar {
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+	return m.routeRegistrar
 }
 
 // ObserveRuntimeEvents subscribes to leadership and lock-state events for logging.
@@ -163,17 +178,17 @@ func (m *AppManager) ensureUnlocked() error {
 }
 
 func (m *AppManager) ensureKernelLeader() error {
-    role := m.LastObservedRole(cluster.ResourceControlPlane)
-    if role == cluster.RoleFollower {
-        return ErrNotLeader
-    }
-    return nil
+	role := m.LastObservedRole(cluster.ResourceKernel)
+	if role == cluster.RoleFollower {
+		return ErrNotLeader
+	}
+	return nil
 }
 
 func (m *AppManager) handleLeadershipChange(ctx context.Context, change events.LeadershipChanged) {
 	switch {
-    case change.Resource == cluster.ResourceControlPlane:
-        // No global stop; per-app leadership events drive app lifecycle.
+	case change.Resource == cluster.ResourceKernel:
+		// No global stop; per-app leadership events drive app lifecycle.
 	case strings.HasPrefix(change.Resource, cluster.ResourceAppPrefix):
 		appName := strings.TrimPrefix(change.Resource, cluster.ResourceAppPrefix)
 		if appName == "" {
@@ -183,6 +198,13 @@ func (m *AppManager) handleLeadershipChange(ctx context.Context, change events.L
 			if err := m.stopInternal(ctx, appName); err != nil {
 				log.Printf("WARN: follower transition stop app %s failed: %v", appName, err)
 			}
+		}
+		if reg := m.currentRouter(); reg != nil {
+			mode := router.ModeLocal
+			if change.Role == cluster.RoleFollower {
+				mode = router.ModeTunnel
+			}
+			reg.RegisterAppRoute(appName, mode, "")
 		}
 	}
 }
@@ -245,9 +267,9 @@ func (m *AppManager) Install(ctx context.Context, appDef *api.AppDefinition) (*A
 	if err := m.ensureUnlocked(); err != nil {
 		return nil, err
 	}
-    if err := m.ensureKernelLeader(); err != nil {
-        return nil, err
-    }
+	if err := m.ensureKernelLeader(); err != nil {
+		return nil, err
+	}
 	// Set defaults then validate
 	SetDefaults(appDef)
 	if err := ValidateAppDefinition(appDef); err != nil {
@@ -308,9 +330,9 @@ func (m *AppManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*Ap
 	if err := m.ensureUnlocked(); err != nil {
 		return nil, err
 	}
-    if err := m.ensureKernelLeader(); err != nil {
-        return nil, err
-    }
+	if err := m.ensureKernelLeader(); err != nil {
+		return nil, err
+	}
 	if existing, exists := m.stateManager.GetApp(appDef.Name); exists {
 		// Reconcile listeners first
 		rec, containerChange, err := m.serviceManager.Reconcile(appDef.Name, appDef.Listeners)
@@ -366,9 +388,9 @@ func (m *AppManager) Start(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureKernelLeader(); err != nil {
-        return err
-    }
+	if err := m.ensureKernelLeader(); err != nil {
+		return err
+	}
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -415,9 +437,9 @@ func (m *AppManager) Stop(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureKernelLeader(); err != nil {
-        return err
-    }
+	if err := m.ensureKernelLeader(); err != nil {
+		return err
+	}
 	return m.stopInternal(ctx, name)
 }
 
@@ -448,9 +470,9 @@ func (m *AppManager) Uninstall(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureKernelLeader(); err != nil {
-        return err
-    }
+	if err := m.ensureKernelLeader(); err != nil {
+		return err
+	}
 	return m.UninstallWithOptions(ctx, name, false)
 }
 
@@ -459,9 +481,9 @@ func (m *AppManager) UninstallWithOptions(ctx context.Context, name string, purg
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureKernelLeader(); err != nil {
-        return err
-    }
+	if err := m.ensureKernelLeader(); err != nil {
+		return err
+	}
 	app, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
@@ -498,9 +520,9 @@ func (m *AppManager) Enable(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureKernelLeader(); err != nil {
-        return err
-    }
+	if err := m.ensureKernelLeader(); err != nil {
+		return err
+	}
 	if _, exists := m.stateManager.GetApp(name); !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
@@ -513,9 +535,9 @@ func (m *AppManager) Disable(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureKernelLeader(); err != nil {
-        return err
-    }
+	if err := m.ensureKernelLeader(); err != nil {
+		return err
+	}
 	if _, exists := m.stateManager.GetApp(name); !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
@@ -542,9 +564,9 @@ func (m *AppManager) UpdateImage(ctx context.Context, name string, tag *string) 
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-    if err := m.ensureKernelLeader(); err != nil {
-        return err
-    }
+	if err := m.ensureKernelLeader(); err != nil {
+		return err
+	}
 	appInst, exists := m.stateManager.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)

@@ -9,6 +9,7 @@ var (
 	ErrNotImplemented    = errors.New("persistence: not implemented")
 	ErrInvalidCommand    = errors.New("persistence: invalid command payload")
 	ErrLocked            = errors.New("persistence: locked")
+	ErrNotLeader         = errors.New("persistence: not leader")
 	ErrCryptoUnavailable = errors.New("persistence: crypto unavailable")
 	ErrNotFound          = errors.New("persistence: not found")
 )
@@ -43,6 +44,9 @@ func (n *noopControlStore) Auth() AuthRepo                  { return n.auth }
 func (n *noopControlStore) Remote() RemoteRepo              { return n.remote }
 func (n *noopControlStore) AppState() AppStateRepo          { return n.appRepo }
 func (n *noopControlStore) Close(ctx context.Context) error { return nil }
+func (n *noopControlStore) Revision(ctx context.Context) (uint64, string, error) {
+	return 0, "", ErrNotImplemented
+}
 
 type noopAuthRepo struct{}
 

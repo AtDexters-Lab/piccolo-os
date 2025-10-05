@@ -43,10 +43,30 @@ func TestEncryptedControlStoreLifecycle(t *testing.T) {
 	if err := store.Auth().SetInitialized(context.Background()); err != nil {
 		t.Fatalf("set initialized: %v", err)
 	}
+	rev, checksum, err := store.Revision(context.Background())
+	if err != nil {
+		t.Fatalf("revision after init: %v", err)
+	}
+	if rev != 1 {
+		t.Fatalf("expected revision 1 after init, got %d", rev)
+	}
+	if checksum == "" {
+		t.Fatalf("expected checksum after init")
+	}
 
 	const hashValue = "argon2id$v=19$m=65536,t=3,p=1$c2FsdHNhbHQ$ZHVtbXlobGFo"
 	if err := store.Auth().SavePasswordHash(context.Background(), hashValue); err != nil {
 		t.Fatalf("save password hash: %v", err)
+	}
+	rev, checksum, err = store.Revision(context.Background())
+	if err != nil {
+		t.Fatalf("revision after password hash: %v", err)
+	}
+	if rev != 2 {
+		t.Fatalf("expected revision 2 after password hash, got %d", rev)
+	}
+	if checksum == "" {
+		t.Fatalf("expected checksum non-empty after password hash")
 	}
 
 	storedHash, err := store.Auth().PasswordHash(context.Background())
@@ -61,9 +81,26 @@ func TestEncryptedControlStoreLifecycle(t *testing.T) {
 	if err := store.Remote().SaveConfig(context.Background(), RemoteConfig{Payload: remotePayload}); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
+	rev, checksum, err = store.Revision(context.Background())
+	if err != nil {
+		t.Fatalf("revision after remote config: %v", err)
+	}
+	if rev != 3 {
+		t.Fatalf("expected revision 3 after remote config, got %d", rev)
+	}
 
 	if err := store.AppState().UpsertApp(context.Background(), AppRecord{Name: "app-alpha"}); err != nil {
 		t.Fatalf("upsert app: %v", err)
+	}
+	rev, checksum, err = store.Revision(context.Background())
+	if err != nil {
+		t.Fatalf("revision after app upsert: %v", err)
+	}
+	if rev != 4 {
+		t.Fatalf("expected revision 4 after app upsert, got %d", rev)
+	}
+	if checksum == "" {
+		t.Fatalf("expected checksum non-empty after app upsert")
 	}
 
 	apps, err := store.AppState().ListApps(context.Background())
@@ -119,6 +156,16 @@ func TestEncryptedControlStoreLifecycle(t *testing.T) {
 	}
 	if len(apps) != 1 || apps[0].Name != "app-alpha" {
 		t.Fatalf("unexpected apps after restart: %#v", apps)
+	}
+	restoredRev, restoredChecksum, err := store2.Revision(context.Background())
+	if err != nil {
+		t.Fatalf("revision after restart: %v", err)
+	}
+	if restoredRev != rev {
+		t.Fatalf("expected revision %d after restart, got %d", rev, restoredRev)
+	}
+	if restoredChecksum != checksum {
+		t.Fatalf("expected checksum to persist, got %s", restoredChecksum)
 	}
 
 	// Ensure file does not contain plaintext values

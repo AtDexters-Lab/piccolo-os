@@ -30,6 +30,7 @@ type ControlStore interface {
 	Remote() RemoteRepo
 	AppState() AppStateRepo
 	Close(ctx context.Context) error
+	Revision(ctx context.Context) (uint64, string, error)
 }
 
 // VolumeManager orchestrates encrypted volumes via the storage backend.

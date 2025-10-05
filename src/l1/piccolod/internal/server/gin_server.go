@@ -22,6 +22,7 @@ import (
 	"piccolod/internal/mdns"
 	"piccolod/internal/persistence"
 	"piccolod/internal/remote"
+	"piccolod/internal/router"
 	"piccolod/internal/runtime/commands"
 	"piccolod/internal/runtime/supervisor"
 	"piccolod/internal/services"
@@ -46,6 +47,7 @@ type GinServer struct {
 	leadership     *cluster.Registry
 	supervisor     *supervisor.Supervisor
 	dispatcher     *commands.Dispatcher
+	routeManager   *router.Manager
 
 	// Optional OpenAPI request validation (Phase 0)
 	apiValidator *openAPIValidator
@@ -91,12 +93,14 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 
 	// Initialize app manager with filesystem state management
 	svcMgr := services.NewServiceManager()
+	routeMgr := router.NewManager()
 	svcMgr.ObserveRuntimeEvents(eventsBus)
 	appMgr, err := app.NewAppManagerWithServices(podmanCLI, "", svcMgr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init app manager: %w", err)
 	}
 	appMgr.ObserveRuntimeEvents(eventsBus)
+	appMgr.SetRouter(routeMgr)
 
 	// Initialize persistence module (skeleton; concrete components wired later)
 	persist, err := persistence.NewService(persistence.Options{
@@ -114,14 +118,15 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// Set Gin to release mode for production (can be overridden by GIN_MODE env var)
 	gin.SetMode(gin.ReleaseMode)
 
-    // Dispatcher middleware slot available for metrics/auditing; lock/leader
-    // enforcement is handled in persistence and managers to avoid duplication.
+	// Dispatcher middleware slot available for metrics/auditing; lock/leader
+	// enforcement is handled in persistence and managers to avoid duplication.
 
 	s := &GinServer{
 		appManager:     appMgr,
 		serviceManager: svcMgr,
 		persistence:    persist,
 		mdnsManager:    mdns.NewManager(),
+		routeManager:   routeMgr,
 		events:         eventsBus,
 		leadership:     leadershipReg,
 		supervisor:     sup,
@@ -507,24 +512,31 @@ func (s *GinServer) observeLeadership(bus *events.Bus) {
 	if bus == nil || s.healthTracker == nil {
 		return
 	}
-    ch := bus.Subscribe(events.TopicLeadershipRoleChanged, 8)
+	ch := bus.Subscribe(events.TopicLeadershipRoleChanged, 8)
 	go func() {
 		for evt := range ch {
 			payload, ok := evt.Payload.(events.LeadershipChanged)
 			if !ok {
 				continue
 			}
-			if payload.Resource != cluster.ResourceControlPlane {
+			if payload.Resource != cluster.ResourceKernel {
 				continue
 			}
-            // Standby (follower) is not a degraded state for the control plane in single-node context.
-            // Reflect role in the message but keep LevelOK.
-            switch payload.Role {
-            case cluster.RoleLeader:
-                s.healthTracker.Setf("service-manager", health.LevelOK, "service manager role=leader")
-            case cluster.RoleFollower:
-                s.healthTracker.Setf("service-manager", health.LevelOK, "service manager role=follower (standby)")
-            }
+			// Standby (follower) is not a degraded state for the control plane in single-node context.
+			// Reflect role in the message but keep LevelOK.
+			if s.routeManager != nil {
+				mode := router.ModeLocal
+				if payload.Role == cluster.RoleFollower {
+					mode = router.ModeTunnel
+				}
+				s.routeManager.RegisterKernelRoute(mode, "")
+			}
+			switch payload.Role {
+			case cluster.RoleLeader:
+				s.healthTracker.Setf("service-manager", health.LevelOK, "service manager role=leader")
+			case cluster.RoleFollower:
+				s.healthTracker.Setf("service-manager", health.LevelOK, "service manager role=follower (standby)")
+			}
 		}
 	}()
 }

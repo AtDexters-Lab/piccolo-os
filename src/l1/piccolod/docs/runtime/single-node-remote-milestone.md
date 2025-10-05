@@ -25,7 +25,7 @@ This document defines the scope, acceptance criteria, and implementation checkpo
 
 ## Deliverables
 - Encrypted control store with repos (auth, remote, appstate) + monotonic `rev` and checksum.
-- Single-disk VolumeManager: control/app volumes attach, encrypted directory backend acceptable for v0; AttachOptions enforce RO/RW.
+- Single-disk VolumeManager: control/app volumes mount through an encrypted backend (e.g., gocryptfs) rooted at `PICCOLO_STATE_DIR`; AttachOptions enforce RO/RW.
 - Leadership wiring:
   - Kernel leader required for management ops (install/stop/etc.).
   - App follower → stop only that app’s container; app leader → run locally.
@@ -33,16 +33,18 @@ This document defines the scope, acceptance criteria, and implementation checkpo
   - `RegisterKernelRoute(mode=local|tunnel, leaderAddr)`; `RegisterAppRoute(app, mode, leaderAddr)`.
   - On Nexus inbound streams, choose local (this milestone) or tunnel (future device hop) based on leadership.
 - Nexus integration:
-  - Start/Stop client under supervisor; register portal + app listeners; `OnStream` → Router.
+  - Adapter around the real `nexus-proxy-backend-client` supervised by runtime; register portal + app listeners; `OnStream` feeds Router decisions.
 - API behaviour:
   - Kernel write endpoints operate locally when leader; on followers, requests arriving through Nexus would be forwarded (hook in place).
 - Health:
   - Standby role (follower) reported as OK with role annotation; lock/unlock reflected.
+  - Fatal persistence/crypto failures flip readiness to HTTP 503 so MicroOS rollback hooks can trigger.
 
 ## Out of Scope (kept as TODOs)
 - Cross-device tunnels for app/kernel traffic (router supports the mode but not the transport here).
 - Nexus enrollment flows beyond device secret/connect; DNS automation/ACME issuance.
 - Block-replication fences; eventual consistency is acceptable with local `rev` verification.
+- Streaming PCV export pipeline (streaming writer, integrity bundle upload) — deferred to a follow-on milestone.
 
 ## Acceptance Criteria
 1. First boot → admin setup → unlock → `/health/ready` reports ready and components OK.
@@ -51,6 +53,7 @@ This document defines the scope, acceptance criteria, and implementation checkpo
 4. Remote access: inbound stream for the app proxies to the local app via Router.
 5. Simulated app follower event: local app stops; Router switches route to tunnel (log-only in single-node); no local serving.
 6. Auth/remote changes bump control-store `rev`; follower poller (if simulated) emits commit events; managers remain consistent.
+7. Inject simulated fatal persistence/crypto error → `/health/ready` flips to HTTP 503 with component status explaining the fault.
 
 ## Test Plan (manual or automated)
 - Unit tests: persistence `rev` bump; AppManager leader/follower reactions; Router stream hand-off (with fake Nexus client).
@@ -63,7 +66,7 @@ This document defines the scope, acceptance criteria, and implementation checkpo
 ## Implementation Checklist
 - [ ] Add `cluster.ResourceKernel`; refactor kernel checks.
 - [ ] Router stub + leadership hook; connect Nexus client `OnStream` to Router.
-- [ ] VolumeManager single-disk attach; enforce RO/RW per role.
+- [ ] VolumeManager single-disk encrypted mount; enforce RO/RW per role.
 - [ ] Control-store `rev` + checksum; follower poller; `TopicControlStoreCommit`.
 - [ ] Gate control-store writes on kernel leader; app volume RW on app leader.
 - [ ] Remote Manager ↔ Nexus client adapter and supervisor component.
@@ -73,4 +76,3 @@ This document defines the scope, acceptance criteria, and implementation checkpo
 - Runtime roadmap: `src/l1/piccolod/docs/runtime/runtime-architecture-roadmap.md`.
 - Kernel/app leadership design: `src/l1/piccolod/docs/runtime/kernel-and-leadership-design.md`.
 - Persistence design: `src/l1/piccolod/docs/persistence/persistence-module-design.md`.
-

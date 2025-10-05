@@ -15,6 +15,7 @@ const (
 	TopicDeviceEvent           Topic = "device_event"
 	TopicExportResult          Topic = "export_result"
 	TopicControlHealth         Topic = "control_health"
+	TopicControlStoreCommit    Topic = "control_store_commit"
 )
 
 // Event represents a message broadcast on the event bus.
@@ -30,6 +31,13 @@ type LeadershipChanged struct {
 }
 type LockStateChanged struct {
 	Locked bool
+}
+
+// ControlStoreCommit announces that the control store has advanced to a new revision.
+type ControlStoreCommit struct {
+	Revision uint64
+	Checksum string
+	Role     cluster.Role
 }
 
 // Bus is a simple pub/sub dispatcher for intra-process events.

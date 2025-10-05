@@ -3,6 +3,8 @@ package persistence
 import (
 	"context"
 	"log"
+	"sync"
+	"time"
 
 	"piccolod/internal/cluster"
 	"piccolod/internal/crypt"
@@ -29,17 +31,20 @@ type Options struct {
 
 // Module implements the Service interface using pluggable sub-components.
 type Module struct {
-	bootstrap  BootstrapStore
-	control    ControlStore
-	volumes    VolumeManager
-	devices    DeviceManager
-	exports    ExportManager
-	events     *events.Bus
-	leadership *cluster.Registry
-	storage    StorageAdapter
-	consensus  ConsensusManager
-	crypto     *crypt.Manager
-	stateDir   string
+	bootstrap          BootstrapStore
+	control            ControlStore
+	volumes            VolumeManager
+	devices            DeviceManager
+	exports            ExportManager
+	events             *events.Bus
+	leadership         *cluster.Registry
+	storage            StorageAdapter
+	consensus          ConsensusManager
+	crypto             *crypt.Manager
+	stateDir           string
+	commitMu           sync.Mutex
+	lastCommitRevision uint64
+	pollCancel         context.CancelFunc
 }
 
 // Ensure Module satisfies the Service interface.
@@ -86,10 +91,18 @@ func NewService(opts Options) (*Module, error) {
 		if err != nil {
 			return nil, err
 		}
-		mod.control = store
+		mod.control = newGuardedControlStore(store, func() bool {
+			if mod.leadership == nil {
+				return true
+			}
+			return mod.leadership.Current(cluster.ResourceKernel) != cluster.RoleFollower
+		}, mod.onControlCommit)
 	}
 	if mod.volumes == nil {
-		mod.volumes = newFileVolumeManager(mod.stateDir)
+		if mod.crypto == nil {
+			return nil, ErrCryptoUnavailable
+		}
+		mod.volumes = newFileVolumeManager(mod.stateDir, mod.crypto)
 	}
 	if mod.devices == nil {
 		mod.devices = newNoopDeviceManager()
@@ -117,6 +130,7 @@ func NewService(opts Options) (*Module, error) {
 	if err := mod.ensureCoreVolumes(context.Background()); err != nil {
 		return nil, err
 	}
+	mod.startRevisionPoller()
 
 	return mod, nil
 }
@@ -161,7 +175,7 @@ func (m *Module) observeLeadership() {
 			if !ok {
 				continue
 			}
-			if payload.Resource != cluster.ResourceControlPlane {
+			if payload.Resource != cluster.ResourceKernel {
 				continue
 			}
 			log.Printf("INFO: persistence observed control-plane role=%s", payload.Role)
@@ -263,6 +277,12 @@ func (m *Module) SwapConsensus(manager ConsensusManager) {
 
 // Shutdown terminates sub-components that require cleanup.
 func (m *Module) Shutdown(ctx context.Context) error {
+	m.commitMu.Lock()
+	if m.pollCancel != nil {
+		m.pollCancel()
+		m.pollCancel = nil
+	}
+	m.commitMu.Unlock()
 	if m.control != nil {
 		_ = m.control.Close(ctx)
 	}
@@ -279,4 +299,85 @@ func (m *Module) publishLockState(locked bool) {
 			Locked: locked,
 		},
 	})
+}
+
+type revisionReporter interface {
+	Revision(context.Context) (uint64, string, error)
+}
+
+func (m *Module) revisionSource() revisionReporter {
+	if rep, ok := m.control.(revisionReporter); ok {
+		return rep
+	}
+	return nil
+}
+
+func (m *Module) onControlCommit(ctx context.Context) {
+	rep := m.revisionSource()
+	if rep == nil {
+		return
+	}
+	rev, checksum, err := rep.Revision(ctx)
+	if err != nil {
+		log.Printf("WARN: persistence commit revision read failed: %v", err)
+		return
+	}
+	m.publishControlCommit(cluster.RoleLeader, rev, checksum)
+}
+
+func (m *Module) publishControlCommit(role cluster.Role, rev uint64, checksum string) {
+	m.commitMu.Lock()
+	if rev <= m.lastCommitRevision {
+		m.commitMu.Unlock()
+		return
+	}
+	m.lastCommitRevision = rev
+	m.commitMu.Unlock()
+	if m.events == nil {
+		return
+	}
+	m.events.Publish(events.Event{
+		Topic:   events.TopicControlStoreCommit,
+		Payload: events.ControlStoreCommit{Revision: rev, Checksum: checksum, Role: role},
+	})
+}
+
+func (m *Module) startRevisionPoller() {
+	rep := m.revisionSource()
+	if rep == nil {
+		return
+	}
+	m.commitMu.Lock()
+	if m.pollCancel != nil {
+		m.commitMu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.pollCancel = cancel
+	m.commitMu.Unlock()
+	go m.revisionPollLoop(ctx, rep)
+}
+
+func (m *Module) revisionPollLoop(ctx context.Context, rep revisionReporter) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.pollRevision(ctx, rep)
+		}
+	}
+}
+
+func (m *Module) pollRevision(ctx context.Context, rep revisionReporter) {
+	if m.leadership != nil && m.leadership.Current(cluster.ResourceKernel) == cluster.RoleLeader {
+		return
+	}
+	rev, checksum, err := rep.Revision(ctx)
+	if err != nil {
+		return
+	}
+	m.publishControlCommit(cluster.RoleFollower, rev, checksum)
 }

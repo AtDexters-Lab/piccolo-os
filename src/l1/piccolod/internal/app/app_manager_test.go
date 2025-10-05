@@ -11,6 +11,7 @@ import (
 	"piccolod/internal/api"
 	"piccolod/internal/cluster"
 	"piccolod/internal/events"
+	"piccolod/internal/router"
 )
 
 // TestAppManager_Install tests app installation with filesystem persistence
@@ -100,15 +101,19 @@ func TestAppManager_Install_NotLeader(t *testing.T) {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
 	manager.ForceLockState(false)
+	if err := manager.stateManager.StoreApp(&AppInstance{Name: "demo"}, &api.AppDefinition{Name: "demo"}); err != nil {
+		t.Fatalf("store app: %v", err)
+	}
+
 	bus := events.NewBus()
 	manager.ObserveRuntimeEvents(bus)
 	defer manager.StopRuntimeEvents()
 
-    bus.Publish(events.Event{Topic: events.TopicLeadershipRoleChanged, Payload: events.LeadershipChanged{Resource: cluster.ResourceControlPlane, Role: cluster.RoleFollower}})
+	bus.Publish(events.Event{Topic: events.TopicLeadershipRoleChanged, Payload: events.LeadershipChanged{Resource: cluster.ResourceKernel, Role: cluster.RoleFollower}})
 
 	deadline := time.Now().Add(100 * time.Millisecond)
 	for time.Now().Before(deadline) {
-    if manager.LastObservedRole(cluster.ResourceControlPlane) == cluster.RoleFollower {
+		if manager.LastObservedRole(cluster.ResourceKernel) == cluster.RoleFollower {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -117,6 +122,45 @@ func TestAppManager_Install_NotLeader(t *testing.T) {
 	appDef := &api.AppDefinition{Name: "nope", Image: "nginx:alpine", Type: "user", Listeners: []api.AppListener{{Name: "web", GuestPort: 80}}}
 	if _, err := manager.Install(context.Background(), appDef); !errors.Is(err, ErrNotLeader) {
 		t.Fatalf("expected ErrNotLeader, got %v", err)
+	}
+}
+
+func TestAppManager_RouterUpdatesOnLeadership(t *testing.T) {
+	tempDir := t.TempDir()
+	mockContainer := NewMockContainerManager()
+	manager, err := NewAppManager(mockContainer, tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create AppManager: %v", err)
+	}
+	manager.ForceLockState(false)
+	routeMgr := router.NewManager()
+	manager.SetRouter(routeMgr)
+
+	bus := events.NewBus()
+	manager.ObserveRuntimeEvents(bus)
+	defer manager.StopRuntimeEvents()
+
+	bus.Publish(events.Event{Topic: events.TopicLeadershipRoleChanged, Payload: events.LeadershipChanged{Resource: cluster.ResourceForApp("demo"), Role: cluster.RoleLeader}})
+
+	waitFor := func(cond func() bool) bool {
+		deadline := time.Now().Add(150 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if cond() {
+				return true
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		return cond()
+	}
+
+	if !waitFor(func() bool { return routeMgr.AppRoute("demo").Mode == router.ModeLocal }) {
+		t.Fatalf("expected local route when leader, got %s", routeMgr.AppRoute("demo").Mode)
+	}
+
+	bus.Publish(events.Event{Topic: events.TopicLeadershipRoleChanged, Payload: events.LeadershipChanged{Resource: cluster.ResourceForApp("demo"), Role: cluster.RoleFollower}})
+
+	if !waitFor(func() bool { return routeMgr.AppRoute("demo").Mode == router.ModeTunnel }) {
+		t.Fatalf("expected tunnel route when follower, got %s", routeMgr.AppRoute("demo").Mode)
 	}
 }
 
