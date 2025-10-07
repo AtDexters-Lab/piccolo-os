@@ -65,19 +65,24 @@ func (s *GinServer) handleCryptoUnlock(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "not initialized"})
 		return
 	}
-	if strings.TrimSpace(body.Password) != "" {
-		if err := s.cryptoManager.Unlock(body.Password); err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-			return
-		}
-		if err := s.notifyPersistenceLockState(c.Request.Context(), false); err != nil {
-			log.Printf("WARN: failed to propagate unlock state: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update persistence state"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "ok"})
-		return
-	}
+    if strings.TrimSpace(body.Password) != "" {
+        if err := s.cryptoManager.Unlock(body.Password); err != nil {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+            return
+        }
+        if err := s.notifyPersistenceLockState(c.Request.Context(), false); err != nil {
+            log.Printf("WARN: failed to propagate unlock state: %v", err)
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update persistence state"})
+            return
+        }
+        // Best-effort: verify admin credentials and create a session automatically.
+        if ok, err := s.authManager.Verify(c.Request.Context(), "admin", body.Password); err == nil && ok {
+            sess := s.sessions.Create("admin", 3600)
+            s.setSessionCookie(c, sess.ID, time.Hour)
+        }
+        c.JSON(http.StatusOK, gin.H{"message": "ok"})
+        return
+    }
 	if strings.TrimSpace(body.RecoveryKey) != "" {
 		words := strings.Fields(body.RecoveryKey)
 		if err := s.cryptoManager.UnlockWithRecoveryKey(words); err != nil {

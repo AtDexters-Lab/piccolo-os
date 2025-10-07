@@ -442,33 +442,34 @@ func (s *GinServer) setupGinRoutes() {
 		})
 
 		// Auth & sessions (selected public endpoints)
-		v1.GET("/auth/session", s.handleAuthSession)
-		v1.GET("/auth/initialized", s.handleAuthInitialized)
-		v1.POST("/auth/login", s.handleAuthLogin)
-		v1.POST("/auth/setup", s.handleAuthSetup)
+        v1.GET("/auth/session", s.handleAuthSession)
+        v1.GET("/auth/initialized", s.handleAuthInitialized)
+        v1.POST("/auth/login", s.handleAuthLogin)
+        v1.POST("/auth/setup", s.handleAuthSetup)
 
 		// Selected read-only status endpoints remain public
-		v1.GET("/updates/os", s.handleOSUpdateStatus)
-		v1.GET("/remote/status", s.handleRemoteStatus)
-		v1.GET("/storage/disks", s.handleStorageDisks)
-		v1.GET("/health/live", s.handleHealthLive)
-		v1.GET("/health/ready", s.handleGinReadinessCheck)
-		v1.GET("/health/detail", s.handleHealthDetail)
+        v1.GET("/updates/os", s.handleOSUpdateStatus)
+        v1.GET("/remote/status", s.handleRemoteStatus)
+        v1.GET("/storage/disks", s.handleStorageDisks)
+        v1.GET("/health/live", s.handleHealthLive)
+        v1.GET("/health/ready", s.handleGinReadinessCheck)
+        v1.GET("/health/detail", s.handleHealthDetail)
 
 		// Allow unlocking without a session to break the initial lock/setup cycle.
-		v1.POST("/crypto/unlock", s.handleCryptoUnlock)
+        // Crypto: expose status/setup/unlock publicly to break circular dependency with sessions.
+        v1.GET("/crypto/status", s.handleCryptoStatus)
+        v1.POST("/crypto/setup", s.handleCryptoSetup)
+        v1.POST("/crypto/unlock", s.handleCryptoUnlock)
 
 		// All other API endpoints require session + CSRF
 		authed := v1.Group("/")
 		authed.Use(s.requireSession())
 		authed.Use(s.csrfMiddleware())
 
-		// Crypto endpoints (session required except unlock)
-		authed.GET("/crypto/status", s.handleCryptoStatus)
-		authed.POST("/crypto/setup", s.handleCryptoSetup)
-		authed.POST("/crypto/lock", s.handleCryptoLock)
-		authed.GET("/crypto/recovery-key", s.handleCryptoRecoveryStatus)
-		authed.POST("/crypto/recovery-key/generate", s.handleCryptoRecoveryGenerate)
+        // Crypto endpoints (session required for lock/recovery management)
+        authed.POST("/crypto/lock", s.handleCryptoLock)
+        authed.GET("/crypto/recovery-key", s.handleCryptoRecoveryStatus)
+        authed.POST("/crypto/recovery-key/generate", s.handleCryptoRecoveryGenerate)
 
 		// App management endpoints
 		apps := authed.Group("/apps")
