@@ -217,10 +217,11 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// Initialize app manager with filesystem state management
 	svcMgr := services.NewServiceManager()
 	routeMgr := router.NewManager()
-    remoteResolver := newServiceRemoteResolver(svcMgr)
+	remoteResolver := newServiceRemoteResolver(svcMgr)
 	svcMgr.ObserveRuntimeEvents(eventsBus)
 	// TLS mux (loopback, remote-only) — created now, started when remote is configured
 	tlsMux := services.NewTlsMux(svcMgr)
+    // Wire ACME HTTP-01 handler into HTTP proxies (set after remote manager init)
 	appMgr, err := app.NewAppManagerWithServices(podmanCLI, "", svcMgr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init app manager: %w", err)
@@ -319,6 +320,13 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		return nil, fmt.Errorf("remote manager init: %w", err)
 	}
 	s.remoteManager = rm
+    // Now that remote manager exists, wire ACME challenge handler and cert provider
+    if rm != nil && svcMgr != nil {
+        svcMgr.ProxyManager().SetAcmeHandler(rm.HTTPChallengeHandler())
+        // File-based cert provider under control volume
+        certProv := remote.NewFileCertProvider("")
+        tlsMux.SetCertProvider(certProv)
+    }
 	var nexusAdapter nexusclient.Adapter
     if os.Getenv("PICCOLO_NEXUS_USE_STUB") == "1" {
         nexusAdapter = nexusclient.NewStub()
@@ -376,7 +384,7 @@ func (s *GinServer) Stop() error {
 
 // setupGinRoutes defines all API endpoints using Gin router.
 func (s *GinServer) setupGinRoutes() {
-	r := gin.New()
+    r := gin.New()
 
 	// Avoid implicit redirects that can cause loops during SPA routing
 	r.RedirectTrailingSlash = false
@@ -404,8 +412,22 @@ func (s *GinServer) setupGinRoutes() {
 		r.Use(s.apiValidator.Middleware())
 	}
 
-	// Root endpoint
-	r.GET("/", s.handleGinRoot)
+    // Root endpoint
+    r.GET("/", s.handleGinRoot)
+    // ACME HTTP-01 challenge for portal hostname
+    r.GET("/.well-known/acme-challenge/:token", func(c *gin.Context) {
+        if s.remoteManager == nil {
+            c.Status(http.StatusNotFound)
+            return
+        }
+        h := s.remoteManager.HTTPChallengeHandler()
+        if h == nil {
+            c.Status(http.StatusNotFound)
+            return
+        }
+        // Delegate to handler (ensures correct content-type and body)
+        h.ServeHTTP(c.Writer, c.Request)
+    })
 
 	// API v1 group
 	v1 := r.Group("/api/v1")

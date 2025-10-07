@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -133,14 +134,15 @@ type Storage interface {
 }
 
 type Manager struct {
-	storage       Storage
-	cfg           *Config
-	dialer        dialer
-	resolver      resolver
-	now           func() time.Time
-	adapter       nexusclient.Adapter
-	adapterMu     sync.Mutex
-	adapterCancel context.CancelFunc
+    storage       Storage
+    cfg           *Config
+    dialer        dialer
+    resolver      resolver
+    now           func() time.Time
+    adapter       nexusclient.Adapter
+    adapterMu     sync.Mutex
+    adapterCancel context.CancelFunc
+    challenges    *ChallengeManager
 }
 
 func NewManager(stateDir string) (*Manager, error) {
@@ -159,12 +161,13 @@ func newManagerWithDeps(storage Storage, d dialer, r resolver, now func() time.T
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	m := &Manager{
-		storage:  storage,
-		dialer:   d,
-		resolver: r,
-		now:      now,
-	}
+    m := &Manager{
+        storage:  storage,
+        dialer:   d,
+        resolver: r,
+        now:      now,
+    }
+    m.challenges = NewChallengeManager()
 	if storage != nil {
 		cfg, err := storage.Load(context.Background())
 		if err != nil {
@@ -537,6 +540,14 @@ func (m *Manager) applyAdapterState() {
 		m.adapterCancel = nil
 		m.adapterMu.Unlock()
 	}()
+}
+
+// HTTPChallengeHandler exposes a read-only handler for ACME HTTP-01 tokens.
+func (m *Manager) HTTPChallengeHandler() http.Handler {
+    if m == nil || m.challenges == nil {
+        return http.NotFoundHandler()
+    }
+    return m.challenges.Handler()
 }
 
 func (m *Manager) stopAdapter() {

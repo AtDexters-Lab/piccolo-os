@@ -8,6 +8,7 @@ import (
     "net/http/httputil"
     "net/url"
     "strconv"
+    "strings"
     "sync"
     "time"
 )
@@ -17,11 +18,15 @@ type ProxyManager struct {
     mu        sync.Mutex
     listeners map[int]net.Listener // by public port
     wg        sync.WaitGroup
+    acme      http.Handler
 }
 
 func NewProxyManager() *ProxyManager {
     return &ProxyManager{listeners: make(map[int]net.Listener)}
 }
+
+// SetAcmeHandler registers a handler to serve HTTP-01 challenges for all HTTP proxies.
+func (p *ProxyManager) SetAcmeHandler(h http.Handler) { p.mu.Lock(); p.acme = h; p.mu.Unlock() }
 
 // StartListener starts a TCP proxy for the given endpoint
 func (p *ProxyManager) StartListener(ep ServiceEndpoint) {
@@ -112,6 +117,14 @@ func (p *ProxyManager) startHTTPProxy(ln net.Listener, ep ServiceEndpoint) {
 
     // Default middleware chain (stubs)
     handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Intercept ACME HTTP-01 challenges on HTTP proxies only
+        if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
+            p.mu.Lock(); acme := p.acme; p.mu.Unlock()
+            if acme != nil {
+                acme.ServeHTTP(w, r)
+                return
+            }
+        }
         rp.ServeHTTP(w, r)
     }))
     handler = securityHeaders(handler)

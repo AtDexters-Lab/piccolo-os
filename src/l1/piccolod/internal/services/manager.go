@@ -178,9 +178,12 @@ func (m *ServiceManager) stopEventObservers() {
 
 // StopRuntimeEvents cancels leadership/lock subscriptions and waits for handlers to exit.
 func (m *ServiceManager) StopRuntimeEvents() {
-	m.stopEventObservers()
-	m.wg.Wait()
+    m.stopEventObservers()
+    m.wg.Wait()
 }
+
+// ProxyManager returns the underlying ProxyManager.
+func (m *ServiceManager) ProxyManager() *ProxyManager { return m.proxyManager }
 
 // LastObservedRole reports the most recent leadership role seen for a resource.
 func (m *ServiceManager) LastObservedRole(resource string) cluster.Role {
