@@ -20,8 +20,8 @@
     } catch {}
     // Probe lock state before any sign-in attempt
     try {
-      const sess: any = await apiProd('/auth/session');
-      cryptoLocked = !!sess?.volumes_locked;
+      const st: any = await apiProd('/crypto/status');
+      cryptoLocked = !!st?.locked;
     } catch {}
   });
   async function signIn(path: string = '/auth/login') {
