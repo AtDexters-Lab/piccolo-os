@@ -472,10 +472,12 @@ func (m *Manager) AddAlias(listener, hostname string) (Alias, error) {
 		Source:    "remote",
 		Message:   fmt.Sprintf("Alias %s queued for listener %s", hostname, listener),
 	})
-	if err := m.save(cfg); err != nil {
-		return Alias{}, err
-	}
-	return alias, nil
+    if err := m.save(cfg); err != nil {
+        return Alias{}, err
+    }
+    // Queue issuance for the alias hostname (listener-specific cert)
+    m.enqueueIssuance("alias:"+strings.ToLower(hostname), []string{strings.ToLower(hostname)}, strings.ToLower(hostname))
+    return alias, nil
 }
 
 // RemoveAlias deletes an alias by ID.
@@ -597,6 +599,16 @@ func (m *Manager) RenewCertificate(id string) error {
         }
     }
     return errors.New("certificate not found")
+}
+
+// QueueHostnameCertificate requests background issuance for a specific hostname.
+// Useful for per-listener certs when wildcard isn't available/supported.
+func (m *Manager) QueueHostnameCertificate(hostname string) {
+    h := strings.TrimSpace(strings.ToLower(hostname))
+    if h == "" {
+        return
+    }
+    m.enqueueIssuance("host:"+h, []string{h}, h)
 }
 
 // enqueueIssuance starts background issuance for the given id/domains/commonName

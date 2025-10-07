@@ -6,6 +6,7 @@ import (
     "net/http"
     "os"
     "strconv"
+    "strings"
     "time"
 
     "github.com/gin-gonic/gin"
@@ -71,6 +72,24 @@ func (s *GinServer) handleRemoteConfigure(c *gin.Context) {
             }
         } else {
             log.Printf("WARN: TLS mux start failed: %v", err)
+        }
+    }
+    // For HTTP-01 solver (wildcard unsupported), proactively issue per-listener certs
+    if strings.EqualFold(configureReq.Solver, "http-01") && configureReq.TLD != "" && s.remoteManager != nil {
+        hosts := map[string]struct{}{}
+        for _, ep := range s.serviceManager.GetAll() {
+            if strings.EqualFold(ep.Flow, "tls") {
+                continue
+            }
+            if !strings.EqualFold(ep.Protocol, "http") && !strings.EqualFold(ep.Protocol, "websocket") {
+                continue
+            }
+            if ep.Name == "" { continue }
+            host := strings.ToLower(ep.Name + "." + configureReq.TLD)
+            hosts[host] = struct{}{}
+        }
+        for h := range hosts {
+            s.remoteManager.QueueHostnameCertificate(h)
         }
     }
     c.JSON(http.StatusOK, gin.H{"message": "remote configured"})
