@@ -13,26 +13,26 @@ import (
 
 // BackendAdapter wraps the real nexus backend client.
 type BackendAdapter struct {
-	mu       sync.Mutex
-	cfg      Config
-	client   *backend.Client
-	cancel   context.CancelFunc
-	router   *router.Manager
-	resolver RemoteResolver
+    mu       sync.Mutex
+    cfg      Config
+    client   *backend.Client
+    cancel   context.CancelFunc
+    router   *router.Manager
+    resolver RemoteResolver
 }
 
 func NewBackendAdapter(r *router.Manager, resolver RemoteResolver) *BackendAdapter {
-	return &BackendAdapter{router: r, resolver: resolver}
+    return &BackendAdapter{router: r, resolver: resolver}
 }
 
 func (a *BackendAdapter) Configure(cfg Config) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.cfg = cfg
-	if updater, ok := a.resolver.(interface{ UpdateConfig(Config) }); ok {
-		updater.UpdateConfig(cfg)
-	}
-	return nil
+    a.mu.Lock()
+    defer a.mu.Unlock()
+    a.cfg = cfg
+    if updater, ok := a.resolver.(interface{ UpdateConfig(Config) }); ok {
+        updater.UpdateConfig(cfg)
+    }
+    return nil
 }
 
 func (a *BackendAdapter) Start(ctx context.Context) error {
@@ -87,29 +87,34 @@ func (a *BackendAdapter) Stop(ctx context.Context) error {
 }
 
 func (a *BackendAdapter) connectHandler() backend.ConnectHandler {
-	return func(ctx context.Context, req backend.ConnectRequest) (net.Conn, error) {
-		if a.router != nil {
-			route := a.router.DecideAppRoute(req.Hostname)
-			if route.Mode == router.ModeTunnel {
-				return nil, backend.ErrNoRoute
-			}
-		}
+    return func(ctx context.Context, req backend.ConnectRequest) (net.Conn, error) {
+        if a.router != nil {
+            route := a.router.DecideAppRoute(req.Hostname)
+            if route.Mode == router.ModeTunnel {
+                return nil, backend.ErrNoRoute
+            }
+        }
 
 		localPort := 0
-		if a.resolver != nil {
-			if port, ok := a.resolver.Resolve(req.OriginalHostname, req.Port); ok {
-				localPort = port
-			} else if port, ok := a.resolver.Resolve(req.Hostname, req.Port); ok {
-				localPort = port
-			} else {
-				return nil, backend.ErrNoRoute
-			}
-		}
-		if localPort == 0 {
-			localPort = req.Port
-		}
-		target := fmt.Sprintf("127.0.0.1:%d", localPort)
-		var d net.Dialer
-		return d.DialContext(ctx, "tcp", target)
-	}
+        if a.resolver != nil {
+            if port, ok := a.resolver.Resolve(req.OriginalHostname, req.Port); ok {
+                localPort = port
+            } else if port, ok := a.resolver.Resolve(req.Hostname, req.Port); ok {
+                localPort = port
+            } else {
+                return nil, backend.ErrNoRoute
+            }
+        }
+        if localPort == 0 {
+            localPort = req.Port
+        }
+        target := fmt.Sprintf("127.0.0.1:%d", localPort)
+        var d net.Dialer
+        return d.DialContext(ctx, "tcp", target)
+    }
 }
+
+// UnregisterPublicPort marks a local public port as unavailable so new inbound
+// streams are refused immediately at the adapter boundary. Existing client
+// streams are naturally torn down when the proxy listener closes.
+// No-op lifecycle hooks for dynamic port publish/unpublish are intentionally omitted for now.

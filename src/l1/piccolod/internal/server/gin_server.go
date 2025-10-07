@@ -50,7 +50,9 @@ type GinServer struct {
 	leadership     *cluster.Registry
 	supervisor     *supervisor.Supervisor
 	dispatcher     *commands.Dispatcher
-	routeManager   *router.Manager
+    routeManager   *router.Manager
+    tlsMux         *services.TlsMux
+    remoteResolver *serviceRemoteResolver
 
 	// Optional OpenAPI request validation (Phase 0)
 	apiValidator *openAPIValidator
@@ -66,12 +68,23 @@ type GinServer struct {
 	healthTracker *health.Tracker
 }
 
+// portUnpublisherFunc adapts a function into services.PortUnpublisher.
+type portUnpublisherFunc func(int)
+
+func (f portUnpublisherFunc) Unpublish(p int) { f(p) }
+
+// portPublisherFunc adapts a function into services.PortPublisher.
+type portPublisherFunc func(int)
+
+func (f portPublisherFunc) Publish(p int) { f(p) }
+
 type serviceRemoteResolver struct {
-	services *services.ServiceManager
-	mu       sync.RWMutex
-	domain   string
-	portal   string
-	port     int
+    services *services.ServiceManager
+    mu       sync.RWMutex
+    domain   string
+    portal   string
+    port     int
+    tlsMuxPort int
 }
 
 func newServiceRemoteResolver(svc *services.ServiceManager) *serviceRemoteResolver {
@@ -93,21 +106,32 @@ func (r *serviceRemoteResolver) UpdateConfig(cfg nexusclient.Config) {
 			domain = r.portal[idx+1:]
 		}
 	}
-	r.domain = domain
-	r.mu.Unlock()
+    r.domain = domain
+    r.mu.Unlock()
 }
 
-func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int) (int, bool) {
-	h := strings.TrimSuffix(strings.ToLower(hostname), ".")
-	r.mu.RLock()
-	portal := r.portal
-	domain := r.domain
-	portalPort := r.port
-	r.mu.RUnlock()
+func (r *serviceRemoteResolver) SetTlsMuxPort(p int) { r.mu.Lock(); r.tlsMuxPort = p; r.mu.Unlock() }
 
-	if portal != "" && h == portal {
-		return portalPort, true
-	}
+func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int) (int, bool) {
+    h := strings.TrimSuffix(strings.ToLower(hostname), ".")
+    r.mu.RLock()
+    portal := r.portal
+    domain := r.domain
+    portalPort := r.port
+    tlsMuxPort := r.tlsMuxPort
+    r.mu.RUnlock()
+
+    // Portal host: treat as flow=tcp (device-terminated TLS when not 80)
+    if portal != "" && h == portal {
+        if remotePort == 80 {
+            return portalPort, true
+        }
+        if tlsMuxPort > 0 {
+            return tlsMuxPort, true
+        }
+        // Fallback to portalPort if mux not running (unit tests)
+        return portalPort, true
+    }
 
 	listener := ""
 	if domain != "" {
@@ -123,15 +147,41 @@ func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int) (int, b
 		listener = h[:idx]
 	}
 
-	if listener != "" {
-		if ep, ok := r.services.ResolveListener(listener, remotePort); ok {
-			return ep.PublicPort, true
-		}
-	}
+    // Listener host
+    if listener != "" {
+        if ep, ok := r.services.ResolveListener(listener, remotePort); ok {
+            switch strings.ToLower(ep.Flow) {
+            case "tls":
+                // App terminates TLS end-to-end (passthrough)
+                return ep.PublicPort, true
+            default: // "tcp" or empty
+                if remotePort == 80 {
+                    return ep.PublicPort, true
+                }
+                if tlsMuxPort > 0 {
+                    return tlsMuxPort, true
+                }
+                // Fallback to HTTP path if mux not running
+                return ep.PublicPort, true
+            }
+        }
+    }
 
-	if ep, ok := r.services.ResolveByRemotePort(remotePort); ok {
-		return ep.PublicPort, true
-	}
+    // Fallback by port only (rare): apply same flow policy when we find an ep
+    if ep, ok := r.services.ResolveByRemotePort(remotePort); ok {
+        switch strings.ToLower(ep.Flow) {
+        case "tls":
+            return ep.PublicPort, true
+        default:
+            if remotePort == 80 {
+                return ep.PublicPort, true
+            }
+            if tlsMuxPort > 0 {
+                return tlsMuxPort, true
+            }
+            return ep.PublicPort, true
+        }
+    }
 
 	return 0, false
 }
@@ -167,8 +217,10 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// Initialize app manager with filesystem state management
 	svcMgr := services.NewServiceManager()
 	routeMgr := router.NewManager()
-	remoteResolver := newServiceRemoteResolver(svcMgr)
+    remoteResolver := newServiceRemoteResolver(svcMgr)
 	svcMgr.ObserveRuntimeEvents(eventsBus)
+	// TLS mux (loopback, remote-only) — created now, started when remote is configured
+	tlsMux := services.NewTlsMux(svcMgr)
 	appMgr, err := app.NewAppManagerWithServices(podmanCLI, "", svcMgr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init app manager: %w", err)
@@ -195,12 +247,14 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// Dispatcher middleware slot available for metrics/auditing; lock/leader
 	// enforcement is handled in persistence and managers to avoid duplication.
 
-	s := &GinServer{
+    s := &GinServer{
 		appManager:     appMgr,
 		serviceManager: svcMgr,
 		persistence:    persist,
 		mdnsManager:    mdns.NewManager(),
 		routeManager:   routeMgr,
+        tlsMux:         tlsMux,
+        remoteResolver: remoteResolver,
 		events:         eventsBus,
 		leadership:     leadershipReg,
 		supervisor:     sup,
@@ -266,14 +320,16 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	}
 	s.remoteManager = rm
 	var nexusAdapter nexusclient.Adapter
-	if os.Getenv("PICCOLO_NEXUS_USE_STUB") == "1" {
-		nexusAdapter = nexusclient.NewStub()
-	} else {
-		nexusAdapter = nexusclient.NewBackendAdapter(routeMgr, remoteResolver)
-	}
+    if os.Getenv("PICCOLO_NEXUS_USE_STUB") == "1" {
+        nexusAdapter = nexusclient.NewStub()
+    } else {
+        nexusAdapter = nexusclient.NewBackendAdapter(routeMgr, remoteResolver)
+    }
 	rm.SetNexusAdapter(nexusAdapter)
 	remote.RegisterHandlers(dispatch, rm)
 	s.healthTracker.Setf("remote", health.LevelOK, "remote manager ready")
+
+    // (Simplified) No dynamic port publish/unpublish wiring; allow dial to fail gracefully.
 
 	// Rehydrate proxies for containers that survived restarts
 	appMgr.RestoreServices(context.Background())
@@ -363,13 +419,10 @@ func (s *GinServer) setupGinRoutes() {
 			}
 		})
 
-		// Auth & sessions (no auth required)
+		// Auth & sessions (selected public endpoints)
 		v1.GET("/auth/session", s.handleAuthSession)
-		v1.POST("/auth/login", s.handleAuthLogin)
-		v1.POST("/auth/logout", s.handleAuthLogout)
-		v1.POST("/auth/password", s.handleAuthPassword)
-		v1.GET("/auth/csrf", s.handleAuthCSRF)
 		v1.GET("/auth/initialized", s.handleAuthInitialized)
+		v1.POST("/auth/login", s.handleAuthLogin)
 		v1.POST("/auth/setup", s.handleAuthSetup)
 
 		// Selected read-only status endpoints remain public
@@ -380,15 +433,17 @@ func (s *GinServer) setupGinRoutes() {
 		v1.GET("/health/ready", s.handleGinReadinessCheck)
 		v1.GET("/health/detail", s.handleHealthDetail)
 
+		// Allow unlocking without a session to break the initial lock/setup cycle.
+		v1.POST("/crypto/unlock", s.handleCryptoUnlock)
+
 		// All other API endpoints require session + CSRF
 		authed := v1.Group("/")
 		authed.Use(s.requireSession())
 		authed.Use(s.csrfMiddleware())
 
-		// Crypto endpoints
+		// Crypto endpoints (session required except unlock)
 		authed.GET("/crypto/status", s.handleCryptoStatus)
 		authed.POST("/crypto/setup", s.handleCryptoSetup)
-		authed.POST("/crypto/unlock", s.handleCryptoUnlock)
 		authed.POST("/crypto/lock", s.handleCryptoLock)
 		authed.GET("/crypto/recovery-key", s.handleCryptoRecoveryStatus)
 		authed.POST("/crypto/recovery-key/generate", s.handleCryptoRecoveryGenerate)
@@ -425,6 +480,11 @@ func (s *GinServer) setupGinRoutes() {
 		// Persistence exports (prototype)
 		authed.POST("/exports/control", s.requireUnlocked(), s.handlePersistenceControlExport)
 		authed.POST("/exports/full", s.requireUnlocked(), s.handlePersistenceFullExport)
+
+		// Auth-only endpoints
+		authed.POST("/auth/logout", s.handleAuthLogout)
+		authed.POST("/auth/password", s.handleAuthPassword)
+		authed.GET("/auth/csrf", s.handleAuthCSRF)
 
 		// Catalog (read-only) and services require auth
 		authed.GET("/catalog", s.handleGinCatalog)

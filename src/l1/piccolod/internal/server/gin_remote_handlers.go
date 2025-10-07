@@ -1,12 +1,15 @@
 package server
 
 import (
-	"errors"
-	"net/http"
-	"time"
+    "errors"
+    "log"
+    "net/http"
+    "os"
+    "strconv"
+    "time"
 
-	"github.com/gin-gonic/gin"
-	"piccolod/internal/remote"
+    "github.com/gin-gonic/gin"
+    "piccolod/internal/remote"
 )
 
 type remoteConfigureRequest struct {
@@ -35,8 +38,8 @@ func (s *GinServer) handleRemoteConfigure(c *gin.Context) {
 		DNSProvider:    req.DNSProvider,
 		DNSCredentials: req.DNSCredentials,
 	}
-	if s.dispatcher != nil {
-		resp, err := s.dispatcher.Dispatch(c.Request.Context(), remote.ConfigureCommand{Req: configureReq})
+    if s.dispatcher != nil {
+        resp, err := s.dispatcher.Dispatch(c.Request.Context(), remote.ConfigureCommand{Req: configureReq})
 		if err != nil {
 			if errors.Is(err, remote.ErrLocked) {
 				writeGinError(c, http.StatusLocked, "storage locked; unlock Piccolo to continue")
@@ -49,8 +52,8 @@ func (s *GinServer) handleRemoteConfigure(c *gin.Context) {
 			writeGinError(c, http.StatusInternalServerError, "unexpected response from remote dispatcher")
 			return
 		}
-	} else {
-		if err := s.remoteManager.Configure(configureReq); err != nil {
+    } else {
+        if err := s.remoteManager.Configure(configureReq); err != nil {
 			if errors.Is(err, remote.ErrLocked) {
 				writeGinError(c, http.StatusLocked, "storage locked; unlock Piccolo to continue")
 				return
@@ -58,8 +61,29 @@ func (s *GinServer) handleRemoteConfigure(c *gin.Context) {
 			writeGinError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "remote configured"})
+    }
+    // Best-effort: start TLS mux and update remote resolver so 443 → mux
+    if s.tlsMux != nil {
+        s.tlsMux.UpdateConfig(configureReq.PortalHostname, configureReq.TLD, s.resolvePortalPort())
+        if port, err := s.tlsMux.Start(); err == nil {
+            if s.remoteResolver != nil {
+                s.remoteResolver.SetTlsMuxPort(port)
+            }
+        } else {
+            log.Printf("WARN: TLS mux start failed: %v", err)
+        }
+    }
+    c.JSON(http.StatusOK, gin.H{"message": "remote configured"})
+}
+
+func (s *GinServer) resolvePortalPort() int {
+    port := 80
+    if p := os.Getenv("PORT"); p != "" {
+        if v, err := strconv.Atoi(p); err == nil && v > 0 {
+            port = v
+        }
+    }
+    return port
 }
 
 // handleRemoteDisable handles POST /api/v1/remote/disable

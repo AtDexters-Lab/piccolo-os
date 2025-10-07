@@ -30,7 +30,9 @@ type ServiceManager struct {
 	eventCancel  context.CancelFunc
 	statusMu     sync.RWMutex
 	leadership   map[string]cluster.Role
-	locked       bool
+    locked       bool
+    unpublisher  PortUnpublisher
+    publisher    PortPublisher
 }
 
 func NewServiceManager() *ServiceManager {
@@ -38,14 +40,56 @@ func NewServiceManager() *ServiceManager {
 		PortRange{Start: 15000, End: 25000},
 		PortRange{Start: 35000, End: 45000},
 	)
-	return &ServiceManager{
-		allocator:    allocator,
-		registry:     make(map[string]map[string]ServiceEndpoint),
-		proxyManager: NewProxyManager(),
-		stopCh:       make(chan struct{}),
-		containerIDs: make(map[string]string),
-		leadership:   make(map[string]cluster.Role),
-	}
+    return &ServiceManager{
+        allocator:    allocator,
+        registry:     make(map[string]map[string]ServiceEndpoint),
+        proxyManager: NewProxyManager(),
+        stopCh:       make(chan struct{}),
+        containerIDs: make(map[string]string),
+        leadership:   make(map[string]cluster.Role),
+    }
+}
+
+// PortUnpublisher abstracts remote unpublish notifications (e.g., Nexus).
+// Implementations should be best-effort and non-blocking.
+type PortUnpublisher interface { Unpublish(port int) }
+
+// SetRemoteUnpublisher wires a remote unpublisher for proxy lifecycle hooks.
+func (m *ServiceManager) SetRemoteUnpublisher(u PortUnpublisher) {
+    m.statusMu.Lock()
+    m.unpublisher = u
+    m.statusMu.Unlock()
+}
+
+func (m *ServiceManager) notifyUnpublish(port int) {
+    m.statusMu.RLock()
+    u := m.unpublisher
+    m.statusMu.RUnlock()
+    if u != nil && port > 0 {
+        // best-effort; avoid panics
+        defer func() { _ = recover() }()
+        u.Unpublish(port)
+    }
+}
+
+// PortPublisher abstracts remote publish notifications (e.g., Nexus re-enable).
+type PortPublisher interface { Publish(port int) }
+
+// SetRemotePublisher wires a remote publisher for proxy lifecycle hooks.
+func (m *ServiceManager) SetRemotePublisher(p PortPublisher) {
+    m.statusMu.Lock()
+    m.publisher = p
+    m.statusMu.Unlock()
+}
+
+func (m *ServiceManager) notifyPublish(port int) {
+    m.statusMu.RLock()
+    p := m.publisher
+    m.statusMu.RUnlock()
+    if p != nil && port > 0 {
+        defer func() { _ = recover() }()
+        p.Publish(port)
+    }
 }
 
 func defaultRemotePorts(listener api.AppListener) []int {
@@ -195,8 +239,10 @@ func (m *ServiceManager) RestoreFromPodman(appName string, listeners []api.AppLi
 		}
 		registry[l.Name] = ep
 		endpoints = append(endpoints, ep)
-		m.proxyManager.StartListener(ep)
-	}
+        m.proxyManager.StartListener(ep)
+        m.notifyPublish(ep.PublicPort)
+        m.notifyPublish(ep.PublicPort)
+    }
 
 	if len(registry) > 0 {
 		m.registry[appName] = registry
@@ -234,10 +280,11 @@ func (m *ServiceManager) AllocateForApp(appName string, listeners []api.AppListe
 		m.registry[appName][l.Name] = ep
 	}
 
-	// Start proxies after registration
-	for _, ep := range endpoints {
-		m.proxyManager.StartListener(ep)
-	}
+    // Start proxies after registration
+    for _, ep := range endpoints {
+        m.proxyManager.StartListener(ep)
+        m.notifyPublish(ep.PublicPort)
+    }
 
 	return endpoints, nil
 }
@@ -506,17 +553,18 @@ func (m *ServiceManager) Reconcile(appName string, listeners []api.AppListener) 
 			ep.Middleware = l.Middleware
 			ep.RemotePorts = defaultRemotePorts(l)
 			newMap[l.Name] = ep
-			if proxyChanged {
-				m.proxyManager.StopPort(ep.PublicPort)
-				m.proxyManager.StartListener(ep)
-				result.ProxyOnlyChanged = append(result.ProxyOnlyChanged, ep)
-			}
-		} else {
-			// New listener: allocate ports, start proxy, mark container change
-			hb, pp, err := m.allocator.AllocatePair()
-			if err != nil {
-				return ReconcileResult{}, false, err
-			}
+            if proxyChanged {
+                m.proxyManager.StopPort(ep.PublicPort)
+                m.proxyManager.StartListener(ep)
+                result.ProxyOnlyChanged = append(result.ProxyOnlyChanged, ep)
+                m.notifyPublish(ep.PublicPort)
+            }
+        } else {
+            // New listener: allocate ports, start proxy, mark container change
+            hb, pp, err := m.allocator.AllocatePair()
+            if err != nil {
+                return ReconcileResult{}, false, err
+            }
 			ep := ServiceEndpoint{
 				App:         appName,
 				Name:        l.Name,
@@ -528,21 +576,24 @@ func (m *ServiceManager) Reconcile(appName string, listeners []api.AppListener) 
 				Middleware:  l.Middleware,
 				RemotePorts: defaultRemotePorts(l),
 			}
-			newMap[l.Name] = ep
-			m.proxyManager.StartListener(ep)
-			containerChange = true
-			result.Added = append(result.Added, ep)
-		}
-	}
+            newMap[l.Name] = ep
+            m.proxyManager.StartListener(ep)
+            m.notifyPublish(ep.PublicPort)
+            containerChange = true
+            result.Added = append(result.Added, ep)
+            m.notifyPublish(ep.PublicPort)
+        }
+    }
 
-	// Removed listeners
-	for name, ep := range existing {
-		if _, ok := newMap[name]; !ok {
-			m.proxyManager.StopPort(ep.PublicPort)
-			containerChange = true
-			result.Removed = append(result.Removed, ep)
-		}
-	}
+    // Removed listeners
+    for name, ep := range existing {
+        if _, ok := newMap[name]; !ok {
+            m.proxyManager.StopPort(ep.PublicPort)
+            containerChange = true
+            result.Removed = append(result.Removed, ep)
+            m.notifyUnpublish(ep.PublicPort)
+        }
+    }
 
 	// Save
 	m.registry[appName] = newMap
@@ -571,14 +622,15 @@ func middlewareEqual(a, b []api.AppProtocolMiddleware) bool {
 
 // RemoveApp stops and removes all listeners for an app
 func (m *ServiceManager) RemoveApp(appName string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if mapp, ok := m.registry[appName]; ok {
-		for _, ep := range mapp {
-			m.proxyManager.StopPort(ep.PublicPort)
-			m.allocator.Release(ep.HostBind, ep.PublicPort)
-		}
-		delete(m.registry, appName)
-	}
-	delete(m.containerIDs, appName)
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    if mapp, ok := m.registry[appName]; ok {
+        for _, ep := range mapp {
+            m.proxyManager.StopPort(ep.PublicPort)
+            m.allocator.Release(ep.HostBind, ep.PublicPort)
+            m.notifyUnpublish(ep.PublicPort)
+        }
+        delete(m.registry, appName)
+    }
+    delete(m.containerIDs, appName)
 }

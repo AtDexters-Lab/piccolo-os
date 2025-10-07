@@ -83,12 +83,16 @@ func TestAuth_Setup_Login_Session_Logout(t *testing.T) {
     req.Header.Set("Cookie", sessionCookieName+"="+sessCookie)
     srv.router.ServeHTTP(w, req)
     if w.Code != http.StatusOK { t.Fatalf("csrf status %d", w.Code) }
+    var csrf map[string]string
+    _ = json.Unmarshal(w.Body.Bytes(), &csrf)
+    token := csrf["token"]
 
     // 7) change password wrong old -> 401
     w = httptest.NewRecorder()
     req, _ = http.NewRequest("POST", "/api/v1/auth/password", strings.NewReader(`{"old_password":"bad","new_password":"pw234567"}`))
     req.Header.Set("Content-Type", "application/json")
     req.Header.Set("Cookie", sessionCookieName+"="+sessCookie)
+    req.Header.Set("X-CSRF-Token", token)
     srv.router.ServeHTTP(w, req)
     if w.Code != http.StatusUnauthorized { t.Fatalf("password expected 401, got %d", w.Code) }
 
@@ -97,6 +101,7 @@ func TestAuth_Setup_Login_Session_Logout(t *testing.T) {
     req, _ = http.NewRequest("POST", "/api/v1/auth/password", strings.NewReader(`{"old_password":"pw123456","new_password":"pw234567"}`))
     req.Header.Set("Content-Type", "application/json")
     req.Header.Set("Cookie", sessionCookieName+"="+sessCookie)
+    req.Header.Set("X-CSRF-Token", token)
     srv.router.ServeHTTP(w, req)
     if w.Code != http.StatusOK { t.Fatalf("password change status %d", w.Code) }
 
@@ -104,6 +109,7 @@ func TestAuth_Setup_Login_Session_Logout(t *testing.T) {
     w = httptest.NewRecorder()
     req, _ = http.NewRequest("POST", "/api/v1/auth/logout", nil)
     req.Header.Set("Cookie", sessionCookieName+"="+sessCookie)
+    req.Header.Set("X-CSRF-Token", token)
     srv.router.ServeHTTP(w, req)
     if w.Code != http.StatusOK { t.Fatalf("logout status %d", w.Code) }
 
@@ -143,4 +149,3 @@ func TestAuth_LoginRateLimit(t *testing.T) {
         t.Fatalf("missing Retry-After")
     }
 }
-

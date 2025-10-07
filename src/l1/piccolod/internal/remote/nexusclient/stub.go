@@ -8,9 +8,9 @@ import (
 
 // Stub is a lightweight implementation used until the real nexus client is wired.
 type Stub struct {
-	mu      sync.Mutex
-	cfg     Config
-	running bool
+    mu      sync.Mutex
+    cfg     Config
+    running bool
 }
 
 func NewStub() *Stub {
@@ -41,13 +41,23 @@ func (s *Stub) Start(ctx context.Context) error {
 }
 
 func (s *Stub) Stop(ctx context.Context) error {
-	s.mu.Lock()
-	if !s.running {
-		s.mu.Unlock()
-		return nil
-	}
-	s.running = false
-	s.mu.Unlock()
-	log.Printf("INFO: nexus stub stopping")
-	return nil
+    s.mu.Lock()
+    if !s.running {
+        s.mu.Unlock()
+        return nil
+    }
+    s.running = false
+    s.mu.Unlock()
+    log.Printf("INFO: nexus stub stopping")
+    return nil
+}
+
+// UnregisterPublicPort is a no-op for the stub, but keeps logs for visibility.
+func (s *Stub) UnregisterPublicPort(port int) {
+    log.Printf("INFO: nexus stub unregister port=%d (no-op)", port)
+}
+
+// RegisterPublicPort is a no-op for the stub.
+func (s *Stub) RegisterPublicPort(port int) {
+    log.Printf("INFO: nexus stub register port=%d (no-op)", port)
 }

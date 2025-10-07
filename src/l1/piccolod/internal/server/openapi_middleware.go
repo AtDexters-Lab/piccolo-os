@@ -1,6 +1,7 @@
 package server
 
 import (
+    "context"
     "net/http"
     "strings"
     "os"
@@ -60,6 +61,17 @@ func (v *openAPIValidator) Middleware() gin.HandlerFunc {
             PathParams: pathParams,
             Route:      route,
         }
+        // Install a permissive AuthenticationFunc so that spec-level security
+        // does not interfere with the app's own session/CSRF middleware. This
+        // keeps the validator useful for shapes/params while auth is enforced
+        // elsewhere.
+        opts := &openapi3filter.Options{
+            AuthenticationFunc: func(ctx context.Context, ai *openapi3filter.AuthenticationInput) error {
+                // Accept cookieAuth (or any) here; real auth enforced by Gin middleware.
+                return nil
+            },
+        }
+        input.Options = opts
         if err := openapi3filter.ValidateRequest(c.Request.Context(), input); err != nil {
             c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Request failed validation", "detail": err.Error()})
             return
