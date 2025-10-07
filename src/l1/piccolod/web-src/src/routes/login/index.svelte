@@ -63,12 +63,12 @@
     error = '';
     try {
       try {
-        await apiProd('/crypto/unlock', { method: 'POST', body: JSON.stringify({ password: unlockPassword }) });
+        await api('/crypto/unlock', { method: 'POST', body: JSON.stringify({ password: unlockPassword }) });
       } catch (e: any) {
         // If crypto is not initialized (dirty state), initialize then unlock
         if (/not initialized/i.test(e?.message || '')) {
-          await apiProd('/crypto/setup', { method: 'POST', body: JSON.stringify({ password: unlockPassword }) });
-          await apiProd('/crypto/unlock', { method: 'POST', body: JSON.stringify({ password: unlockPassword }) });
+          await api('/crypto/setup', { method: 'POST', body: JSON.stringify({ password: unlockPassword }) });
+          await api('/crypto/unlock', { method: 'POST', body: JSON.stringify({ password: unlockPassword }) });
         } else {
           throw e;
         }
