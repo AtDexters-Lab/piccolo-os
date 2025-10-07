@@ -35,8 +35,9 @@ This file tracks P0 tasks required to hit the milestone. Owners and PR links can
 - Fixed ACME issuer compile errors and wired lego v4 HTTP-01 issuer:
   - Implemented `registration.User` correctly (`GetPrivateKey() crypto.PrivateKey`).
   - Switched to `certificate.ObtainRequest` API and removed unused imports.
-  - `remote.Manager.Configure` now best-effort issues certs for `portal_hostname` and `*.TLD` into `<control>/remote/certs/`.
+  - Background issuance: `remote.Manager.Configure` queues ACME for `portal_hostname` and `*.TLD` and logs `started/failed/succeeded` events; manual renew queues issuance via `POST /remote/certificates/:id/renew`.
 - File-backed cert provider is active; TLS mux uses it to terminate remote HTTPS for HTTP listeners; portal remains HTTP on LAN.
+- Cert store reload: provider prefers fresh on-disk loads so newly issued certs are picked up without restart.
 - TLS mux is started on remote configure and resolver maps `443` → mux for `flow=tcp` listeners; `flow=tls` stays passthrough.
 - Nexus backend adapter regression addressed: removed per-port disable/blacklist; we now let dial fail if the local proxy isn’t up (prevents recycled-port lockout).
 - Repository builds green; some mdns/container tests require elevated capabilities and fail in local env—left untouched as out of scope for this milestone.

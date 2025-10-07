@@ -37,12 +37,12 @@ func (p *FileCertProvider) GetCertificate(host string) (*tls.Certificate, error)
     if host == "" {
         return nil, services.ErrNoCert
     }
-    // Exact
-    if cert := p.fromCache(host); cert != nil {
-        return cert, nil
-    }
+    // Always prefer fresh load from disk, then fall back to cache.
     if cert := p.tryLoad(host); cert != nil {
         p.toCache(host, cert)
+        return cert, nil
+    }
+    if cert := p.fromCache(host); cert != nil {
         return cert, nil
     }
     // Wildcard fallback: *.domain
@@ -50,11 +50,11 @@ func (p *FileCertProvider) GetCertificate(host string) (*tls.Certificate, error)
         domain := host[i+1:]
         if domain != "" {
             star := "*." + domain
-            if cert := p.fromCache(star); cert != nil {
-                return cert, nil
-            }
             if cert := p.tryLoad(star); cert != nil {
                 p.toCache(star, cert)
+                return cert, nil
+            }
+            if cert := p.fromCache(star); cert != nil {
                 return cert, nil
             }
         }
@@ -138,4 +138,3 @@ func loadPEMBundle(path string) (*tls.Certificate, error) {
 }
 
 var _ services.CertProvider = (*FileCertProvider)(nil)
-

@@ -2,6 +2,8 @@ package remote
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -390,21 +392,12 @@ func (m *Manager) Configure(req ConfigureRequest) error {
 	cfg.LastHandshake = now
 	cfg.LatencyMS = 0
 	cfg.LastPreflight = nil
-    // Attempt ACME issuance for portal and wildcard (best-effort)
-    // portal
-    if m.acmeMgr != nil && cfg.PortalHostname != "" {
-        if _, err := m.acmeMgr.Issue(cfg.PortalHostname, nil, "portal", filepath.Join(paths.ControlDir(), "remote", "certs")); err != nil {
-            log.Printf("WARN: ACME issue portal failed: %v", err)
-        }
-    }
-    // wildcard
-    if m.acmeMgr != nil && cfg.TLD != "" {
-        cn := "*."+cfg.TLD
-        if _, err := m.acmeMgr.Issue(cn, nil, cn, filepath.Join(paths.ControlDir(), "remote", "certs")); err != nil {
-            log.Printf("WARN: ACME issue wildcard failed: %v", err)
-        }
-    }
+    // Queue background ACME issuance and surface events/inventory.
     cfg.Certificates = defaultCertificates(cfg, now)
+    m.enqueueIssuance("portal", []string{cfg.PortalHostname}, cfg.PortalHostname)
+    if cfg.TLD != "" {
+        m.enqueueIssuance("wildcard", []string{"*." + cfg.TLD}, "*."+cfg.TLD)
+    }
 	cfg.Events = append(cfg.Events, Event{
 		Timestamp: now,
 		Level:     "info",
@@ -587,27 +580,153 @@ func (m *Manager) stopAdapter() {
 
 // RenewCertificate simulates a manual renewal.
 func (m *Manager) RenewCertificate(id string) error {
-	cfg := m.currentConfig()
-	for i := range cfg.Certificates {
-		if cfg.Certificates[i].ID == id {
-			now := m.now()
-			exp := now.Add(90 * 24 * time.Hour)
-			next := now.Add(60 * 24 * time.Hour)
-			cfg.Certificates[i].IssuedAt = timePtr(now)
-			cfg.Certificates[i].ExpiresAt = timePtr(exp)
-			cfg.Certificates[i].NextRenewal = timePtr(next)
-			cfg.Certificates[i].Status = "ok"
-			cfg.Certificates[i].FailureReason = ""
-			cfg.Events = append(cfg.Events, Event{
-				Timestamp: now,
-				Level:     "info",
-				Source:    "remote",
-				Message:   fmt.Sprintf("Certificate %s renewed", id),
-			})
-			return m.save(cfg)
-		}
-	}
-	return errors.New("certificate not found")
+    cfg := m.currentConfig()
+    // Find target cert and queue issuance
+    for _, c := range cfg.Certificates {
+        if c.ID == id {
+            domains := append([]string(nil), c.Domains...)
+            cn := domains[0]
+            if id == "portal" && cfg.PortalHostname != "" {
+                cn = cfg.PortalHostname
+            }
+            if id == "wildcard" && cfg.TLD != "" {
+                cn = "*." + cfg.TLD
+            }
+            m.enqueueIssuance(id, domains, cn)
+            return nil
+        }
+    }
+    return errors.New("certificate not found")
+}
+
+// enqueueIssuance starts background issuance for the given id/domains/commonName
+// and records progress into the config certificates inventory and events.
+func (m *Manager) enqueueIssuance(id string, domains []string, commonName string) {
+    if m.acmeMgr == nil || commonName == "" {
+        return
+    }
+    cfg := m.currentConfig()
+    now := m.now()
+    // Ensure inventory entry exists and mark pending
+    m.ensureCertPending(cfg, id, domains, now)
+    _ = m.save(cfg)
+
+    // Fire and forget
+    go func(id string, domains []string, cn string) {
+        certDir := filepath.Join(paths.ControlDir(), "remote", "certs")
+        _, err := m.acmeMgr.Issue(cn, nil, outNameFor(id, cn), certDir)
+        if err != nil {
+            m.updateCertFailure(id, err.Error())
+            return
+        }
+        // Try to read expiry from on-disk certificate
+        if exp, ok := readCertExpiry(filepath.Join(certDir, outNameFor(id, cn)+".crt")); ok {
+            m.updateCertSuccess(id, exp)
+        } else {
+            // Fallback: 90d expiry
+            m.updateCertSuccess(id, m.now().Add(90*24*time.Hour))
+        }
+    }(id, append([]string(nil), domains...), commonName)
+}
+
+func outNameFor(id, cn string) string {
+    // For wildcard we want the actual CN as filename (e.g., *.example.com)
+    if id == "wildcard" {
+        return cn
+    }
+    if id == "portal" {
+        return "portal"
+    }
+    // default to sanitized cn
+    return cn
+}
+
+func (m *Manager) ensureCertPending(cfg *Config, id string, domains []string, now time.Time) {
+    found := false
+    for i := range cfg.Certificates {
+        if cfg.Certificates[i].ID == id {
+            cfg.Certificates[i].Domains = append([]string(nil), domains...)
+            cfg.Certificates[i].Status = "pending"
+            cfg.Certificates[i].FailureReason = ""
+            cfg.Certificates[i].IssuedAt = nil
+            cfg.Certificates[i].ExpiresAt = nil
+            cfg.Certificates[i].NextRenewal = nil
+            found = true
+            break
+        }
+    }
+    if !found {
+        cfg.Certificates = append(cfg.Certificates, Certificate{
+            ID:      id,
+            Domains: append([]string(nil), domains...),
+            Status:  "pending",
+        })
+    }
+    cfg.Events = append(cfg.Events, Event{
+        Timestamp: now,
+        Level:     "info",
+        Source:    "remote",
+        Message:   fmt.Sprintf("Certificate issuance started (%s)", id),
+    })
+}
+
+func (m *Manager) updateCertSuccess(id string, expiresAt time.Time) {
+    cfg := m.currentConfig()
+    now := m.now()
+    next := now.Add(60 * 24 * time.Hour)
+    for i := range cfg.Certificates {
+        if cfg.Certificates[i].ID == id {
+            cfg.Certificates[i].IssuedAt = timePtr(now)
+            cfg.Certificates[i].ExpiresAt = timePtr(expiresAt)
+            cfg.Certificates[i].NextRenewal = timePtr(next)
+            cfg.Certificates[i].Status = "ok"
+            cfg.Certificates[i].FailureReason = ""
+            break
+        }
+    }
+    cfg.Events = append(cfg.Events, Event{
+        Timestamp: now,
+        Level:     "info",
+        Source:    "remote",
+        Message:   fmt.Sprintf("Certificate issuance succeeded (%s)", id),
+    })
+    _ = m.save(cfg)
+}
+
+func (m *Manager) updateCertFailure(id string, reason string) {
+    cfg := m.currentConfig()
+    now := m.now()
+    for i := range cfg.Certificates {
+        if cfg.Certificates[i].ID == id {
+            cfg.Certificates[i].Status = "error"
+            cfg.Certificates[i].FailureReason = reason
+            break
+        }
+    }
+    cfg.Events = append(cfg.Events, Event{
+        Timestamp: now,
+        Level:     "warn",
+        Source:    "remote",
+        Message:   fmt.Sprintf("Certificate issuance failed (%s): %s", id, reason),
+        NextStep:  "Verify DNS/Nexus reachability and retry",
+    })
+    _ = m.save(cfg)
+}
+
+func readCertExpiry(path string) (time.Time, bool) {
+    b, err := os.ReadFile(path)
+    if err != nil { return time.Time{}, false }
+    for {
+        var block *pem.Block
+        block, b = pem.Decode(b)
+        if block == nil { break }
+        if block.Type == "CERTIFICATE" {
+            if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
+                return cert.NotAfter, true
+            }
+        }
+    }
+    return time.Time{}, false
 }
 
 // RunPreflight performs validation checks for the remote configuration.
