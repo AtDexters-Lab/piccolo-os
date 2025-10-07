@@ -7,6 +7,9 @@
   let password = '';
   let error = '';
   let working = false;
+  let cryptoLocked = false;
+  let unlocking = false;
+  let unlockPassword = '';
   onMount(async () => {
     if (demo) return;
     try {
@@ -14,6 +17,11 @@
       if (!init?.initialized) {
         window.location.hash = '/setup';
       }
+    } catch {}
+    // Probe crypto lock state to offer unlock inline when needed
+    try {
+      const st: any = await apiProd('/crypto/status');
+      cryptoLocked = !!st?.locked;
     } catch {}
   });
   async function signIn(path: string = '/auth/login') {
@@ -33,8 +41,28 @@
       window.location.hash = '/';
     } catch (e: any) {
       error = e?.message || 'Sign in failed';
+      cryptoLocked = /locked/i.test(error);
     } finally {
       working = false;
+    }
+  }
+
+  async function unlockNow() {
+    if (!unlockPassword) {
+      error = 'Enter your admin password to unlock';
+      return;
+    }
+    unlocking = true;
+    error = '';
+    try {
+      await apiProd('/crypto/unlock', { method: 'POST', body: JSON.stringify({ password: unlockPassword }) });
+      cryptoLocked = false;
+      unlockPassword = '';
+      toast('Unlocked. You can sign in now.', 'success');
+    } catch (e: any) {
+      error = e?.message || 'Unlock failed';
+    } finally {
+      unlocking = false;
     }
   }
 </script>
@@ -58,3 +86,14 @@
     {/if}
   </div>
 </form>
+
+{#if cryptoLocked}
+  <div class="mt-4 bg-yellow-50 border border-yellow-200 rounded p-4">
+    <p class="text-sm text-yellow-900 mb-2">Device is locked</p>
+    <p class="text-xs text-yellow-900 mb-3">Enter your admin password to unlock encrypted volumes, then sign in.</p>
+    <div class="flex flex-wrap items-center gap-2">
+      <input class="w-64 border rounded p-2 text-sm" type="password" bind:value={unlockPassword} placeholder="admin password" autocomplete="current-password" />
+      <button class="px-3 py-2 text-sm border rounded hover:bg-yellow-100 disabled:opacity-50" on:click={unlockNow} disabled={unlocking}>{unlocking ? 'Unlocking…' : 'Unlock'}</button>
+    </div>
+  </div>
+{/if}

@@ -1229,12 +1229,21 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        endpoint?: string;
-                        device_id?: string;
+                        /** @description Nexus websocket endpoint (wss://...) */
+                        endpoint: string;
+                        /** @description Shared JWT signing secret for backend clients */
                         device_secret?: string;
-                        hostname?: string;
-                        /** @description ACME directory URL for staging/tests */
-                        acme_directory?: string;
+                        /** @enum {string} */
+                        solver?: "http-01" | "dns-01";
+                        /** @description Piccolo remote domain (e.g. example.com or piccolo.example.com) */
+                        tld: string;
+                        /** @description Optional explicit portal hostname */
+                        portal_hostname?: string;
+                        /** @description Required when solver=dns-01 */
+                        dns_provider?: string;
+                        dns_credentials?: {
+                            [key: string]: string;
+                        };
                     };
                 };
             };
@@ -1244,7 +1253,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            message?: string;
+                        };
+                    };
                 };
                 /** @description Bad Request */
                 400: {
@@ -1294,7 +1307,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            message?: string;
+                        };
+                    };
                 };
             };
         };
@@ -1328,7 +1345,404 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            device_secret?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote/preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run remote preflight validation */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: date-time */
+                            ran_at?: string;
+                            checks?: components["schemas"]["RemotePreflightCheck"][];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote/aliases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List remote aliases */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            aliases?: components["schemas"]["RemoteAlias"][];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Add a remote alias */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        hostname: string;
+                        listener?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RemoteAlias"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote/aliases/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove remote alias */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            message?: string;
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote/certificates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List issued certificates */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            certificates?: components["schemas"]["RemoteCertificate"][];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote/certificates/{id}/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Trigger manual certificate renewal */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            message?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Remote activity log */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            events?: components["schemas"]["RemoteEvent"][];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote/dns/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Supported DNS-01 providers */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            providers?: components["schemas"]["RemoteDNSProvider"][];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote/nexus-guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Nexus provisioning helper */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RemoteGuideInfo"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote/nexus-guide/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark guide as verified */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        endpoint?: string;
+                        tld?: string;
+                        portal_hostname?: string;
+                        jwt_secret?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: date-time */
+                            verified_at?: string;
+                            message?: string;
+                        };
+                    };
                 };
             };
         };
@@ -2423,13 +2837,86 @@ export interface components {
         };
         RemoteStatus: {
             enabled?: boolean;
-            public_url?: string | null;
+            state?: string;
+            solver?: string;
+            endpoint?: string | null;
+            tld?: string | null;
+            portal_hostname?: string | null;
+            latency_ms?: number | null;
+            /** Format: date-time */
+            last_handshake?: string | null;
+            /** Format: date-time */
+            next_renewal?: string | null;
             issuer?: string | null;
+            /** Format: date-time */
+            expires_at?: string | null;
+            warnings?: string[];
+            /** Format: date-time */
+            guide_verified_at?: string | null;
+            listeners?: components["schemas"]["RemoteListener"][];
+            aliases?: components["schemas"]["RemoteAlias"][];
+            certificates?: components["schemas"]["RemoteCertificate"][];
+        };
+        RemoteListener: {
+            name?: string;
+            remote_host?: string;
+        };
+        RemoteAlias: {
+            id?: string;
+            hostname?: string;
+            listener?: string;
+            status?: string;
+            /** Format: date-time */
+            last_checked?: string | null;
+            message?: string | null;
+        };
+        RemoteCertificate: {
+            id?: string;
+            domains?: string[];
+            solver?: string | null;
+            /** Format: date-time */
+            issued_at?: string | null;
             /** Format: date-time */
             expires_at?: string | null;
             /** Format: date-time */
             next_renewal?: string | null;
-            warnings?: string[];
+            status?: string | null;
+            failure_reason?: string | null;
+        };
+        RemotePreflightCheck: {
+            name?: string;
+            status?: string;
+            detail?: string | null;
+            next_step?: string | null;
+        };
+        RemoteEvent: {
+            /** Format: date-time */
+            ts?: string;
+            level?: string;
+            source?: string;
+            message?: string;
+            next_step?: string | null;
+        };
+        RemoteDNSProviderField: {
+            id?: string;
+            label?: string;
+            secret?: boolean;
+            placeholder?: string | null;
+            description?: string | null;
+        };
+        RemoteDNSProvider: {
+            id?: string;
+            name?: string;
+            docs_url?: string | null;
+            fields?: components["schemas"]["RemoteDNSProviderField"][];
+        };
+        RemoteGuideInfo: {
+            command?: string;
+            requirements?: string[];
+            notes?: string[];
+            docs_url?: string;
+            /** Format: date-time */
+            verified_at?: string | null;
         };
         StorageMounts: {
             mounts?: {
