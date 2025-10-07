@@ -68,11 +68,15 @@ func (s *GinServer) handleAuthSession(c *gin.Context) {
 			return
 		}
 	}
+	locked := false
+	if s.cryptoManager != nil && s.cryptoManager.IsInitialized() {
+		locked = s.cryptoManager.IsLocked()
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"authenticated":  false,
 		"user":           "",
 		"expires_at":     time.Now().UTC().Format(time.RFC3339),
-		"volumes_locked": false,
+		"volumes_locked": locked,
 	})
 }
 
