@@ -1,12 +1,12 @@
 package server
 
 import (
-    "context"
-    "errors"
-    "log"
-    "net/http"
-    "strings"
-    "time"
+	"context"
+	"errors"
+	"log"
+	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -66,24 +66,40 @@ func (s *GinServer) handleCryptoUnlock(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "not initialized"})
 		return
 	}
-    if strings.TrimSpace(body.Password) != "" {
-        if err := s.cryptoManager.Unlock(body.Password); err != nil {
-            c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-            return
-        }
-        if err := s.notifyPersistenceLockState(c.Request.Context(), false); err != nil {
-            log.Printf("WARN: failed to propagate unlock state: %v", err)
-            c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update persistence state"})
-            return
-        }
-        // Best-effort: verify admin credentials and create a session automatically.
-        if ok, err := s.authManager.Verify(c.Request.Context(), "admin", body.Password); err == nil && ok {
-            sess := s.sessions.Create("admin", 3600)
-            s.setSessionCookie(c, sess.ID, time.Hour)
-        }
-        c.JSON(http.StatusOK, gin.H{"message": "ok"})
-        return
-    }
+	if strings.TrimSpace(body.Password) != "" {
+		if err := s.cryptoManager.Unlock(body.Password); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+		if err := s.notifyPersistenceLockState(c.Request.Context(), false); err != nil {
+			log.Printf("WARN: failed to propagate unlock state: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update persistence state"})
+			return
+		}
+		// Best-effort: verify admin credentials and create a session automatically.
+		ctx := c.Request.Context()
+		init := false
+		if s.authManager != nil {
+			if initialized, err := s.authManager.IsInitialized(ctx); err == nil {
+				init = initialized
+				if !initialized {
+					if err := s.authManager.Setup(ctx, body.Password); err != nil {
+						log.Printf("WARN: auth setup during unlock failed: %v", err)
+					} else {
+						init = true
+					}
+				}
+			}
+			if init {
+				if ok, err := s.authManager.Verify(ctx, "admin", body.Password); err == nil && ok {
+					sess := s.sessions.Create("admin", 3600)
+					s.setSessionCookie(c, sess.ID, time.Hour)
+				}
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+		return
+	}
 	if strings.TrimSpace(body.RecoveryKey) != "" {
 		words := strings.Fields(body.RecoveryKey)
 		if err := s.cryptoManager.UnlockWithRecoveryKey(words); err != nil {
