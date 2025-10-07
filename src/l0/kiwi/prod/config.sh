@@ -36,6 +36,17 @@ systemctl enable piccolod.service
 systemctl enable piccolod-health-check.service
 # Note: piccolod-failure-handler.service is triggered by OnFailure, not enabled directly
 
+# Ensure helper scripts are executable (overlay may not preserve mode)
+chmod 0755 /usr/local/bin/piccolo-update-stage.sh || true
+chmod 0755 /usr/local/bin/piccolo-rollback.sh || true
+
+# Background update staging (explicit reboot only; no unattended reboots)
+systemctl enable piccolo-update-stage.service
+systemctl enable piccolo-update-stage.timer
+
+# Ensure default MicroOS auto-update timer is disabled to avoid unintended reboots
+systemctl disable transactional-update.timer 2>/dev/null || true
+
 echo "PRODUCTION services enabled successfully"
 
 #==========================================

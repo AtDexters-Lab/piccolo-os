@@ -16,6 +16,13 @@
     try {
       // Always use real API for admin setup
       await apiProd('/auth/setup', { method: 'POST', body: JSON.stringify({ password }) });
+      // Initialize crypto right away with the same password (idempotent)
+      try {
+        await apiProd('/crypto/setup', { method: 'POST', body: JSON.stringify({ password }) });
+      } catch (e: any) {
+        // Ignore if already initialized
+        if (!/already initialized/i.test(e?.message || '')) throw e;
+      }
       await bootstrapSession();
       toast('Admin created', 'success');
       window.location.hash = '/';

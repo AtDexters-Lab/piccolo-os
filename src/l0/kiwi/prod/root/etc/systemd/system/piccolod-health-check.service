@@ -2,7 +2,9 @@
 Description=Piccolo Health Check for OS Updates - PRODUCTION MODE
 Documentation=https://piccolospace.com/docs/health-checks
 After=piccolod.service
-Requires=piccolod.service
+# Run even if piccolod fails to start so we can trigger automatic rollback.
+Wants=piccolod.service
+OnFailure=piccolo-rollback.service
 
 [Service]
 Type=oneshot
