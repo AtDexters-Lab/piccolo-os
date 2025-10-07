@@ -150,6 +150,7 @@
   let aliasWorking = false;
 
   let certificates: CertificateRow[] = [];
+  let renewing: Record<string, boolean> = {};
   let events: TimelineEvent[] = [];
   let preflightChecks: PreflightCheck[] = [];
   let preflightTimestamp: string | null = null;
@@ -329,6 +330,26 @@
         // Endpoint not yet available; fall back to payload snapshot
         certificates = statusPayload?.certificates ?? [];
       }
+    }
+  }
+
+  async function renewCert(cert: CertificateRow) {
+    const id = (cert.id || cert.domains?.[0] || '').trim();
+    if (!id) {
+      toast('Missing certificate identifier', 'error');
+      return;
+    }
+    if (renewing[id]) return;
+    renewing = { ...renewing, [id]: true };
+    try {
+      await apiProd(`/remote/certificates/${encodeURIComponent(id)}/renew`, { method: 'POST' });
+      toast('Issuance queued', 'success');
+      await loadCertificates();
+      await loadEvents();
+    } catch (err: any) {
+      toast(err?.message || 'Failed to queue issuance', 'error');
+    } finally {
+      renewing = { ...renewing, [id]: false };
     }
   }
 
@@ -767,6 +788,7 @@
                     <th class="py-2 pr-4">Expires</th>
                     <th class="py-2 pr-4">Next renewal</th>
                     <th class="py-2 pr-4">Status</th>
+                    <th class="py-2 pr-4">Actions</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
@@ -787,6 +809,17 @@
                         {cert.status ? cert.status.toUpperCase() : 'UNKNOWN'}
                         {#if cert.failure_reason}
                           <div class="mt-1 text-xs text-slate-500">{cert.failure_reason}</div>
+                        {/if}
+                      </td>
+                      <td class="py-2 pr-4">
+                        {#if cert.id}
+                          <button class="px-2 py-1 text-xs border rounded hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            on:click={() => renewCert(cert)}
+                            disabled={renewing[cert.id] || cert.status === 'pending'}>
+                            {renewing[cert.id] ? 'Queuing…' : 'Retry issuance'}
+                          </button>
+                        {:else}
+                          <span class="text-xs text-slate-400">—</span>
                         {/if}
                       </td>
                     </tr>
