@@ -39,6 +39,7 @@ This file tracks P0 tasks required to hit the milestone. Owners and PR links can
 - File-backed cert provider is active; TLS mux uses it to terminate remote HTTPS for HTTP listeners; portal remains HTTP on LAN.
 - Cert store reload: provider prefers fresh on-disk loads so newly issued certs are picked up without restart.
 - Listener-specific HTTP-01: when solver=http-01 (wildcard unsupported), per-listener hostnames `<listener>.<tld>` are queued for issuance on configure; adding an alias also queues issuance for that hostname.
+- Renewal scheduler: background loop checks `next_renewal`/`expires_at` and queues issuance with pending-state gating; events show started/failed/succeeded.
 - TLS mux is started on remote configure and resolver maps `443` → mux for `flow=tcp` listeners; `flow=tls` stays passthrough.
 - Nexus backend adapter regression addressed: removed per-port disable/blacklist; we now let dial fail if the local proxy isn’t up (prevents recycled-port lockout).
 - Repository builds green; some mdns/container tests require elevated capabilities and fail in local env—left untouched as out of scope for this milestone.

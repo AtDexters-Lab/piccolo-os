@@ -147,6 +147,7 @@ type Manager struct {
     adapterCancel context.CancelFunc
     challenges    *ChallengeManager
     acmeMgr       *acme.Manager
+    renewCancel   context.CancelFunc
 }
 
 func NewManager(stateDir string) (*Manager, error) {
@@ -530,10 +531,11 @@ func (m *Manager) applyAdapterState() {
 		log.Printf("WARN: remote: configure nexus adapter failed: %v", err)
 	}
 
-	if !cfg.Enabled || cfg.Endpoint == "" || cfg.DeviceSecret == "" || cfg.PortalHostname == "" {
-		m.stopAdapter()
-		return
-	}
+    if !cfg.Enabled || cfg.Endpoint == "" || cfg.DeviceSecret == "" || cfg.PortalHostname == "" {
+        m.stopAdapter()
+        m.stopRenewScheduler()
+        return
+    }
 
 	if cancel != nil {
 		m.stopAdapter()
@@ -545,14 +547,16 @@ func (m *Manager) applyAdapterState() {
 	adapterRun := m.adapter
 	m.adapterMu.Unlock()
 
-	go func() {
-		if err := adapterRun.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("WARN: remote: nexus adapter exited: %v", err)
-		}
-		m.adapterMu.Lock()
-		m.adapterCancel = nil
-		m.adapterMu.Unlock()
-	}()
+    go func() {
+        if err := adapterRun.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+            log.Printf("WARN: remote: nexus adapter exited: %v", err)
+        }
+        m.adapterMu.Lock()
+        m.adapterCancel = nil
+        m.adapterMu.Unlock()
+    }()
+    // Ensure renew scheduler is running when remote is active
+    m.startRenewScheduler()
 }
 
 // HTTPChallengeHandler exposes a read-only handler for ACME HTTP-01 tokens.
@@ -578,6 +582,78 @@ func (m *Manager) stopAdapter() {
 			log.Printf("WARN: remote: stopping nexus adapter: %v", err)
 		}
 	}
+}
+
+// startRenewScheduler starts a background loop to renew certificates when due.
+func (m *Manager) startRenewScheduler() {
+    if m.renewCancel != nil {
+        return
+    }
+    ctx, cancel := context.WithCancel(context.Background())
+    m.renewCancel = cancel
+    go m.runRenewScheduler(ctx)
+}
+
+func (m *Manager) stopRenewScheduler() {
+    if m.renewCancel != nil {
+        m.renewCancel()
+        m.renewCancel = nil
+    }
+}
+
+func (m *Manager) runRenewScheduler(ctx context.Context) {
+    // Check hourly; jitter issuance via pending-state gate
+    ticker := time.NewTicker(1 * time.Hour)
+    defer ticker.Stop()
+    // Initial quick check after a short delay
+    initial := time.NewTimer(10 * time.Second)
+    defer initial.Stop()
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-initial.C:
+            m.scanAndQueueRenewals()
+        case <-ticker.C:
+            m.scanAndQueueRenewals()
+        }
+    }
+}
+
+func (m *Manager) scanAndQueueRenewals() {
+    cfg := m.currentConfig()
+    now := m.now()
+    for _, c := range cfg.Certificates {
+        if strings.EqualFold(c.Status, "pending") {
+            continue // avoid duplicate queueing
+        }
+        if c.NextRenewal == nil || c.ExpiresAt == nil {
+            continue
+        }
+        // Renew when due or if within 24h of expiry as a safety net
+        if now.After(*c.NextRenewal) || now.Add(24*time.Hour).After(*c.ExpiresAt) {
+            switch c.ID {
+            case "portal":
+                if cfg.PortalHostname != "" {
+                    m.enqueueIssuance("portal", []string{cfg.PortalHostname}, cfg.PortalHostname)
+                }
+            case "wildcard":
+                if cfg.TLD != "" {
+                    cn := "*." + cfg.TLD
+                    m.enqueueIssuance("wildcard", []string{cn}, cn)
+                }
+            default:
+                if strings.HasPrefix(c.ID, "alias:") || strings.HasPrefix(c.ID, "host:") {
+                    // ID suffix is the hostname for our queued entries
+                    parts := strings.SplitN(c.ID, ":", 2)
+                    if len(parts) == 2 && parts[1] != "" {
+                        h := parts[1]
+                        m.enqueueIssuance(c.ID, []string{h}, h)
+                    }
+                }
+            }
+        }
+    }
 }
 
 // RenewCertificate simulates a manual renewal.
