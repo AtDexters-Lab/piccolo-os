@@ -1033,7 +1033,7 @@ func defaultCertificates(cfg *Config, now time.Time) []Certificate {
 			Status:      "ok",
 		})
 	}
-	if cfg.TLD != "" {
+	if cfg.TLD != "" && strings.EqualFold(cfg.Solver, "dns-01") {
 		certificates = append(certificates, Certificate{
 			ID:          "wildcard",
 			Domains:     []string{fmt.Sprintf("*.%s", cfg.TLD)},
