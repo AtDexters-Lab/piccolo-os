@@ -15,6 +15,11 @@ require (
 )
 
 require (
+	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
+	github.com/go-jose/go-jose/v3 v3.0.0 // indirect
+)
+
+require (
 	github.com/AtDexters-Lab/nexus-proxy-backend-client v0.1.1
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
@@ -24,6 +29,7 @@ require (
 	github.com/getkin/kin-openapi v0.127.0
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/gin-gonic/gin v1.10.1
+	github.com/go-acme/lego/v4 v4.14.2
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect

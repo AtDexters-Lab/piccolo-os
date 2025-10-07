@@ -31,6 +31,16 @@ This file tracks P0 tasks required to hit the milestone. Owners and PR links can
 - Wired ServiceManager lifecycle with publish hooks (no‑ops for now) to ease future adapter enhancements.
 - Next: ACME manager + encrypted cert store; hook challenge handlers (portal + HTTP proxies); readiness 503 + leader hints; Nexus host array restart.
 
+## Progress notes (Oct 07)
+- Fixed ACME issuer compile errors and wired lego v4 HTTP-01 issuer:
+  - Implemented `registration.User` correctly (`GetPrivateKey() crypto.PrivateKey`).
+  - Switched to `certificate.ObtainRequest` API and removed unused imports.
+  - `remote.Manager.Configure` now best-effort issues certs for `portal_hostname` and `*.TLD` into `<control>/remote/certs/`.
+- File-backed cert provider is active; TLS mux uses it to terminate remote HTTPS for HTTP listeners; portal remains HTTP on LAN.
+- TLS mux is started on remote configure and resolver maps `443` → mux for `flow=tcp` listeners; `flow=tls` stays passthrough.
+- Nexus backend adapter regression addressed: removed per-port disable/blacklist; we now let dial fail if the local proxy isn’t up (prevents recycled-port lockout).
+- Repository builds green; some mdns/container tests require elevated capabilities and fail in local env—left untouched as out of scope for this milestone.
+
 ## Notes
 - TLS termination policy follows `src/l1/piccolod/docs/app-platform/specification.yaml`.
 - Pebble is used for automated issuance; Let’s Encrypt Staging is for optional manual verification.

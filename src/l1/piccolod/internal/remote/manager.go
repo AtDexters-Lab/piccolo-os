@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"piccolod/internal/remote/nexusclient"
+	"piccolod/internal/remote/acme"
 	"piccolod/internal/state/paths"
 )
 
@@ -143,6 +144,7 @@ type Manager struct {
     adapterMu     sync.Mutex
     adapterCancel context.CancelFunc
     challenges    *ChallengeManager
+    acmeMgr       *acme.Manager
 }
 
 func NewManager(stateDir string) (*Manager, error) {
@@ -168,7 +170,9 @@ func newManagerWithDeps(storage Storage, d dialer, r resolver, now func() time.T
         now:      now,
     }
     m.challenges = NewChallengeManager()
-	if storage != nil {
+    // ACME manager (wire later on configure)
+    m.acmeMgr = acme.NewManager(paths.Root(), m.challenges, "", os.Getenv("PICCOLO_ACME_DIR_URL"))
+    if storage != nil {
 		cfg, err := storage.Load(context.Background())
 		if err != nil {
 			if !errors.Is(err, ErrLocked) {
@@ -367,7 +371,7 @@ func (m *Manager) Configure(req ConfigureRequest) error {
 		return errors.New("dns_provider required for dns-01")
 	}
 
-	now := m.now()
+    now := m.now()
 	expires := now.Add(90 * 24 * time.Hour)
 	nextRenewal := now.Add(60 * 24 * time.Hour)
 
@@ -386,7 +390,21 @@ func (m *Manager) Configure(req ConfigureRequest) error {
 	cfg.LastHandshake = now
 	cfg.LatencyMS = 0
 	cfg.LastPreflight = nil
-	cfg.Certificates = defaultCertificates(cfg, now)
+    // Attempt ACME issuance for portal and wildcard (best-effort)
+    // portal
+    if m.acmeMgr != nil && cfg.PortalHostname != "" {
+        if _, err := m.acmeMgr.Issue(cfg.PortalHostname, nil, "portal", filepath.Join(paths.ControlDir(), "remote", "certs")); err != nil {
+            log.Printf("WARN: ACME issue portal failed: %v", err)
+        }
+    }
+    // wildcard
+    if m.acmeMgr != nil && cfg.TLD != "" {
+        cn := "*."+cfg.TLD
+        if _, err := m.acmeMgr.Issue(cn, nil, cn, filepath.Join(paths.ControlDir(), "remote", "certs")); err != nil {
+            log.Printf("WARN: ACME issue wildcard failed: %v", err)
+        }
+    }
+    cfg.Certificates = defaultCertificates(cfg, now)
 	cfg.Events = append(cfg.Events, Event{
 		Timestamp: now,
 		Level:     "info",
