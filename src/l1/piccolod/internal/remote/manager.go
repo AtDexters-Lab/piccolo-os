@@ -386,6 +386,9 @@ func (m *Manager) Configure(req ConfigureRequest) error {
 	cfg := m.currentConfig()
 	cfg.Endpoint = endpoint
 	cfg.DeviceSecret = strings.TrimSpace(req.DeviceSecret)
+	if err := validateJWT(cfg.DeviceSecret); err != nil {
+		return err
+	}
 	cfg.Solver = solver
 	cfg.TLD = tld
 	cfg.PortalHostname = portalHost
@@ -1115,6 +1118,18 @@ func deriveACMEEmail(tld, portal string) string {
 		return "admin@piccolo.local"
 	}
 	return fmt.Sprintf("admin@%s", host)
+}
+
+func validateJWT(token string) error {
+
+	if token == "" {
+		return errors.New("device secret (JWT) required")
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return errors.New("device secret must be a JWT (three segments)")
+	}
+	return nil
 }
 
 func normalizePortalHost(tld, portal string) string {
