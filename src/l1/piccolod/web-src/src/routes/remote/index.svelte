@@ -778,54 +778,35 @@
           {#if !certificates.length}
             <p class="text-sm text-slate-500 mt-3">No certificates issued yet.</p>
           {:else}
-            <div class="mt-3 overflow-x-auto">
-              <table class="min-w-full text-sm text-left">
-                <thead class="text-xs uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th class="py-2 pr-4">Domains</th>
-                    <th class="py-2 pr-4">Solver</th>
-                    <th class="py-2 pr-4">Issued</th>
-                    <th class="py-2 pr-4">Expires</th>
-                    <th class="py-2 pr-4">Next renewal</th>
-                    <th class="py-2 pr-4">Status</th>
-                    <th class="py-2 pr-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                  {#each certificates as cert}
-                    <tr>
-                      <td class="py-2 pr-4 whitespace-normal">
-                        <div class="space-y-0.5">
-                          {#each cert.domains as domain}
-                            <div class="text-slate-900 font-medium">{domain}</div>
-                          {/each}
-                        </div>
-                      </td>
-                      <td class="py-2 pr-4 uppercase text-xs">{cert.solver || '-'}</td>
-                      <td class="py-2 pr-4">{formatDate(cert.issued_at)}</td>
-                      <td class="py-2 pr-4">{formatDate(cert.expires_at)}</td>
-                      <td class="py-2 pr-4">{formatDate(cert.next_renewal)}</td>
-                      <td class={`py-2 pr-4 text-xs font-semibold ${certificateStatusClass(cert.status)}`}>
-                        {cert.status ? cert.status.toUpperCase() : 'UNKNOWN'}
-                        {#if cert.failure_reason}
-                          <div class="mt-1 text-xs text-slate-500">{cert.failure_reason}</div>
-                        {/if}
-                      </td>
-                      <td class="py-2 pr-4">
-                        {#if cert.id}
-                          <button class="px-2 py-1 text-xs border rounded hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                            on:click={() => renewCert(cert)}
-                            disabled={renewing[cert.id] || cert.status === 'pending'}>
-                            {renewing[cert.id] ? 'Queuing…' : 'Retry issuance'}
-                          </button>
-                        {:else}
-                          <span class="text-xs text-slate-400">—</span>
-                        {/if}
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
+            <div class="mt-3 space-y-3">
+              {#each certificates as cert}
+                <div class="border border-slate-100 rounded-md p-3 space-y-3">
+                  <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div class="space-y-2">
+                      <div class="space-y-1">
+                        {#each cert.domains as domain}
+                          <div class="text-slate-900 font-medium break-words">{domain}</div>
+                        {/each}
+                      </div>
+                      <dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-600">
+                        <dt>Solver</dt><dd class="uppercase text-slate-800">{cert.solver || '-'}</dd>
+                        <dt>Issued</dt><dd>{formatDate(cert.issued_at)}</dd>
+                        <dt>Expires</dt><dd>{formatDate(cert.expires_at)}</dd>
+                        <dt>Next renewal</dt><dd>{formatDate(cert.next_renewal)}</dd>
+                      </dl>
+                    </div>
+                    <div class="space-y-2 text-sm md:text-right md:w-48">
+                      <p class={`text-xs font-semibold ${certificateStatusClass(cert.status)}`}>{cert.status ? cert.status.toUpperCase() : 'UNKNOWN'}</p>
+                      {#if cert.failure_reason}
+                        <p class="text-xs text-slate-500 whitespace-pre-wrap break-words">{cert.failure_reason}</p>
+                      {/if}
+                      {#if cert.id}
+                        <button class="px-2 py-1 text-xs border rounded hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed" on:click={() => renewCert(cert)} disabled={renewing[cert.id] || cert.status === 'pending'}>{renewing[cert.id] ? 'Queuing…' : 'Retry issuance'}</button>
+                      {/if}
+                    </div>
+                  </div>
+                </div>
+              {/each}
             </div>
           {/if}
         </section>
