@@ -26,7 +26,9 @@
     // Probe lock state before any sign-in attempt
     try {
       const st: any = await apiProd('/crypto/status');
-      cryptoLocked = !!st?.locked;
+      if (typeof st?.locked === 'boolean') {
+        cryptoLocked = st.locked || cryptoLocked;
+      }
     } catch {}
   });
   async function signIn(path: string = '/auth/login') {
