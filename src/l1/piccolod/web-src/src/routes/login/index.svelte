@@ -17,7 +17,12 @@
       if (!init?.initialized) {
         window.location.hash = '/setup';
       }
-    } catch {}
+    } catch (e: any) {
+      // If persistence reports locked, show unlock first.
+      if (e?.code === 423 || /locked/i.test(e?.message || '')) {
+        cryptoLocked = true;
+      }
+    }
     // Probe lock state before any sign-in attempt
     try {
       const st: any = await apiProd('/crypto/status');
