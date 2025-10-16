@@ -4,7 +4,7 @@ DEMO ?= 0
 RUN_PORT ?= 8080
 RUN_STATE_DIR ?= $(CURDIR)/run-state
 
-.PHONY: all ui server build run release demo demo-serve clean typegen deps e2e e2e-real e2e-demo e2e-deps e2e-one e2e-mobile e2e-visual e2e-visual-one
+.PHONY: all ui server build run release demo demo-serve clean typegen deps e2e e2e-deps e2e-one e2e-mobile e2e-visual e2e-visual-one
 
 all: build
 
@@ -63,41 +63,47 @@ clean:
 e2e-deps: ## Install Playwright browser binaries (no root deps)
 	cd web-src && npm ci && npx playwright install chromium
 
-e2e: e2e-real ## Run Playwright tests (default: real API)
+e2e: ## Build and run Playwright tests against the real API (stubbed remote by default)
+	$(MAKE) build DEMO=0
+	rm -rf .e2e-state && mkdir -p .e2e-state
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test || true
+	node web-src/tools/summarize-playwright.js || true
+
+e2e-remote: ## Run E2E against local Nexus+Pebble (full-remote lane; requires Docker & Podman)
+	$(MAKE) build DEMO=0
+	rm -rf .e2e-state && mkdir -p .e2e-state
+	cd web-src && npm ci && npx playwright install chromium && \
+		PICCOLO_E2E_TLD=example.com \
+		PICCOLO_E2E_PORTAL=portal-e2e \
+		PICCOLO_E2E_NEXUS_SECRET=local-secret \
+		PICCOLO_ACME_DIR_URL=https://localhost:14000/dir \
+		LEGO_CA_CERTIFICATES=../tools/remote-stack/pebble.minica.pem \
+		SSL_CERT_FILE=../tools/remote-stack/combined-ca.pem \
+		E2E_REMOTE_STACK=1 npx playwright test || true
+	node web-src/tools/summarize-playwright.js || true
 
 # Run only a subset of tests by passing ARGS, e.g.:
 #   make e2e-one ARGS="tests/mobile.spec.ts --project=mobile-chromium --grep 'menu button'"
-e2e-one: ## Run Playwright with custom args (ARGS="...") against real API
+e2e-one: ## Run Playwright with custom args (ARGS="...")
 	$(MAKE) build DEMO=0
 	rm -rf .e2e-state && mkdir -p .e2e-state
-	cd web-src && npm ci && npx playwright install chromium && npx playwright test --config=playwright.real.config.ts $(ARGS)
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test $(ARGS)
 
 e2e-mobile: ## Run only mobile project tests
 	$(MAKE) build DEMO=0
 	rm -rf .e2e-state && mkdir -p .e2e-state
-	cd web-src && npm ci && npx playwright install chromium && npx playwright test --config=playwright.real.config.ts --project=mobile-chromium
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test --project=mobile-chromium
 
 # Visual tour: capture screenshots across key routes (no reinstall)
-e2e-visual: ## Generate visual screenshots (desktop+mobile) for real API
+e2e-visual: ## Generate visual screenshots (desktop+mobile)
 	$(MAKE) build DEMO=0
 	rm -rf .e2e-state && mkdir -p .e2e-state
-	cd web-src && npm ci && npx playwright install chromium && npx playwright test tests/visual.spec.ts --config=playwright.real.config.ts --project=chromium --project=mobile-chromium || true
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test tests/visual.spec.ts --project=chromium --project=mobile-chromium || true
 
 # Visual tour for a single project or with custom args
 e2e-visual-one: ## Run visual tour with ARGS (e.g., --project=chromium)
 	$(MAKE) build DEMO=0
 	rm -rf .e2e-state && mkdir -p .e2e-state
-	cd web-src && npm ci && npx playwright install chromium && npx playwright test tests/visual.spec.ts --config=playwright.real.config.ts $(ARGS)
+	cd web-src && npm ci && npx playwright install chromium && npx playwright test tests/visual.spec.ts $(ARGS)
 
-# Real-auth E2E (default)
-.PHONY: e2e-real
-e2e-real: ## Run Playwright against real server (auth/setup enforced)
-	$(MAKE) build DEMO=0
-	rm -rf .e2e-state && mkdir -p .e2e-state
-	cd web-src && npm ci && npx playwright install chromium && npx playwright test --config=playwright.real.config.ts || true
-	node web-src/tools/summarize-playwright.js || true
-
-e2e-demo: ## Run legacy demo-mode Playwright suite (stubs enabled)
-	$(MAKE) build DEMO=1
-	cd web-src && npm ci && npx playwright install chromium && npx playwright test || true
-	node web-src/tools/summarize-playwright.js || true
+# Removed legacy demo and separate real config; unified on single config.

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { ADMIN_PASSWORD, ensureSignedIn, seedAdmin } from './support/session';
 
 test.beforeEach(async ({ page }) => {
   await page.route('**/favicon.ico', async (route) => {
@@ -15,21 +16,12 @@ test.beforeEach(async ({ page }) => {
 
 test.describe('Navigation basics', () => {
   test.beforeAll(async ({ request }) => {
-    await request.post('/api/v1/auth/setup', { data: { password: 'password' } }).catch(() => {});
+    await seedAdmin(request, ADMIN_PASSWORD);
   });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    const heading = page.locator('h2');
-    const text = (await heading.textContent()) || '';
-    if (/Sign in/i.test(text)) {
-      await page.getByLabel('Username').fill('admin');
-      await page.getByLabel('Password').fill('password');
-      await page.getByRole('button', { name: 'Sign in' }).click();
-      await expect(page.locator('h2')).toHaveText('Dashboard');
-    } else {
-      await expect(heading).toHaveText('Dashboard');
-    }
+    await ensureSignedIn(page, ADMIN_PASSWORD);
+    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
   });
 
   test('home loads without redirects and assets are reachable', async ({ page, request }) => {

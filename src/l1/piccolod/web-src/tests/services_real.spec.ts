@@ -1,16 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { ADMIN_PASSWORD, ensureSignedIn } from './support/session';
 
 test.describe('Service discovery (real API)', () => {
-  const adminPass = 'password';
-
   test('list services and app services shape', async ({ page }) => {
     // Setup admin and login
-    await page.request.post('/api/v1/auth/setup', { data: { password: adminPass } }).catch(() => {});
-    await page.goto('/#/login');
-    await page.getByLabel('Username').fill('admin');
-    await page.getByLabel('Password').fill(adminPass);
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.locator('h2')).toHaveText('Dashboard');
+    await ensureSignedIn(page, ADMIN_PASSWORD);
+    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
 
     // GET /services returns array; items (if any) include host_port and optional local_url
     const all = await page.request.get('/api/v1/services').then(r => r.json());

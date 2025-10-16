@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { ADMIN_PASSWORD, ensureSignedIn } from './support/session';
 
 // Console error guard (ignore benign 401/403 during auth transitions)
 test.beforeEach(async ({ page }) => {
@@ -15,6 +16,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('skip link moves focus to main content', async ({ page }) => {
+  await ensureSignedIn(page, ADMIN_PASSWORD);
   await page.goto('/');
   // Tab to reveal skip link
   await page.keyboard.press('Tab');
@@ -26,19 +28,15 @@ test('skip link moves focus to main content', async ({ page }) => {
   expect(activeId).toBe('router-root');
 });
 
-test('focus moves to main after route change', async ({ page, request }) => {
-  await request.post('/api/v1/auth/setup', { data: { password: 'password' } }).catch(() => {});
-  await page.goto('/#/login');
-  await page.getByLabel('Username').fill('admin');
-  await page.getByLabel('Password').fill('password');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.locator('h2')).toHaveText('Dashboard');
+test('focus moves to main after route change', async ({ page }) => {
+  await ensureSignedIn(page, ADMIN_PASSWORD);
   await page.getByRole('link', { name: 'Apps' }).click();
   await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
   await page.waitForFunction(() => document.activeElement && (document.activeElement as HTMLElement).id === 'router-root');
 });
 
 test('toasts expose aria-live and role status', async ({ page }) => {
+  await ensureSignedIn(page, ADMIN_PASSWORD);
   await page.goto('/#/apps');
   // Trigger a toast (Start first app)
   const startBtn = page.getByRole('button', { name: 'Start' }).first();
@@ -50,6 +48,7 @@ test('toasts expose aria-live and role status', async ({ page }) => {
 
 test('mobile menu closes on Escape and focuses first link when opened', async ({ page }) => {
   if (test.info().project.name !== 'mobile-chromium') test.skip();
+  await ensureSignedIn(page, ADMIN_PASSWORD);
   await page.goto('/');
   const menuBtn = page.getByRole('button', { name: 'Menu' });
   await menuBtn.click();

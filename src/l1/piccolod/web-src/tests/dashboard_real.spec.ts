@@ -1,16 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { ADMIN_PASSWORD, ensureSignedIn } from './support/session';
 
 test.describe('Dashboard panels (real-backed status)', () => {
-  test('renders OS/Remote/Storage panels with real API data', async ({ page, request }) => {
+  test('renders OS/Remote/Storage panels with real API data', async ({ page }) => {
     // Ensure admin is set up for real auth flows; ignore if already initialized
-    await request.post('/api/v1/auth/setup', { data: { password: 'password' } }).catch(() => {});
-
-    // Login via UI to establish session
-    await page.goto('/#/login');
-    await page.getByLabel('Username').fill('admin');
-    await page.getByLabel('Password').fill('password');
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.locator('h2')).toHaveText('Dashboard');
+    await ensureSignedIn(page, ADMIN_PASSWORD);
+    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
 
     // Updates panel (real /updates/os)
     await expect(page.getByText(/OS:\s+.*→\s+.*/)).toBeVisible();

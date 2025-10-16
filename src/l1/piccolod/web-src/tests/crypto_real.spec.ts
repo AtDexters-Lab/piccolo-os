@@ -1,17 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { ADMIN_PASSWORD, ensureSignedIn } from './support/session';
 
 test.describe('Crypto setup and unlock (real API)', () => {
-  const adminPass = 'password';
-
   test('setup -> locked gates app install -> unlock allows reaching handler', async ({ page }) => {
-    // Ensure admin exists
-    await page.request.post('/api/v1/auth/setup', { data: { password: adminPass } }).catch(() => {});
-    // Login to establish session cookies
-    await page.goto('/#/login');
-    await page.getByLabel('Username').fill('admin');
-    await page.getByLabel('Password').fill(adminPass);
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.locator('h2')).toHaveText('Dashboard');
+    const adminPass = ADMIN_PASSWORD;
+    await ensureSignedIn(page, adminPass);
+    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
 
     // CSRF token for state-changing requests
     const csrf = await page.request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string);

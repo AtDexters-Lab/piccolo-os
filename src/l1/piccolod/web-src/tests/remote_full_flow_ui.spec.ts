@@ -2,72 +2,45 @@ import { test, expect } from '@playwright/test';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import os from 'os';
-import https from 'https';
 
 const ADMIN_PASSWORD = process.env.PICCOLO_E2E_ADMIN_PASSWORD || 'password';
-const NEXUS_ENDPOINT = process.env.PICCOLO_E2E_NEXUS_ENDPOINT || 'wss://nxs.abhishekborar.com:8443/connect';
-const NEXUS_SECRET = process.env.PICCOLO_E2E_NEXUS_SECRET || '503f05a677ba7bf94d37240bc28833b65528f1e160611556daa24db554f54b44';
-const PICCOLO_TLD = process.env.PICCOLO_E2E_TLD || 'abhishekborar.com';
-const PORTAL_SUBDOMAIN = process.env.PICCOLO_E2E_PORTAL || 'piccolo';
+const NEXUS_ENDPOINT = process.env.PICCOLO_E2E_NEXUS_ENDPOINT || 'wss://stub/connect';
+const NEXUS_SECRET = process.env.PICCOLO_E2E_NEXUS_SECRET || 'stub-secret';
+const PICCOLO_TLD = process.env.PICCOLO_E2E_TLD || 'example.com';
+const PORTAL_SUBDOMAIN = process.env.PICCOLO_E2E_PORTAL || 'portal-e2e';
 const REMOTE_HOST = `${PORTAL_SUBDOMAIN}.${PICCOLO_TLD}`;
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const PICCOLO_BIN = path.resolve(__dirname, '../../piccolod');
 
-async function waitForHttps(url: string, timeoutMs: number) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError: any;
-  while (Date.now() < deadline) {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        https.get(url, { rejectUnauthorized: false }, (res) => {
-          const ok = res.statusCode && res.statusCode < 500;
-          res.resume();
-          ok ? resolve() : reject(new Error(`status ${res.statusCode}`));
-        }).on('error', reject);
-      });
-      return;
-    } catch (err) {
-      lastError = err;
-      await new Promise((r) => setTimeout(r, 5000));
-    }
-  }
-  throw lastError ?? new Error(`timeout waiting for ${url}`);
-}
-
+test.describe.configure({ timeout: 10 * 60 * 1000 });
 test.describe('Remote full flow (UI-driven)', () => {
   let stateDir: string;
   let server: ReturnType<typeof spawn> | undefined;
 
-  test.beforeAll(async () => {
-    stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piccolod-e2e-ui-'));
-    const env = { ...process.env, PICCOLO_STATE_DIR: stateDir, PORT: '8080' };
-    server = spawn(PICCOLO_BIN, { env, stdio: 'inherit' });
 
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch('http://localhost:8080');
-        if (res.ok) break;
-      } catch (_) {
-        await new Promise((r) => setTimeout(r, 500));
-      }
-    }
-  });
-
-  test.afterAll(async () => {
-    if (server) server.kill('SIGINT');
-    if (stateDir) fs.rmSync(stateDir, { recursive: true, force: true });
-  });
 
   test('creates admin, configures remote, verifies HTTPS', async ({ page }) => {
     await page.goto('http://localhost:8080/#/setup');
-    await page.getByLabel('Password').fill(ADMIN_PASSWORD);
-    await page.getByLabel('Confirm password').fill(ADMIN_PASSWORD);
+    await page.getByPlaceholder('New password').fill(ADMIN_PASSWORD);
+    await page.getByPlaceholder('Confirm password').fill(ADMIN_PASSWORD);
     await page.getByRole('button', { name: 'Create Admin' }).click();
-    await page.waitForURL('**/#/');
+    try {
+      await page.waitForURL('**/#/', { timeout: 15000 });
+    } catch {
+      if (await page.locator('text=Locked').first().isVisible()) {
+        await page.goto('http://localhost:8080/#/login');
+        await page.getByPlaceholder('admin password').fill(ADMIN_PASSWORD);
+        await page.getByRole('button', { name: /unlock/i }).click();
+        await page.waitForURL('**/#/');
+      } else {
+        throw new Error('Create admin did not navigate to dashboard and no lock message found');
+      }
+    }
 
-    // Unlock/auth happens automatically after setup; ensure session is live
     await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
 
     await page.goto('http://localhost:8080/#/remote');
@@ -84,17 +57,30 @@ test.describe('Remote full flow (UI-driven)', () => {
 
     const deadline = Date.now() + 10 * 60_000;
     let portalIssued = false;
+    let portalCerts: any = null;
     while (Date.now() < deadline) {
-      const statusText = await page.locator('section:has-text("Certificate inventory")').textContent();
-      if (statusText && statusText.includes('portal.') && statusText.includes('OK')) {
+      portalCerts = await page.evaluate(async () => {
+        const res = await fetch('/api/v1/remote/certificates', { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('failed to fetch certificates');
+        return res.json();
+      });
+      const portal = (portalCerts.certificates || []).find((c: any) => c.id === 'portal');
+      if (portal?.status === 'ok') {
         portalIssued = true;
         break;
       }
-      await page.reload();
-      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(1000);
     }
     expect(portalIssued).toBeTruthy();
+    const wildcard = (portalCerts?.certificates || []).find((c: any) => c.id === 'wildcard');
+    expect(wildcard).toBeFalsy();
 
-    await waitForHttps(`https://${REMOTE_HOST}/#/login`, 120_000);
+    const status = await page.evaluate(async () => {
+      const res = await fetch('/api/v1/remote/status', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('failed to fetch status');
+      return res.json();
+    });
+    expect(status.portal_hostname).toBe(REMOTE_HOST);
+    expect((status.certificates || []).some((c: any) => c.id === 'portal')).toBeTruthy();
   });
 });

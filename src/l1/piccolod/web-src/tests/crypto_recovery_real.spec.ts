@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { seedAdmin } from './support/session';
 
 test.describe('Crypto recovery + rewrap (real API)', () => {
   const adminPassA = 'password';
@@ -6,7 +7,7 @@ test.describe('Crypto recovery + rewrap (real API)', () => {
 
   test('generate recovery, unlock via recovery, and rewrap on password change', async ({ page }) => {
     // Setup admin (idempotent) and login via API (more stable than UI clicks)
-    await page.request.post('/api/v1/auth/setup', { data: { password: adminPassA } }).catch(() => {});
+    await seedAdmin(page.request, adminPassA);
     let currentPass = adminPassA;
     let login = await page.request.post('/api/v1/auth/login', { data: { username: 'admin', password: currentPass } });
     if (!login.ok()) {

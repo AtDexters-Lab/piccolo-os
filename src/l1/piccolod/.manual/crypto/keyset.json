@@ -1,0 +1,11 @@
+{
+  "sdek": "jIwuTgv2vwMwpREVgkR4hZIdJECMBRpPL8bfz1yO1GMZhS24DJayWdz1vxYBQoMy",
+  "salt": "gfU87n2zoSlsZCTSRMcxrA",
+  "nonce": "N8e1x9nRmIurw1uZ",
+  "kdf": {
+    "alg": "argon2id",
+    "time": 3,
+    "memory": 65536,
+    "threads": 1
+  }
+}

@@ -71,12 +71,14 @@ Commands:
 
 - First-time setup: `make deps` (UI deps), `make e2e-deps` (Playwright browsers).
 - Dev loop: `make ui DEMO=1 && make server && make demo-serve`.
-- Full validation: `make e2e` (builds and runs Playwright against demo server).
+- Full validation: `make e2e` (builds and runs Playwright against the real API; remote is stubbed by default).
+- Full remote lane (CI or local): set `E2E_REMOTE_STACK=1` to run against a local Nexus+Pebble stack without fake ACME.
 
 Notes:
 
 - Playwright tests are configured to fail on any browser console error to catch regressions early.
 - UI builds to `web/` and is embedded via go:embed; override via `PICCOLO_UI_DIR` for local serving.
+- E2E testing policy lives at `docs/testing/e2e-policy.md`.
 
 ## Integration Plan (UI → Real API)
 

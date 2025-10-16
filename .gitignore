@@ -10,6 +10,7 @@
 
 # Test binary, built with `go test -c`
 *.test
+.e2e-state
 
 # Code coverage profiles and other test artifacts
 *.out
@@ -32,3 +33,8 @@ go.work.sum
 # .vscode/
 
 codex_conv.sh
+src/l1/piccolod/web-src/test-results/
+src/l1/piccolod/web-src/playwright-report/
+src/l1/piccolod/tools/remote-stack/config/
+src/l1/piccolod/tools/remote-stack/data/
+src/l1/piccolod/tools/remote-stack/*.pem

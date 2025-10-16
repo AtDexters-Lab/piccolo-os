@@ -1,16 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { ADMIN_PASSWORD, ensureSignedIn } from './support/session';
 
 test.describe('Auth + CSRF enforcement (real API)', () => {
-  const adminPass = 'password';
-
   test('state-changing requests require session + CSRF', async ({ page }) => {
-    // Setup admin and login via UI
-    await page.request.post('/api/v1/auth/setup', { data: { password: adminPass } }).catch(() => {});
-    await page.goto('/#/login');
-    await page.getByLabel('Username').fill('admin');
-    await page.getByLabel('Password').fill(adminPass);
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.locator('h2')).toHaveText('Dashboard');
+    const adminPass = ADMIN_PASSWORD;
+    await ensureSignedIn(page, adminPass);
+    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
 
     // Prepare invalid YAML to avoid container work later
     const badYaml = 'name: foo\n';
@@ -32,4 +27,3 @@ test.describe('Auth + CSRF enforcement (real API)', () => {
     expect(resWithCsrf.status()).toBe(400);
   });
 });
-

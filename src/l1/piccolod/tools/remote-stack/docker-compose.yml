@@ -1,0 +1,51 @@
+services:
+  nexus:
+    build:
+      context: .
+      dockerfile: nexus.Dockerfile
+      args:
+        NEXUS_VERSION: ${NEXUS_VERSION:-v0.1.3}
+    container_name: piccolo-e2e-nexus
+    environment:
+      - NEXUS_CONFIG=/config/nexus-config.yaml
+    volumes:
+      - ./config:/config:ro
+      - ./data:/var/lib/nexus-proxy-server
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8443:8443"
+    networks:
+      piccolo_e2e:
+        ipv4_address: 172.29.0.10
+
+  pebble:
+    image: ${PEBBLE_IMAGE:-letsencrypt/pebble:latest}
+    container_name: piccolo-e2e-pebble
+    environment:
+      - PEBBLE_VA_NOSLEEP=1
+      - PEBBLE_VA_ALWAYS_VALID_HTTP_PORTS=80,8080
+      - PEBBLE_VA_ALWAYS_VALID_TLS_PORTS=443,8443
+      - PEBBLE_CHALLTESTSRV=${CHALLTESTSRV_HOST:-http://challtestsrv:8055}
+    command: ["pebble", "-config", "/test/config/pebble-config.json", "-dnsserver", "challtestsrv:8053"]
+    ports:
+      - "14000:14000"
+    networks:
+      piccolo_e2e:
+        ipv4_address: 172.29.0.11
+
+  challtestsrv:
+    image: ${CHALLTESTSRV_IMAGE:-letsencrypt/pebble-challtestsrv:latest}
+    container_name: piccolo-e2e-challtestsrv
+    ports:
+      - "8055:8055"
+    networks:
+      piccolo_e2e:
+        ipv4_address: 172.29.0.12
+
+networks:
+  piccolo_e2e:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24

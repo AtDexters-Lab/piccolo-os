@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/go-acme/lego/v4/certificate"
 	lego "github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/registration"
+	acmepkg "golang.org/x/crypto/acme"
 )
 
 // ChallengeSink exposes Present/CleanUp to publish HTTP-01 tokens.
@@ -51,6 +53,7 @@ func NewManager(stateDir string, sink ChallengeSink, email string, directoryURL 
 			directoryURL = "https://acme-staging-v02.api.letsencrypt.org/directory"
 		}
 	}
+	log.Printf("INFO: ACME directory configured: %s", directoryURL)
 	return &Manager{baseDir: filepath.Join(stateDir, "remote", "acme"), directory: directoryURL, email: email, sink: sink}
 }
 
@@ -120,6 +123,27 @@ func (m *Manager) saveAccount(a *account) error {
 	return nil
 }
 
+func (m *Manager) resetAccountCache() error {
+	keyPath, regPath := m.accountPaths()
+	if err := os.Remove(keyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Remove(regPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func isAccountDoesNotExist(err error) bool {
+	if err == nil {
+		return false
+	}
+	if acmeErr, ok := err.(*acmepkg.Error); ok {
+		return acmeErr.ProblemType == "urn:ietf:params:acme:error:accountDoesNotExist"
+	}
+	return strings.Contains(err.Error(), "accountDoesNotExist")
+}
+
 // SetEmail updates the preferred contact email used for ACME registration.
 func (m *Manager) SetEmail(email string) {
 	email = strings.TrimSpace(strings.ToLower(email))
@@ -141,6 +165,9 @@ func (m *Manager) EnsureAccount() (*lego.Client, *account, error) {
 		}
 		prov := &http01Provider{sink: m.sink}
 		_ = cli.Challenge.SetHTTP01Provider(prov)
+		if acc.Registration != nil {
+			log.Printf("INFO: ACME loaded cached account %s", acc.Registration.URI)
+		}
 		return cli, acc, nil
 	}
 	// Create new
@@ -167,36 +194,49 @@ func (m *Manager) EnsureAccount() (*lego.Client, *account, error) {
 	if err := m.saveAccount(acc); err != nil {
 		return nil, nil, err
 	}
+	if acc.Registration != nil {
+		log.Printf("INFO: ACME registered new account %s", acc.Registration.URI)
+	}
 	return cli, acc, nil
 }
 
 // Issue writes certificate and key files for the given commonName and SANs.
 func (m *Manager) Issue(commonName string, sans []string, outName string, certDir string) (*tls.Certificate, error) {
-	cli, _, err := m.EnsureAccount()
-	if err != nil {
-		return nil, err
+	for attempt := 0; attempt < 2; attempt++ {
+		cli, _, err := m.EnsureAccount()
+		if err != nil {
+			return nil, err
+		}
+		req := certificate.ObtainRequest{Domains: append([]string{commonName}, sans...), Bundle: true}
+		certRes, err := cli.Certificate.Obtain(req)
+		if err != nil {
+			if attempt == 0 && isAccountDoesNotExist(err) {
+				log.Printf("WARN: ACME account invalid, resetting cache and retrying: %v", err)
+				if err := m.resetAccountCache(); err != nil {
+					log.Printf("WARN: failed to reset ACME cache: %v", err)
+				}
+				continue
+			}
+			return nil, err
+		}
+		if err := os.MkdirAll(certDir, 0o700); err != nil {
+			return nil, err
+		}
+		crtPath := filepath.Join(certDir, outName+".crt")
+		keyPath := filepath.Join(certDir, outName+".key")
+		if err := os.WriteFile(crtPath, certRes.Certificate, 0o600); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(keyPath, certRes.PrivateKey, 0o600); err != nil {
+			return nil, err
+		}
+		pair, err := tls.X509KeyPair(certRes.Certificate, certRes.PrivateKey)
+		if err != nil {
+			return nil, err
+		}
+		return &pair, nil
 	}
-	req := certificate.ObtainRequest{Domains: append([]string{commonName}, sans...), Bundle: true}
-	certRes, err := cli.Certificate.Obtain(req)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(certDir, 0o700); err != nil {
-		return nil, err
-	}
-	crtPath := filepath.Join(certDir, outName+".crt")
-	keyPath := filepath.Join(certDir, outName+".key")
-	if err := os.WriteFile(crtPath, certRes.Certificate, 0o600); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(keyPath, certRes.PrivateKey, 0o600); err != nil {
-		return nil, err
-	}
-	pair, err := tls.X509KeyPair(certRes.Certificate, certRes.PrivateKey)
-	if err != nil {
-		return nil, err
-	}
-	return &pair, nil
+	return nil, errors.New("acme: failed to obtain certificate after retry")
 }
 
 // http01Provider bridges lego HTTP-01 to our ChallengeSink.

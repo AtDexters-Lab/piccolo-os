@@ -2,12 +2,17 @@ package remote
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	cryptoRand "crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"math/rand"
 	"net"
 	"net/http"
@@ -401,7 +406,7 @@ func (m *Manager) Configure(req ConfigureRequest) error {
 	// Queue background ACME issuance and surface events/inventory.
 	cfg.Certificates = defaultCertificates(cfg, now)
 	m.enqueueIssuance("portal", []string{cfg.PortalHostname}, cfg.PortalHostname)
-	if cfg.TLD != "" {
+	if cfg.TLD != "" && strings.EqualFold(cfg.Solver, "dns-01") {
 		m.enqueueIssuance("wildcard", []string{"*." + cfg.TLD}, "*."+cfg.TLD)
 	}
 	cfg.Events = append(cfg.Events, Event{
@@ -643,7 +648,7 @@ func (m *Manager) scanAndQueueRenewals() {
 					m.enqueueIssuance("portal", []string{cfg.PortalHostname}, cfg.PortalHostname)
 				}
 			case "wildcard":
-				if cfg.TLD != "" {
+				if cfg.TLD != "" && strings.EqualFold(cfg.Solver, "dns-01") {
 					cn := "*." + cfg.TLD
 					m.enqueueIssuance("wildcard", []string{cn}, cn)
 				}
@@ -673,6 +678,9 @@ func (m *Manager) RenewCertificate(id string) error {
 				cn = cfg.PortalHostname
 			}
 			if id == "wildcard" && cfg.TLD != "" {
+				if !strings.EqualFold(cfg.Solver, "dns-01") {
+					return errors.New("wildcard renewals require dns-01 solver")
+				}
 				cn = "*." + cfg.TLD
 			}
 			m.enqueueIssuance(id, domains, cn)
@@ -704,16 +712,27 @@ func (m *Manager) enqueueIssuance(id string, domains []string, commonName string
 	m.ensureCertPending(cfg, id, domains, now)
 	_ = m.save(cfg)
 
+	fakeACME := os.Getenv("PICCOLO_REMOTE_FAKE_ACME") == "1"
 	// Fire and forget
 	go func(id string, domains []string, cn string) {
 		certDir := filepath.Join(paths.ControlDir(), "remote", "certs")
-		_, err := m.acmeMgr.Issue(cn, nil, outNameFor(id, cn), certDir)
+		outName := outNameFor(id, cn)
+		if fakeACME {
+			expires, err := writeSelfSignedCertificate(certDir, outName, cn, domains)
+			if err != nil {
+				m.updateCertFailure(id, err.Error())
+				return
+			}
+			m.updateCertSuccess(id, expires)
+			return
+		}
+		_, err := m.acmeMgr.Issue(cn, nil, outName, certDir)
 		if err != nil {
 			m.updateCertFailure(id, err.Error())
 			return
 		}
 		// Try to read expiry from on-disk certificate
-		if exp, ok := readCertExpiry(filepath.Join(certDir, outNameFor(id, cn)+".crt")); ok {
+		if exp, ok := readCertExpiry(filepath.Join(certDir, outName+".crt")); ok {
 			m.updateCertSuccess(id, exp)
 		} else {
 			// Fallback: 90d expiry
@@ -804,6 +823,65 @@ func (m *Manager) updateCertFailure(id string, reason string) {
 		NextStep:  "Verify DNS/Nexus reachability and retry",
 	})
 	_ = m.save(cfg)
+}
+
+func writeSelfSignedCertificate(dir, outName, commonName string, domains []string) (time.Time, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return time.Time{}, err
+	}
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), cryptoRand.Reader)
+	if err != nil {
+		return time.Time{}, err
+	}
+	now := time.Now().Add(-time.Minute)
+	expires := now.Add(90 * 24 * time.Hour)
+	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := cryptoRand.Int(cryptoRand.Reader, serialLimit)
+	if err != nil {
+		return time.Time{}, err
+	}
+	unique := make(map[string]struct{})
+	add := func(host string) {
+		h := strings.TrimSpace(strings.ToLower(host))
+		if h == "" {
+			return
+		}
+		unique[h] = struct{}{}
+	}
+	add(commonName)
+	for _, d := range domains {
+		add(d)
+	}
+	var dns []string
+	for h := range unique {
+		dns = append(dns, h)
+	}
+	template := x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    now,
+		NotAfter:     expires,
+		DNSNames:     dns,
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(cryptoRand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return time.Time{}, err
+	}
+	keyBytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return time.Time{}, err
+	}
+	certPath := filepath.Join(dir, outName+".crt")
+	keyPath := filepath.Join(dir, outName+".key")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		return time.Time{}, err
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes}), 0o600); err != nil {
+		return time.Time{}, err
+	}
+	return expires, nil
 }
 
 func readCertExpiry(path string) (time.Time, bool) {

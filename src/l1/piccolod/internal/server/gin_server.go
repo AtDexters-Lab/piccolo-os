@@ -50,9 +50,9 @@ type GinServer struct {
 	leadership     *cluster.Registry
 	supervisor     *supervisor.Supervisor
 	dispatcher     *commands.Dispatcher
-    routeManager   *router.Manager
-    tlsMux         *services.TlsMux
-    remoteResolver *serviceRemoteResolver
+	routeManager   *router.Manager
+	tlsMux         *services.TlsMux
+	remoteResolver *serviceRemoteResolver
 
 	// Optional OpenAPI request validation (Phase 0)
 	apiValidator *openAPIValidator
@@ -79,12 +79,12 @@ type portPublisherFunc func(int)
 func (f portPublisherFunc) Publish(p int) { f(p) }
 
 type serviceRemoteResolver struct {
-    services *services.ServiceManager
-    mu       sync.RWMutex
-    domain   string
-    portal   string
-    port     int
-    tlsMuxPort int
+	services   *services.ServiceManager
+	mu         sync.RWMutex
+	domain     string
+	portal     string
+	port       int
+	tlsMuxPort int
 }
 
 func newServiceRemoteResolver(svc *services.ServiceManager) *serviceRemoteResolver {
@@ -106,32 +106,32 @@ func (r *serviceRemoteResolver) UpdateConfig(cfg nexusclient.Config) {
 			domain = r.portal[idx+1:]
 		}
 	}
-    r.domain = domain
-    r.mu.Unlock()
+	r.domain = domain
+	r.mu.Unlock()
 }
 
 func (r *serviceRemoteResolver) SetTlsMuxPort(p int) { r.mu.Lock(); r.tlsMuxPort = p; r.mu.Unlock() }
 
 func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int) (int, bool) {
-    h := strings.TrimSuffix(strings.ToLower(hostname), ".")
-    r.mu.RLock()
-    portal := r.portal
-    domain := r.domain
-    portalPort := r.port
-    tlsMuxPort := r.tlsMuxPort
-    r.mu.RUnlock()
+	h := strings.TrimSuffix(strings.ToLower(hostname), ".")
+	r.mu.RLock()
+	portal := r.portal
+	domain := r.domain
+	portalPort := r.port
+	tlsMuxPort := r.tlsMuxPort
+	r.mu.RUnlock()
 
-    // Portal host: treat as flow=tcp (device-terminated TLS when not 80)
-    if portal != "" && h == portal {
-        if remotePort == 80 {
-            return portalPort, true
-        }
-        if tlsMuxPort > 0 {
-            return tlsMuxPort, true
-        }
-        // Fallback to portalPort if mux not running (unit tests)
-        return portalPort, true
-    }
+	// Portal host: treat as flow=tcp (device-terminated TLS when not 80)
+	if portal != "" && h == portal {
+		if remotePort == 80 {
+			return portalPort, true
+		}
+		if tlsMuxPort > 0 {
+			return tlsMuxPort, true
+		}
+		// Fallback to portalPort if mux not running (unit tests)
+		return portalPort, true
+	}
 
 	listener := ""
 	if domain != "" {
@@ -147,41 +147,41 @@ func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int) (int, b
 		listener = h[:idx]
 	}
 
-    // Listener host
-    if listener != "" {
-        if ep, ok := r.services.ResolveListener(listener, remotePort); ok {
-            switch strings.ToLower(ep.Flow) {
-            case "tls":
-                // App terminates TLS end-to-end (passthrough)
-                return ep.PublicPort, true
-            default: // "tcp" or empty
-                if remotePort == 80 {
-                    return ep.PublicPort, true
-                }
-                if tlsMuxPort > 0 {
-                    return tlsMuxPort, true
-                }
-                // Fallback to HTTP path if mux not running
-                return ep.PublicPort, true
-            }
-        }
-    }
+	// Listener host
+	if listener != "" {
+		if ep, ok := r.services.ResolveListener(listener, remotePort); ok {
+			switch strings.ToLower(ep.Flow) {
+			case "tls":
+				// App terminates TLS end-to-end (passthrough)
+				return ep.PublicPort, true
+			default: // "tcp" or empty
+				if remotePort == 80 {
+					return ep.PublicPort, true
+				}
+				if tlsMuxPort > 0 {
+					return tlsMuxPort, true
+				}
+				// Fallback to HTTP path if mux not running
+				return ep.PublicPort, true
+			}
+		}
+	}
 
-    // Fallback by port only (rare): apply same flow policy when we find an ep
-    if ep, ok := r.services.ResolveByRemotePort(remotePort); ok {
-        switch strings.ToLower(ep.Flow) {
-        case "tls":
-            return ep.PublicPort, true
-        default:
-            if remotePort == 80 {
-                return ep.PublicPort, true
-            }
-            if tlsMuxPort > 0 {
-                return tlsMuxPort, true
-            }
-            return ep.PublicPort, true
-        }
-    }
+	// Fallback by port only (rare): apply same flow policy when we find an ep
+	if ep, ok := r.services.ResolveByRemotePort(remotePort); ok {
+		switch strings.ToLower(ep.Flow) {
+		case "tls":
+			return ep.PublicPort, true
+		default:
+			if remotePort == 80 {
+				return ep.PublicPort, true
+			}
+			if tlsMuxPort > 0 {
+				return tlsMuxPort, true
+			}
+			return ep.PublicPort, true
+		}
+	}
 
 	return 0, false
 }
@@ -221,7 +221,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	svcMgr.ObserveRuntimeEvents(eventsBus)
 	// TLS mux (loopback, remote-only) — created now, started when remote is configured
 	tlsMux := services.NewTlsMux(svcMgr)
-    // Wire ACME HTTP-01 handler into HTTP proxies (set after remote manager init)
+	// Wire ACME HTTP-01 handler into HTTP proxies (set after remote manager init)
 	appMgr, err := app.NewAppManagerWithServices(podmanCLI, "", svcMgr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init app manager: %w", err)
@@ -248,14 +248,20 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// Dispatcher middleware slot available for metrics/auditing; lock/leader
 	// enforcement is handled in persistence and managers to avoid duplication.
 
-    s := &GinServer{
+	mdnsDisabled := os.Getenv("PICCOLO_DISABLE_MDNS") == "1"
+	var mdnsMgr *mdns.Manager
+	if !mdnsDisabled {
+		mdnsMgr = mdns.NewManager()
+	}
+
+	s := &GinServer{
 		appManager:     appMgr,
 		serviceManager: svcMgr,
 		persistence:    persist,
-		mdnsManager:    mdns.NewManager(),
+		mdnsManager:    mdnsMgr,
 		routeManager:   routeMgr,
-        tlsMux:         tlsMux,
-        remoteResolver: remoteResolver,
+		tlsMux:         tlsMux,
+		remoteResolver: remoteResolver,
 		events:         eventsBus,
 		leadership:     leadershipReg,
 		supervisor:     sup,
@@ -267,15 +273,21 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	healthTracker.Setf("http", health.LevelOK, "HTTP server initialized")
 	healthTracker.Setf("app-manager", health.LevelWarn, "app manager gated by lock state")
 	healthTracker.Setf("service-manager", health.LevelOK, "service manager running")
-	healthTracker.Setf("mdns", health.LevelOK, "mdns supervisor registered")
+	if mdnsDisabled {
+		healthTracker.Setf("mdns", health.LevelWarn, "mdns disabled via PICCOLO_DISABLE_MDNS")
+	} else {
+		healthTracker.Setf("mdns", health.LevelOK, "mdns supervisor registered")
+	}
 	healthTracker.Setf("remote", health.LevelWarn, "remote manager initializing")
 	healthTracker.Setf("persistence", health.LevelWarn, "control store locked")
 
-	s.supervisor.Register(supervisor.NewComponent("mdns", func(ctx context.Context) error {
-		return s.mdnsManager.Start()
-	}, func(ctx context.Context) error {
-		return s.mdnsManager.Stop()
-	}))
+	if !mdnsDisabled {
+		s.supervisor.Register(supervisor.NewComponent("mdns", func(ctx context.Context) error {
+			return s.mdnsManager.Start()
+		}, func(ctx context.Context) error {
+			return s.mdnsManager.Stop()
+		}))
+	}
 
 	s.supervisor.Register(supervisor.NewComponent("service-manager", func(ctx context.Context) error {
 		s.serviceManager.StartBackground()
@@ -320,24 +332,24 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		return nil, fmt.Errorf("remote manager init: %w", err)
 	}
 	s.remoteManager = rm
-    // Now that remote manager exists, wire ACME challenge handler and cert provider
-    if rm != nil && svcMgr != nil {
-        svcMgr.ProxyManager().SetAcmeHandler(rm.HTTPChallengeHandler())
-        // File-based cert provider under control volume
-        certProv := remote.NewFileCertProvider("")
-        tlsMux.SetCertProvider(certProv)
-    }
+	// Now that remote manager exists, wire ACME challenge handler and cert provider
+	if rm != nil && svcMgr != nil {
+		svcMgr.ProxyManager().SetAcmeHandler(rm.HTTPChallengeHandler())
+		// File-based cert provider under control volume
+		certProv := remote.NewFileCertProvider("")
+		tlsMux.SetCertProvider(certProv)
+	}
 	var nexusAdapter nexusclient.Adapter
-    if os.Getenv("PICCOLO_NEXUS_USE_STUB") == "1" {
-        nexusAdapter = nexusclient.NewStub()
-    } else {
-        nexusAdapter = nexusclient.NewBackendAdapter(routeMgr, remoteResolver)
-    }
+	if os.Getenv("PICCOLO_NEXUS_USE_STUB") == "1" {
+		nexusAdapter = nexusclient.NewStub()
+	} else {
+		nexusAdapter = nexusclient.NewBackendAdapter(routeMgr, remoteResolver)
+	}
 	rm.SetNexusAdapter(nexusAdapter)
 	remote.RegisterHandlers(dispatch, rm)
 	s.healthTracker.Setf("remote", health.LevelOK, "remote manager ready")
 
-    // (Simplified) No dynamic port publish/unpublish wiring; allow dial to fail gracefully.
+	// (Simplified) No dynamic port publish/unpublish wiring; allow dial to fail gracefully.
 
 	// Rehydrate proxies for containers that survived restarts
 	appMgr.RestoreServices(context.Background())
@@ -384,7 +396,7 @@ func (s *GinServer) Stop() error {
 
 // setupGinRoutes defines all API endpoints using Gin router.
 func (s *GinServer) setupGinRoutes() {
-    r := gin.New()
+	r := gin.New()
 
 	// Avoid implicit redirects that can cause loops during SPA routing
 	r.RedirectTrailingSlash = false
@@ -412,22 +424,22 @@ func (s *GinServer) setupGinRoutes() {
 		r.Use(s.apiValidator.Middleware())
 	}
 
-    // Root endpoint
-    r.GET("/", s.handleGinRoot)
-    // ACME HTTP-01 challenge for portal hostname
-    r.GET("/.well-known/acme-challenge/:token", func(c *gin.Context) {
-        if s.remoteManager == nil {
-            c.Status(http.StatusNotFound)
-            return
-        }
-        h := s.remoteManager.HTTPChallengeHandler()
-        if h == nil {
-            c.Status(http.StatusNotFound)
-            return
-        }
-        // Delegate to handler (ensures correct content-type and body)
-        h.ServeHTTP(c.Writer, c.Request)
-    })
+	// Root endpoint
+	r.GET("/", s.handleGinRoot)
+	// ACME HTTP-01 challenge for portal hostname
+	r.GET("/.well-known/acme-challenge/:token", func(c *gin.Context) {
+		if s.remoteManager == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		h := s.remoteManager.HTTPChallengeHandler()
+		if h == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		// Delegate to handler (ensures correct content-type and body)
+		h.ServeHTTP(c.Writer, c.Request)
+	})
 
 	// API v1 group
 	v1 := r.Group("/api/v1")
@@ -442,34 +454,34 @@ func (s *GinServer) setupGinRoutes() {
 		})
 
 		// Auth & sessions (selected public endpoints)
-        v1.GET("/auth/session", s.handleAuthSession)
-        v1.GET("/auth/initialized", s.handleAuthInitialized)
-        v1.POST("/auth/login", s.handleAuthLogin)
-        v1.POST("/auth/setup", s.handleAuthSetup)
+		v1.GET("/auth/session", s.handleAuthSession)
+		v1.GET("/auth/initialized", s.handleAuthInitialized)
+		v1.POST("/auth/login", s.handleAuthLogin)
+		v1.POST("/auth/setup", s.handleAuthSetup)
 
 		// Selected read-only status endpoints remain public
-        v1.GET("/updates/os", s.handleOSUpdateStatus)
-        v1.GET("/remote/status", s.handleRemoteStatus)
-        v1.GET("/storage/disks", s.handleStorageDisks)
-        v1.GET("/health/live", s.handleHealthLive)
-        v1.GET("/health/ready", s.handleGinReadinessCheck)
-        v1.GET("/health/detail", s.handleHealthDetail)
+		v1.GET("/updates/os", s.handleOSUpdateStatus)
+		v1.GET("/remote/status", s.handleRemoteStatus)
+		v1.GET("/storage/disks", s.handleStorageDisks)
+		v1.GET("/health/live", s.handleHealthLive)
+		v1.GET("/health/ready", s.handleGinReadinessCheck)
+		v1.GET("/health/detail", s.handleHealthDetail)
 
 		// Allow unlocking without a session to break the initial lock/setup cycle.
-        // Crypto: expose status/setup/unlock publicly to break circular dependency with sessions.
-        v1.GET("/crypto/status", s.handleCryptoStatus)
-        v1.POST("/crypto/setup", s.handleCryptoSetup)
-        v1.POST("/crypto/unlock", s.handleCryptoUnlock)
+		// Crypto: expose status/setup/unlock publicly to break circular dependency with sessions.
+		v1.GET("/crypto/status", s.handleCryptoStatus)
+		v1.POST("/crypto/setup", s.handleCryptoSetup)
+		v1.POST("/crypto/unlock", s.handleCryptoUnlock)
 
 		// All other API endpoints require session + CSRF
 		authed := v1.Group("/")
 		authed.Use(s.requireSession())
 		authed.Use(s.csrfMiddleware())
 
-        // Crypto endpoints (session required for lock/recovery management)
-        authed.POST("/crypto/lock", s.handleCryptoLock)
-        authed.GET("/crypto/recovery-key", s.handleCryptoRecoveryStatus)
-        authed.POST("/crypto/recovery-key/generate", s.handleCryptoRecoveryGenerate)
+		// Crypto endpoints (session required for lock/recovery management)
+		authed.POST("/crypto/lock", s.handleCryptoLock)
+		authed.GET("/crypto/recovery-key", s.handleCryptoRecoveryStatus)
+		authed.POST("/crypto/recovery-key/generate", s.handleCryptoRecoveryGenerate)
 
 		// App management endpoints
 		apps := authed.Group("/apps")
