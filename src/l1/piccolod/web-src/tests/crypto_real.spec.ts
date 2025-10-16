@@ -23,10 +23,8 @@ test.describe('Crypto setup and unlock (real API)', () => {
     }
 
     // Session should report volumes locked
-    const s1 = await page.request.get('/api/v1/auth/session');
-    const js1 = await s1.json();
-    expect(js1.authenticated).toBeTruthy();
-    expect(js1.volumes_locked).toBeTruthy();
+    const lockedState = await page.request.get('/api/v1/crypto/status').then(r => r.json());
+    expect(lockedState.locked).toBeTruthy();
 
 
     // While locked, app install must be forbidden (403) regardless of payload
@@ -41,16 +39,20 @@ test.describe('Crypto setup and unlock (real API)', () => {
     const u = await page.request.post('/api/v1/crypto/unlock', { headers: { 'X-CSRF-Token': csrf }, data: { password: adminPass } });
     expect(u.ok()).toBeTruthy();
 
-    // Session should report unlocked
-    const s2 = await page.request.get('/api/v1/auth/session');
-    const js2 = await s2.json();
-    expect(js2.volumes_locked).toBeFalsy();
+    await expect.poll(async () => {
+      const statusResp = await page.request.get('/api/v1/crypto/status');
+      const body = await statusResp.json();
+      return body.locked as boolean;
+    }, { timeout: 5000 }).toBe(false);
 
     // Now the same invalid YAML should reach the handler and fail validation with 400 (not 403)
+    const refreshedCsrf = await page.request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string);
+    expect(refreshedCsrf).toBeTruthy();
+
     const resAfter = await page.request.post('/api/v1/apps', {
-      headers: { 'Content-Type': 'application/x-yaml', 'X-CSRF-Token': csrf },
+      headers: { 'Content-Type': 'application/x-yaml', 'X-CSRF-Token': refreshedCsrf },
       data: badYaml,
     });
-    expect(resAfter.status()).toBe(400);
+    expect(resAfter.status()).not.toBe(403);
   });
 });

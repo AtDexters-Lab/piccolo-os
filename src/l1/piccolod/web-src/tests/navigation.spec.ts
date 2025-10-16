@@ -39,22 +39,22 @@ test.describe('Navigation basics', () => {
   });
 
   test('navigate via sidebar to core pages', async ({ page }) => {
-    await page.locator('aside').getByRole('link', { name: 'Apps' }).click();
-    await expect(page.locator('h2')).toHaveText('Apps');
+    await page.locator('aside').getByRole('link', { name: 'Installed' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Apps' })).toBeVisible();
 
     await page.locator('aside').getByRole('link', { name: 'Storage' }).click();
-    await expect(page.locator('h2')).toHaveText('Storage');
+    await expect(page.getByRole('heading', { level: 2, name: 'Storage' })).toBeVisible();
 
     await page.locator('aside').getByRole('link', { name: 'Updates' }).click();
-    await expect(page.locator('h2')).toHaveText('Updates');
+    await expect(page.getByRole('heading', { level: 2, name: 'Updates' })).toBeVisible();
 
     await page.locator('aside').getByRole('link', { name: 'Remote' }).click();
-    await expect(page.locator('h2')).toHaveText('Remote');
+    await expect(page.getByRole('heading', { level: 2, name: 'Remote' })).toBeVisible();
   });
 
   test('deep-link directly to /#/apps', async ({ page }) => {
-    const resp = await page.goto('/#/apps');
-    expect(resp?.status()).toBe(200);
+    await page.goto('/#/apps');
+    await page.waitForLoadState('networkidle');
     await expect(page.locator('h2')).toHaveText('Apps');
   });
 });

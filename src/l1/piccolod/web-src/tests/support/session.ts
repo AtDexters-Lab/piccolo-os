@@ -19,12 +19,14 @@ export async function login(page: Page, password: string = ADMIN_PASSWORD): Prom
   }
 
   const usernameInput = page.getByPlaceholder('admin');
-  await expect(usernameInput).toBeVisible({ timeout: 15000 });
-  await usernameInput.fill('admin');
-  await page.getByPlaceholder('••••••••').fill(password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/#\/?$/);
-  await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
+  const onLogin = await usernameInput.isVisible({ timeout: 5000 }).catch(() => false);
+  if (onLogin) {
+    await usernameInput.fill('admin');
+    await page.getByPlaceholder('••••••••').fill(password);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page).toHaveURL(/#\/?$/);
+  }
+  await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible({ timeout: 15000 });
 }
 
 export async function ensureSignedIn(page: Page, password: string = ADMIN_PASSWORD): Promise<void> {

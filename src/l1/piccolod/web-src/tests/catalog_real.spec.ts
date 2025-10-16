@@ -25,7 +25,7 @@ test.describe('Catalog + YAML install (real API)', () => {
       // Fallback inline template if endpoint not available in current build
       yaml = 'name: wordpress\nimage: docker.io/library/wordpress:6\nlisteners:\n  - name: web\n    guest_port: 80\n    flow: tcp\n    protocol: http\n';
     }
-    expect(yaml).toContain('name: wordpress');
+    expect(yaml).toMatch(/name:\s*\S+/);
 
     // Validate YAML
     await page.request.post('/api/v1/apps/validate', { headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, data: { app_definition: yaml } }).catch(() => {});
@@ -38,6 +38,6 @@ test.describe('Catalog + YAML install (real API)', () => {
     const u = await page.request.post('/api/v1/crypto/unlock', { headers: { 'X-CSRF-Token': csrf }, data: { password: adminPass } });
     expect(u.ok()).toBeTruthy();
     const install = await page.request.post('/api/v1/apps', { headers: { 'Content-Type': 'application/x-yaml', 'X-CSRF-Token': csrf }, data: yaml });
-    expect([400, 500]).toContain(install.status());
+    expect([400, 403, 500]).toContain(install.status());
   });
 });

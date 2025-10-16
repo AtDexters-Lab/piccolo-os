@@ -1,15 +1,14 @@
 import { test, expect } from '@playwright/test';
-import { spawn } from 'child_process';
-import fs from 'fs';
-import path from 'path';
 import { fileURLToPath } from 'url';
+import path from 'path';
+import fs from 'fs';
 import os from 'os';
+import { login, ADMIN_PASSWORD } from './support/session';
 
-const ADMIN_PASSWORD = process.env.PICCOLO_E2E_ADMIN_PASSWORD || 'password';
 const NEXUS_ENDPOINT = process.env.PICCOLO_E2E_NEXUS_ENDPOINT || 'wss://stub/connect';
 const NEXUS_SECRET = process.env.PICCOLO_E2E_NEXUS_SECRET || 'stub-secret';
 const PICCOLO_TLD = process.env.PICCOLO_E2E_TLD || 'example.com';
-const PORTAL_SUBDOMAIN = process.env.PICCOLO_E2E_PORTAL || 'portal-e2e';
+const PORTAL_SUBDOMAIN = process.env.PICCOLO_E2E_PORTAL || 'portal';
 const REMOTE_HOST = `${PORTAL_SUBDOMAIN}.${PICCOLO_TLD}`;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,21 +23,31 @@ test.describe('Remote full flow (UI-driven)', () => {
 
 
   test('creates admin, configures remote, verifies HTTPS', async ({ page }) => {
-    await page.goto('http://localhost:8080/#/setup');
-    await page.getByPlaceholder('New password').fill(ADMIN_PASSWORD);
-    await page.getByPlaceholder('Confirm password').fill(ADMIN_PASSWORD);
-    await page.getByRole('button', { name: 'Create Admin' }).click();
-    try {
-      await page.waitForURL('**/#/', { timeout: 15000 });
-    } catch {
-      if (await page.locator('text=Locked').first().isVisible()) {
-        await page.goto('http://localhost:8080/#/login');
-        await page.getByPlaceholder('admin password').fill(ADMIN_PASSWORD);
-        await page.getByRole('button', { name: /unlock/i }).click();
-        await page.waitForURL('**/#/');
-      } else {
-        throw new Error('Create admin did not navigate to dashboard and no lock message found');
+    const initStatus = await page.request.get('/api/v1/auth/initialized').then(r => r.json()).catch(() => ({}));
+    if (!initStatus?.initialized) {
+      await page.goto('http://localhost:8080/#/setup');
+      await page.getByPlaceholder('New password').fill(ADMIN_PASSWORD);
+      await page.getByPlaceholder('Confirm password').fill(ADMIN_PASSWORD);
+      await page.getByRole('button', { name: 'Create Admin' }).click();
+      try {
+        await page.waitForURL('**/#/', { timeout: 15000 });
+      } catch {
+        if (await page.locator('text=Locked').first().isVisible()) {
+          await page.goto('http://localhost:8080/#/login');
+          await page.getByPlaceholder('admin password').fill(ADMIN_PASSWORD);
+          await page.getByRole('button', { name: /unlock/i }).click();
+          await page.waitForURL('**/#/');
+        } else {
+          throw new Error('Create admin did not navigate to dashboard and no lock message found');
+        }
       }
+    } else {
+      await login(page, ADMIN_PASSWORD);
+    }
+
+    const csrfToken = await page.request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string).catch(() => '');
+    if (csrfToken) {
+      await page.request.post('/api/v1/remote/disable', { headers: { 'X-CSRF-Token': csrfToken } }).catch(() => {});
     }
 
     await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
@@ -49,9 +58,11 @@ test.describe('Remote full flow (UI-driven)', () => {
     await page.getByLabel('Nexus endpoint').fill(NEXUS_ENDPOINT);
     await page.getByLabel('JWT signing secret').fill(NEXUS_SECRET);
     await page.getByLabel('Piccolo domain (TLD)').fill(PICCOLO_TLD);
+    await expect(page.getByLabel('Piccolo domain (TLD)')).toHaveValue(PICCOLO_TLD);
     await page.getByLabel('Use a dedicated portal subdomain').check();
     await page.getByPlaceholder('portal').clear();
     await page.getByPlaceholder('portal').fill(PORTAL_SUBDOMAIN);
+    await expect(page.getByPlaceholder('portal')).toHaveValue(PORTAL_SUBDOMAIN);
 
     await page.getByRole('button', { name: 'Save & run preflight' }).click();
 
@@ -75,12 +86,18 @@ test.describe('Remote full flow (UI-driven)', () => {
     const wildcard = (portalCerts?.certificates || []).find((c: any) => c.id === 'wildcard');
     expect(wildcard).toBeFalsy();
 
-    const status = await page.evaluate(async () => {
-      const res = await fetch('/api/v1/remote/status', { credentials: 'same-origin' });
-      if (!res.ok) throw new Error('failed to fetch status');
-      return res.json();
-    });
-    expect(status.portal_hostname).toBe(REMOTE_HOST);
-    expect((status.certificates || []).some((c: any) => c.id === 'portal')).toBeTruthy();
+    await expect.poll(async () => {
+      const resp = await page.request.get('/api/v1/remote/status');
+      if (!resp.ok()) {
+        throw new Error('status fetch failed');
+      }
+      const body = await resp.json();
+      return body.portal_hostname as string;
+    }, { timeout: 15000 }).toBe(REMOTE_HOST);
+
+    const certsResp = await page.request.get('/api/v1/remote/certificates');
+    expect(certsResp.ok()).toBeTruthy();
+    const certs = await certsResp.json();
+    expect((certs.certificates || []).some((c: any) => c.id === 'portal')).toBeTruthy();
   });
 });
