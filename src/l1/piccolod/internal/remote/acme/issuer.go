@@ -12,6 +12,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,6 +145,14 @@ func isAccountDoesNotExist(err error) bool {
 	return strings.Contains(err.Error(), "accountDoesNotExist")
 }
 
+func hostFromURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Host)
+}
+
 // SetEmail updates the preferred contact email used for ACME registration.
 func (m *Manager) SetEmail(email string) {
 	email = strings.TrimSpace(strings.ToLower(email))
@@ -156,19 +165,30 @@ func (m *Manager) SetEmail(email string) {
 // EnsureAccount loads or creates a new ACME account (P-256), accepts TOS.
 func (m *Manager) EnsureAccount() (*lego.Client, *account, error) {
 	if acc, err := m.loadAccount(); err == nil {
-		cfg := lego.NewConfig(acc)
-		cfg.CADirURL = m.directory
-		cfg.Certificate.KeyType = certcrypto.EC256
-		cli, err := lego.NewClient(cfg)
-		if err != nil {
-			return nil, nil, err
+		if acc != nil && acc.Registration != nil && acc.Registration.URI != "" {
+			if regHost, dirHost := hostFromURL(acc.Registration.URI), hostFromURL(m.directory); regHost != "" && dirHost != "" && !strings.EqualFold(regHost, dirHost) {
+				log.Printf("INFO: ACME cached account host %s differs from directory %s; resetting", regHost, dirHost)
+				if err := m.resetAccountCache(); err != nil {
+					return nil, nil, err
+				}
+				acc = nil
+			}
 		}
-		prov := &http01Provider{sink: m.sink}
-		_ = cli.Challenge.SetHTTP01Provider(prov)
-		if acc.Registration != nil {
-			log.Printf("INFO: ACME loaded cached account %s", acc.Registration.URI)
+		if acc != nil {
+			cfg := lego.NewConfig(acc)
+			cfg.CADirURL = m.directory
+			cfg.Certificate.KeyType = certcrypto.EC256
+			cli, err := lego.NewClient(cfg)
+			if err != nil {
+				return nil, nil, err
+			}
+			prov := &http01Provider{sink: m.sink}
+			_ = cli.Challenge.SetHTTP01Provider(prov)
+			if acc.Registration != nil {
+				log.Printf("INFO: ACME loaded cached account %s", acc.Registration.URI)
+			}
+			return cli, acc, nil
 		}
-		return cli, acc, nil
 	}
 	// Create new
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
