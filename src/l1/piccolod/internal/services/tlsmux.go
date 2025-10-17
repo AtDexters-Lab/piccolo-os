@@ -81,8 +81,16 @@ func (m *TlsMux) Start() (int, error) {
 	m.mu.Unlock()
 
 	go func() {
-		// Build tls.Config with SNI callback.
+		// Build tls.Config with SNI callback and hardened cipher suite policy.
 		tlsCfg := &tls.Config{
+			MinVersion:   tls.VersionTLS12,
+			CipherSuites: []uint16{tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305},
+			CurvePreferences: []tls.CurveID{
+				tls.X25519,
+				tls.CurveP256,
+				tls.CurveP384,
+			},
+			PreferServerCipherSuites: true,
 			GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
 				host := strings.TrimSuffix(strings.ToLower(chi.ServerName), ".")
 				// Ask provider for certificate
