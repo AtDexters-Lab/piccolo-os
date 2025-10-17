@@ -50,7 +50,7 @@ func NewManager(stateDir string, sink ChallengeSink, email string, directoryURL 
 		if v := os.Getenv("PICCOLO_ACME_DIR_URL"); v != "" {
 			directoryURL = v
 		} else {
-			directoryURL = "https://acme-staging-v02.api.letsencrypt.org/directory"
+			directoryURL = "https://acme-v02.api.letsencrypt.org/directory"
 		}
 	}
 	log.Printf("INFO: ACME directory configured: %s", directoryURL)
