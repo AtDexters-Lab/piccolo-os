@@ -203,6 +203,7 @@ func newManagerWithDeps(storage Storage, d dialer, r resolver, now func() time.T
 	if m.cfg == nil {
 		m.cfg = &Config{}
 	}
+	m.updateACMEEmail(m.cfg)
 	return m, nil
 }
 
@@ -304,6 +305,7 @@ func (m *Manager) save(cfg *Config) error {
 	m.cfg = cfg
 	m.needsReload.Store(false)
 	m.applyAdapterState()
+	m.updateACMEEmail(cfg)
 	m.publishConfigChanged()
 	return nil
 }
@@ -326,6 +328,7 @@ func (m *Manager) reloadFromStorage() error {
 	m.cfg = &cfg
 	m.needsReload.Store(false)
 	m.applyAdapterState()
+	m.updateACMEEmail(&cfg)
 	m.publishConfigChanged()
 	return nil
 }
@@ -656,6 +659,14 @@ func (m *Manager) publishConfigChanged() {
 		Topic:   events.TopicRemoteConfigChanged,
 		Payload: status,
 	})
+}
+
+func (m *Manager) updateACMEEmail(cfg *Config) {
+	if m == nil || m.acmeMgr == nil || cfg == nil {
+		return
+	}
+	email := deriveACMEEmail(cfg.TLD, cfg.PortalHostname)
+	m.acmeMgr.SetEmail(email)
 }
 
 // HTTPChallengeHandler exposes a read-only handler for ACME HTTP-01 tokens.
@@ -1279,7 +1290,7 @@ func deriveACMEEmail(tld, portal string) string {
 	}
 	host = strings.Trim(host, ".")
 	if host == "" || !strings.Contains(host, ".") {
-		return "admin@piccolo.local"
+		return "admin@piccolo.invalid"
 	}
 	return fmt.Sprintf("admin@%s", host)
 }
