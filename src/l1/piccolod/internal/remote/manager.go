@@ -21,8 +21,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"piccolod/internal/events"
 	"piccolod/internal/remote/acme"
 	"piccolod/internal/remote/nexusclient"
 	"piccolod/internal/state/paths"
@@ -153,6 +155,8 @@ type Manager struct {
 	challenges    *ChallengeManager
 	acmeMgr       *acme.Manager
 	renewCancel   context.CancelFunc
+	needsReload   atomic.Bool
+	eventsBus     *events.Bus
 }
 
 func NewManager(stateDir string) (*Manager, error) {
@@ -183,11 +187,17 @@ func newManagerWithDeps(storage Storage, d dialer, r resolver, now func() time.T
 	if storage != nil {
 		cfg, err := storage.Load(context.Background())
 		if err != nil {
-			if !errors.Is(err, ErrLocked) {
+			if errors.Is(err, ErrLocked) {
+				m.needsReload.Store(true)
+			} else {
 				return nil, err
 			}
 		} else {
 			m.cfg = &cfg
+			if m.cfg.DNSCredentials == nil {
+				m.cfg.DNSCredentials = map[string]string{}
+			}
+			m.needsReload.Store(false)
 		}
 	}
 	if m.cfg == nil {
@@ -199,8 +209,16 @@ func newManagerWithDeps(storage Storage, d dialer, r resolver, now func() time.T
 // SetNexusAdapter injects the adapter responsible for proxy connectivity.
 func (m *Manager) SetNexusAdapter(adapter nexusclient.Adapter) {
 	m.adapterMu.Lock()
-	defer m.adapterMu.Unlock()
 	m.adapter = adapter
+	m.adapterMu.Unlock()
+	m.ensureConfigHydrated()
+	m.applyAdapterState()
+}
+
+// SetEventsBus wires the shared event bus so the manager can publish config changes.
+func (m *Manager) SetEventsBus(bus *events.Bus) {
+	m.eventsBus = bus
+	m.publishConfigChanged()
 }
 
 type netDialer struct{}
@@ -277,15 +295,58 @@ func (m *Manager) save(cfg *Config) error {
 	}
 	if m.storage != nil {
 		if err := m.storage.Save(context.Background(), *cfg); err != nil {
+			if errors.Is(err, ErrLocked) {
+				m.needsReload.Store(true)
+			}
 			return err
 		}
 	}
 	m.cfg = cfg
+	m.needsReload.Store(false)
 	m.applyAdapterState()
+	m.publishConfigChanged()
 	return nil
 }
 
+func (m *Manager) reloadFromStorage() error {
+	if m.storage == nil {
+		m.needsReload.Store(false)
+		return nil
+	}
+	cfg, err := m.storage.Load(context.Background())
+	if err != nil {
+		if errors.Is(err, ErrLocked) {
+			m.needsReload.Store(true)
+		}
+		return err
+	}
+	if cfg.DNSCredentials == nil {
+		cfg.DNSCredentials = map[string]string{}
+	}
+	m.cfg = &cfg
+	m.needsReload.Store(false)
+	m.applyAdapterState()
+	m.publishConfigChanged()
+	return nil
+}
+
+func (m *Manager) ensureConfigHydrated() {
+	if m == nil {
+		return
+	}
+	if !m.needsReload.Load() {
+		return
+	}
+	if err := m.reloadFromStorage(); err != nil && !errors.Is(err, ErrLocked) {
+		log.Printf("WARN: remote: opportunistic reload failed: %v", err)
+	}
+}
+
 func (m *Manager) currentConfig() *Config {
+	if m == nil {
+		return &Config{}
+	}
+	m.ensureConfigHydrated()
 	if m.cfg == nil {
 		m.cfg = &Config{}
 	}
@@ -334,6 +395,20 @@ func (m *Manager) Status() Status {
 		Aliases:         cloneAliases(cfg.Aliases),
 		Certificates:    cloneCertificates(cfg.Certificates),
 	}
+}
+
+// ReloadFromStorage attempts to refresh the in-memory configuration from the backing storage.
+func (m *Manager) ReloadFromStorage() error {
+	if m == nil {
+		return nil
+	}
+	if err := m.reloadFromStorage(); err != nil {
+		if errors.Is(err, ErrLocked) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // ConfigureRequest holds the payload accepted by Configure.
@@ -523,12 +598,15 @@ func (m *Manager) ListCertificates() []Certificate {
 func (m *Manager) applyAdapterState() {
 	m.adapterMu.Lock()
 	adapter := m.adapter
-	cfg := m.currentConfig()
 	cancel := m.adapterCancel
+	cfg := m.cfg
 	m.adapterMu.Unlock()
 
 	if adapter == nil {
 		return
+	}
+	if cfg == nil {
+		cfg = &Config{}
 	}
 
 	adapterCfg := nexusclient.Config{
@@ -567,6 +645,17 @@ func (m *Manager) applyAdapterState() {
 	}()
 	// Ensure renew scheduler is running when remote is active
 	m.startRenewScheduler()
+}
+
+func (m *Manager) publishConfigChanged() {
+	if m == nil || m.eventsBus == nil {
+		return
+	}
+	status := m.Status()
+	m.eventsBus.Publish(events.Event{
+		Topic:   events.TopicRemoteConfigChanged,
+		Payload: status,
+	})
 }
 
 // HTTPChallengeHandler exposes a read-only handler for ACME HTTP-01 tokens.

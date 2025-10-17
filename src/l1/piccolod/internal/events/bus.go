@@ -16,6 +16,7 @@ const (
 	TopicExportResult          Topic = "export_result"
 	TopicControlHealth         Topic = "control_health"
 	TopicControlStoreCommit    Topic = "control_store_commit"
+	TopicRemoteConfigChanged   Topic = "remote_config_changed"
 )
 
 // Event represents a message broadcast on the event bus.

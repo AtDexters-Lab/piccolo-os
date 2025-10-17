@@ -37,6 +37,10 @@ import (
 	webassets "piccolod"
 )
 
+type unlockReloader interface {
+	ReloadFromStorage() error
+}
+
 // GinServer holds all the core components for our application using Gin framework.
 type GinServer struct {
 	appManager     *app.AppManager
@@ -66,6 +70,9 @@ type GinServer struct {
 	// Crypto manager for lock/unlock of app data volumes
 	cryptoManager *crypt.Manager
 	healthTracker *health.Tracker
+
+	reloadersMu     sync.RWMutex
+	unlockReloaders []unlockReloader
 }
 
 // portUnpublisherFunc adapts a function into services.PortUnpublisher.
@@ -301,6 +308,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	s.supervisor.Register(newLeadershipObserver(eventsBus))
 	s.observeLockState(eventsBus)
 	s.observeLeadership(eventsBus)
+	s.observeRemoteConfig(eventsBus)
 
 	for _, opt := range opts {
 		opt(s)
@@ -332,6 +340,8 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		return nil, fmt.Errorf("remote manager init: %w", err)
 	}
 	s.remoteManager = rm
+	s.registerUnlockReloader(rm)
+	rm.SetEventsBus(eventsBus)
 	// Now that remote manager exists, wire ACME challenge handler and cert provider
 	if rm != nil && svcMgr != nil {
 		svcMgr.ProxyManager().SetAcmeHandler(rm.HTTPChallengeHandler())
@@ -348,6 +358,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	rm.SetNexusAdapter(nexusAdapter)
 	remote.RegisterHandlers(dispatch, rm)
 	s.healthTracker.Setf("remote", health.LevelOK, "remote manager ready")
+	s.refreshRemoteRuntime()
 
 	// (Simplified) No dynamic port publish/unpublish wiring; allow dial to fail gracefully.
 
@@ -662,6 +673,61 @@ func (s *GinServer) handleGinVersion(c *gin.Context) {
 	})
 }
 
+func (s *GinServer) registerUnlockReloader(r unlockReloader) {
+	if s == nil || r == nil {
+		return
+	}
+	s.reloadersMu.Lock()
+	s.unlockReloaders = append(s.unlockReloaders, r)
+	s.reloadersMu.Unlock()
+}
+
+func (s *GinServer) reloadComponentsAfterUnlock() {
+	if s == nil {
+		return
+	}
+	s.reloadersMu.RLock()
+	reloaders := append([]unlockReloader(nil), s.unlockReloaders...)
+	s.reloadersMu.RUnlock()
+	for _, r := range reloaders {
+		if r == nil {
+			continue
+		}
+		if err := r.ReloadFromStorage(); err != nil {
+			log.Printf("WARN: unlock reload failed: %v", err)
+		}
+	}
+}
+
+func (s *GinServer) refreshRemoteRuntime() {
+	if s == nil || s.remoteManager == nil {
+		return
+	}
+	status := s.remoteManager.Status()
+	s.applyRemoteRuntimeFromStatus(status)
+}
+
+func (s *GinServer) applyRemoteRuntimeFromStatus(status remote.Status) {
+	if s == nil || s.tlsMux == nil {
+		return
+	}
+	s.tlsMux.UpdateConfig(status.PortalHostname, status.TLD, s.resolvePortalPort())
+	if status.Enabled && strings.TrimSpace(status.PortalHostname) != "" {
+		if port, err := s.tlsMux.Start(); err == nil {
+			if s.remoteResolver != nil {
+				s.remoteResolver.SetTlsMuxPort(port)
+			}
+		} else {
+			log.Printf("WARN: TLS mux start failed: %v", err)
+		}
+	} else {
+		s.tlsMux.Stop()
+		if s.remoteResolver != nil {
+			s.remoteResolver.SetTlsMuxPort(0)
+		}
+	}
+}
+
 func (s *GinServer) observeLockState(bus *events.Bus) {
 	if bus == nil || s.healthTracker == nil {
 		return
@@ -679,6 +745,7 @@ func (s *GinServer) observeLockState(bus *events.Bus) {
 			} else {
 				s.healthTracker.Setf("persistence", health.LevelOK, "control store unlocked")
 				s.healthTracker.Setf("app-manager", health.LevelOK, "app manager ready")
+				s.reloadComponentsAfterUnlock()
 			}
 		}
 	}()
@@ -713,6 +780,22 @@ func (s *GinServer) observeLeadership(bus *events.Bus) {
 			case cluster.RoleFollower:
 				s.healthTracker.Setf("service-manager", health.LevelOK, "service manager role=follower (standby)")
 			}
+		}
+	}()
+}
+
+func (s *GinServer) observeRemoteConfig(bus *events.Bus) {
+	if bus == nil {
+		return
+	}
+	ch := bus.Subscribe(events.TopicRemoteConfigChanged, 8)
+	go func() {
+		for evt := range ch {
+			status, ok := evt.Payload.(remote.Status)
+			if !ok {
+				continue
+			}
+			s.applyRemoteRuntimeFromStatus(status)
 		}
 	}()
 }
