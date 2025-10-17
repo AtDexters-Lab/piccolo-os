@@ -5,10 +5,19 @@ export const ADMIN_PASSWORD = process.env.PICCOLO_E2E_ADMIN_PASSWORD || 'passwor
 export async function seedAdmin(request: APIRequestContext, password: string = ADMIN_PASSWORD): Promise<void> {
   await request.post('/api/v1/auth/setup', { data: { password } }).catch(() => {});
   await request.post('/api/v1/crypto/setup', { data: { password } }).catch(() => {});
-  await request.post('/api/v1/crypto/unlock', { data: { password } }).catch(() => {});
 }
 
 export async function login(page: Page, password: string = ADMIN_PASSWORD): Promise<void> {
+  // Try API login first for stability; fall back to UI if session still unauthenticated.
+  const apiLogin = await page.request.post('/api/v1/auth/login', {
+    data: { username: 'admin', password }
+  });
+  if (apiLogin.ok()) {
+    await page.goto('/#/');
+    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible({ timeout: 15000 });
+    return;
+  }
+
   await page.goto('/#/login');
 
   const unlockField = page.getByPlaceholder('admin password');
@@ -23,7 +32,7 @@ export async function login(page: Page, password: string = ADMIN_PASSWORD): Prom
   if (onLogin) {
     await usernameInput.fill('admin');
     await page.getByPlaceholder('••••••••').fill(password);
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    await page.getByRole('button', { name: 'Sign in' }).click({ timeout: 15000 });
     await expect(page).toHaveURL(/#\/?$/);
   }
   await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible({ timeout: 15000 });

@@ -25,6 +25,10 @@ test.describe('Service install (nginx) and local proxy', () => {
     if (st2.locked) {
       const u = await request.post('/api/v1/crypto/unlock', { headers: { 'X-CSRF-Token': csrf }, data: { password: adminPass } });
       expect(u.ok()).toBeTruthy();
+      await expect.poll(async () => {
+        const unlocked = await request.get('/api/v1/crypto/status').then(r => r.json());
+        return unlocked.locked as boolean;
+      }, { timeout: 5000 }).toBe(false);
     }
 
     // Install nginx (simple HTTP listener)
@@ -64,4 +68,3 @@ test.describe('Service install (nginx) and local proxy', () => {
     await request.delete(`/api/v1/apps/${appName}?purge=true`, { headers: { 'X-CSRF-Token': csrf } });
   });
 });
-

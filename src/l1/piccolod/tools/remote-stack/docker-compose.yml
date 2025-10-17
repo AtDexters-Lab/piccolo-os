@@ -12,8 +12,6 @@ services:
       - ./config:/config:ro
       - ./data:/var/lib/nexus-proxy-server
     ports:
-      - "80:80"
-      - "443:443"
       - "8443:8443"
     networks:
       piccolo_e2e:

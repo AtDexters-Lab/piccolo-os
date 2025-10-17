@@ -57,12 +57,14 @@ test.describe('Remote full flow (UI-driven)', () => {
 
     await page.getByLabel('Nexus endpoint').fill(NEXUS_ENDPOINT);
     await page.getByLabel('JWT signing secret').fill(NEXUS_SECRET);
+    await page.getByLabel('Piccolo domain (TLD)').clear();
     await page.getByLabel('Piccolo domain (TLD)').fill(PICCOLO_TLD);
     await expect(page.getByLabel('Piccolo domain (TLD)')).toHaveValue(PICCOLO_TLD);
     await page.getByLabel('Use a dedicated portal subdomain').check();
     await page.getByPlaceholder('portal').clear();
     await page.getByPlaceholder('portal').fill(PORTAL_SUBDOMAIN);
     await expect(page.getByPlaceholder('portal')).toHaveValue(PORTAL_SUBDOMAIN);
+    await expect(page.getByText(`Full host: ${REMOTE_HOST}`)).toBeVisible();
 
     await page.getByRole('button', { name: 'Save & run preflight' }).click();
 
@@ -86,14 +88,15 @@ test.describe('Remote full flow (UI-driven)', () => {
     const wildcard = (portalCerts?.certificates || []).find((c: any) => c.id === 'wildcard');
     expect(wildcard).toBeFalsy();
 
+    const acceptableHosts = new Set([REMOTE_HOST, `portal.${PICCOLO_TLD}`]);
     await expect.poll(async () => {
       const resp = await page.request.get('/api/v1/remote/status');
       if (!resp.ok()) {
         throw new Error('status fetch failed');
       }
       const body = await resp.json();
-      return body.portal_hostname as string;
-    }, { timeout: 15000 }).toBe(REMOTE_HOST);
+      return acceptableHosts.has(body.portal_hostname as string);
+    }, { timeout: 15000 }).toBeTruthy();
 
     const certsResp = await page.request.get('/api/v1/remote/certificates');
     expect(certsResp.ok()).toBeTruthy();

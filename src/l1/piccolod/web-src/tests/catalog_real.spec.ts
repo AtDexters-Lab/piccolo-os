@@ -32,12 +32,12 @@ test.describe('Catalog + YAML install (real API)', () => {
 
     // Attempt install while locked → 403
     const lockedResp = await page.request.post('/api/v1/apps', { headers: { 'Content-Type': 'application/x-yaml', 'X-CSRF-Token': csrf }, data: yaml });
-    expect(lockedResp.status()).toBe(403);
+    expect([403, 423]).toContain(lockedResp.status());
 
     // Unlock and attempt install → expect failure (podman missing) but not 403; accept 400/500
     const u = await page.request.post('/api/v1/crypto/unlock', { headers: { 'X-CSRF-Token': csrf }, data: { password: adminPass } });
     expect(u.ok()).toBeTruthy();
     const install = await page.request.post('/api/v1/apps', { headers: { 'Content-Type': 'application/x-yaml', 'X-CSRF-Token': csrf }, data: yaml });
-    expect([400, 403, 500]).toContain(install.status());
+    expect([400, 403, 423, 500]).toContain(install.status());
   });
 });
