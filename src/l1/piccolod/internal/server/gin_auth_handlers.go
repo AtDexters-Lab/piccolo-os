@@ -13,7 +13,10 @@ import (
 const sessionCookieName = "piccolo_session"
 
 func (s *GinServer) setSessionCookie(c *gin.Context, id string, ttl time.Duration) {
-	secure := c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
+	secure := false
+	if s != nil {
+		secure = s.isSecureRequest(c.Request)
+	}
 	// Prefer SameSite=Lax for session cookie
 	c.SetSameSite(http.SameSiteLaxMode)
 	// Use explicit cookie to control SameSite and HttpOnly flags

@@ -678,6 +678,9 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 
 	// Setup Gin routes
 	server.setupGinRoutes()
+	if err := server.initSecureLoopback(); err != nil {
+		t.Fatalf("secure loopback init: %v", err)
+	}
 	server.refreshRemoteRuntime()
 
 	return server

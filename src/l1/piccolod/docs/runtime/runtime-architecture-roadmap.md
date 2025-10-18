@@ -45,6 +45,7 @@ This document captures the architectural patterns we are adopting and the breadt
 - Service manager and app manager attach to the shared bus—current wiring logs leadership and lock-state changes to validate propagation; policy hooks (warm vs cold, proxy gating) come next.  
 - Gin server bootstraps the shared bus/registry, supervisor, dispatcher, and passes them to persistence.  
 - Persistence design checkpoint lives in `docs/persistence/persistence-module-design.md`.
+- Remote HTTPS enforcement now uses a dedicated loopback listener: the TLS mux terminates transport only and forwards to `127.0.0.1:<ephemeral secure port>` (HTTP-level handler that injects HSTS/redirects). The original plain HTTP listener still serves LAN traffic, keeping the mux transport-agnostic while guaranteeing secure semantics for remote hosts.
 
 ## Near-term Tasks
 1. **Dispatcher coverage**  

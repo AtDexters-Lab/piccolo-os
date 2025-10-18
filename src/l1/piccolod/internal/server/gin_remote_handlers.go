@@ -87,13 +87,15 @@ func (s *GinServer) handleRemoteConfigure(c *gin.Context) {
 }
 
 func (s *GinServer) resolvePortalPort() int {
-	port := 80
+	if s != nil && s.securePort > 0 {
+		return s.securePort
+	}
 	if p := os.Getenv("PORT"); p != "" {
 		if v, err := strconv.Atoi(p); err == nil && v > 0 {
-			port = v
+			return v
 		}
 	}
-	return port
+	return 80
 }
 
 // handleRemoteDisable handles POST /api/v1/remote/disable

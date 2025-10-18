@@ -6,12 +6,14 @@ import (
 	"fmt"
 	stdfs "io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"piccolod/internal/app"
 	authpkg "piccolod/internal/auth"
@@ -58,6 +60,10 @@ type GinServer struct {
 	tlsMux         *services.TlsMux
 	remoteResolver *serviceRemoteResolver
 
+	secureSrv      *http.Server
+	secureListener net.Listener
+	securePort     int
+
 	// Optional OpenAPI request validation (Phase 0)
 	apiValidator *openAPIValidator
 
@@ -74,6 +80,10 @@ type GinServer struct {
 	reloadersMu     sync.RWMutex
 	unlockReloaders []unlockReloader
 }
+
+type secureContextKey struct{}
+
+var secureContextKeyInstance = secureContextKey{}
 
 // portUnpublisherFunc adapts a function into services.PortUnpublisher.
 type portUnpublisherFunc func(int)
@@ -115,6 +125,29 @@ func (r *serviceRemoteResolver) UpdateConfig(cfg nexusclient.Config) {
 	}
 	r.domain = domain
 	r.mu.Unlock()
+}
+
+func (r *serviceRemoteResolver) IsRemoteHostname(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	r.mu.RLock()
+	portal := r.portal
+	domain := r.domain
+	r.mu.RUnlock()
+	if host == "" {
+		return false
+	}
+	if portal != "" && host == portal {
+		return true
+	}
+	if domain != "" {
+		if host == domain {
+			return true
+		}
+		if strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *serviceRemoteResolver) SetTlsMuxPort(p int) { r.mu.Lock(); r.tlsMuxPort = p; r.mu.Unlock() }
@@ -366,6 +399,9 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	appMgr.RestoreServices(context.Background())
 
 	s.setupGinRoutes()
+	if err := s.initSecureLoopback(); err != nil {
+		return nil, fmt.Errorf("secure loopback init: %w", err)
+	}
 	return s, nil
 }
 
@@ -379,6 +415,8 @@ func (s *GinServer) Start() error {
 	if err := s.supervisor.Start(context.Background()); err != nil {
 		return fmt.Errorf("failed to start runtime components: %w", err)
 	}
+
+	s.startSecureLoopback()
 
 	log.Printf("INFO: Starting piccolod server with Gin on http://localhost:%s", port)
 
@@ -398,6 +436,7 @@ func (s *GinServer) Stop() error {
 	if s.appManager != nil {
 		s.appManager.StopRuntimeEvents()
 	}
+	s.stopSecureLoopback()
 	if err := s.supervisor.Stop(context.Background()); err != nil {
 		log.Printf("WARN: Failed to stop components cleanly: %v", err)
 		return err
@@ -418,6 +457,7 @@ func (s *GinServer) setupGinRoutes() {
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 	r.Use(s.corsMiddleware())
+	r.Use(s.httpsRedirectMiddleware())
 	r.Use(s.securityHeadersMiddleware())
 
 	// Optional: OpenAPI request validation (enabled when validator is initialized)
@@ -711,6 +751,12 @@ func (s *GinServer) applyRemoteRuntimeFromStatus(status remote.Status) {
 	if s == nil || s.tlsMux == nil {
 		return
 	}
+	if s.remoteResolver != nil {
+		s.remoteResolver.UpdateConfig(nexusclient.Config{
+			PortalHostname: status.PortalHostname,
+			TLD:            status.TLD,
+		})
+	}
 	s.tlsMux.UpdateConfig(status.PortalHostname, status.TLD, s.resolvePortalPort())
 	if status.Enabled && strings.TrimSpace(status.PortalHostname) != "" {
 		if port, err := s.tlsMux.Start(); err == nil {
@@ -924,4 +970,115 @@ func (s *GinServer) setupStaticRoutes(r *gin.Engine) {
 		}
 		c.FileFromFS("index.html", http.FS(uiFS))
 	})
+}
+
+func (s *GinServer) initSecureLoopback() error {
+	if s == nil {
+		return nil
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	s.secureListener = ln
+	if addr, ok := ln.Addr().(*net.TCPAddr); ok {
+		s.securePort = addr.Port
+	}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), secureContextKeyInstance, true)
+		s.router.ServeHTTP(w, r.WithContext(ctx))
+	})
+	s.secureSrv = &http.Server{
+		Handler:      handler,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+	return nil
+}
+
+func (s *GinServer) startSecureLoopback() {
+	if s == nil || s.secureSrv == nil || s.secureListener == nil {
+		return
+	}
+	go func() {
+		if err := s.secureSrv.Serve(s.secureListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("WARN: secure loopback server stopped: %v", err)
+		}
+	}()
+	log.Printf("INFO: Secure loopback portal listening on 127.0.0.1:%d", s.securePort)
+}
+
+func (s *GinServer) stopSecureLoopback() {
+	if s == nil || s.secureSrv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.secureSrv.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("WARN: secure loopback shutdown failed: %v", err)
+	}
+	s.secureSrv = nil
+	s.secureListener = nil
+	s.securePort = 0
+}
+
+func (s *GinServer) httpsRedirectMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s == nil || s.remoteResolver == nil {
+			c.Next()
+			return
+		}
+		host := canonicalHost(c.Request.Host)
+		if host == "" || !s.remoteResolver.IsRemoteHostname(host) {
+			c.Next()
+			return
+		}
+		if s.isSecureRequest(c.Request) {
+			c.Next()
+			return
+		}
+		target := "https://" + host + c.Request.URL.RequestURI()
+		c.Redirect(http.StatusMovedPermanently, target)
+		c.Abort()
+	}
+}
+
+func (s *GinServer) isSecureRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	if v := r.Context().Value(secureContextKeyInstance); v != nil {
+		return true
+	}
+	if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return true
+	}
+	return false
+}
+
+func canonicalHost(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	if i := strings.Index(v, ","); i != -1 {
+		v = v[:i]
+	}
+	if strings.HasPrefix(v, "[") {
+		if idx := strings.Index(v, "]"); idx != -1 {
+			v = v[1:idx]
+		}
+	} else {
+		if h, _, err := net.SplitHostPort(v); err == nil {
+			v = h
+		} else if i := strings.Index(v, ":"); i != -1 {
+			v = v[:i]
+		}
+	}
+	v = strings.Trim(v, "[]")
+	return strings.TrimSuffix(strings.ToLower(v), ".")
 }
