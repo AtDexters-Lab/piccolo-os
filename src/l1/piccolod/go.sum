@@ -1,5 +1,5 @@
-github.com/AtDexters-Lab/nexus-proxy-backend-client v0.1.1 h1:UuLk3goHfeR7VfPNk+NAaXPMLpC3hN9IRDnXg2s7UIA=
-github.com/AtDexters-Lab/nexus-proxy-backend-client v0.1.1/go.mod h1:4RN53zhEBHKGl+1eFhwz6wG2Uc8ZgrAGEJJ5mOfUsRw=
+github.com/AtDexters-Lab/nexus-proxy-backend-client v0.1.2 h1:qe8WhnHj5Y2Gyl/XffCmTsmieR3zqT4t6f/Vh95jXvM=
+github.com/AtDexters-Lab/nexus-proxy-backend-client v0.1.2/go.mod h1:4RN53zhEBHKGl+1eFhwz6wG2Uc8ZgrAGEJJ5mOfUsRw=
 github.com/bytedance/sonic v1.11.6 h1:oUp34TzMlL+OY1OUWxHqsdkgC/Zfc85zGqw9siXjrc0=
 github.com/bytedance/sonic v1.11.6/go.mod h1:LysEHSvpvDySVdC2f87zGWf6CIKJcAvqab1ZaiQtds4=
 github.com/bytedance/sonic/loader v0.1.1 h1:c+e5Pt1k/cy5wMveRDyk2X4B9hF4g7an8N3zCYjJFNM=
