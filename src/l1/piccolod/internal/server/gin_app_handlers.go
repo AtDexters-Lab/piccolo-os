@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -32,6 +33,69 @@ func determineScheme(flow, protocol string) string {
 		return "https"
 	}
 	return "http"
+}
+
+func (s *GinServer) queueAppRemoteCertificates(appName string) {
+	if s == nil || s.remoteManager == nil || s.serviceManager == nil {
+		return
+	}
+	status := s.remoteManager.Status()
+	if !status.Enabled {
+		return
+	}
+	if !strings.EqualFold(status.Solver, "http-01") {
+		return
+	}
+	tld := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(status.TLD)), ".")
+	if tld == "" {
+		return
+	}
+	endpoints, err := s.serviceManager.GetByApp(appName)
+	if err != nil {
+		log.Printf("WARN: remote: queue certificates for app %s: %v", appName, err)
+		return
+	}
+	hosts := map[string]struct{}{}
+	for _, ep := range endpoints {
+		flow := strings.ToLower(strings.TrimSpace(ep.Flow))
+		proto := strings.ToLower(strings.TrimSpace(ep.Protocol))
+		if flow == "tls" {
+			continue
+		}
+		if proto != "http" && proto != "ws" && proto != "websocket" {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(ep.Name))
+		if name == "" {
+			continue
+		}
+		if !isValidDNSLabel(name) {
+			log.Printf("WARN: remote: skipping remote certificate queue for listener %q on app %q (not DNS-safe)", ep.Name, appName)
+			continue
+		}
+		host := name + "." + tld
+		hosts[host] = struct{}{}
+	}
+	for h := range hosts {
+		s.remoteManager.QueueHostnameCertificate(h)
+	}
+}
+
+func isValidDNSLabel(label string) bool {
+	if label == "" || len(label) > 63 {
+		return false
+	}
+	if label[0] == '-' || label[len(label)-1] == '-' {
+		return false
+	}
+	for i := 0; i < len(label); i++ {
+		ch := label[i]
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // APIError represents a structured API error response
@@ -158,6 +222,8 @@ func (s *GinServer) handleGinAppInstall(c *gin.Context) {
 		writeGinError(c, http.StatusInternalServerError, "Failed to install app: "+err.Error())
 		return
 	}
+
+	s.queueAppRemoteCertificates(appInstance.Name)
 
 	response := GinAppResponse{
 		Data:    appInstance,

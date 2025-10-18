@@ -452,15 +452,32 @@
     try {
       const endpoint = httpForm.endpoint.trim() || undefined;
       const deviceSecret = httpForm.jwtSecret.trim() || undefined;
-      const tld = domainTld.trim() || undefined;
-      const portalHost = portalHostname.trim() || undefined;
+      const tldRaw = domainTld.trim();
+      const prefixRaw = portalPrefix.trim();
 
+      let tld = tldRaw ? tldRaw.toLowerCase() : '';
+      if (portalMode !== 'root' && !prefixRaw) {
+        toast('Enter a portal subdomain before saving.', 'error');
+        return;
+      }
       if (!endpoint || !deviceSecret) {
         toast('Provide the Nexus endpoint and JWT signing secret.', 'error');
         return;
       }
       if (!tld) {
         toast('Enter the Piccolo domain (TLD).', 'error');
+        return;
+      }
+
+      let portalHost = '';
+      if (portalMode === 'root') {
+        portalHost = tld;
+      } else {
+        portalHost = `${prefixRaw.toLowerCase()}.${tld}`;
+      }
+
+      if (!portalHost) {
+        toast('Portal hostname is required.', 'error');
         return;
       }
       if (solver === 'dns-01' && !dnsForm.provider) {

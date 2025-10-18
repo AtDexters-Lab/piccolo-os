@@ -17,6 +17,7 @@ import (
 	"piccolod/internal/health"
 	"piccolod/internal/remote"
 	"piccolod/internal/remote/nexusclient"
+	"piccolod/internal/state/paths"
 )
 
 func TestRemote_Configure_Status_Disable_Rotate(t *testing.T) {
@@ -117,6 +118,28 @@ func TestRemote_Configure_Status_Disable_Rotate(t *testing.T) {
 	}
 	if st.Enabled {
 		t.Fatalf("expected disabled")
+	}
+}
+
+func TestRemote_Configure_RequirePortalHostname(t *testing.T) {
+	srv := createGinTestServer(t, t.TempDir())
+	sessionCookie, csrfToken := setupTestAdminSession(t, srv)
+
+	payload := map[string]interface{}{
+		"endpoint":        "wss://nexus.example.com/connect",
+		"device_secret":   "super-secret",
+		"solver":          "http-01",
+		"tld":             "example.com",
+		"portal_hostname": "",
+	}
+	body, _ := json.Marshal(payload)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/remote/configure", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	attachAuth(req, sessionCookie, csrfToken)
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -367,4 +390,114 @@ func TestRemote_TlsMuxRestartsAfterReload(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("expected tls mux to start after unlock reload; port=%d", srv2.tlsMux.Port())
+}
+
+func TestRemote_PortalHostnamePersistsAndAppCertQueued(t *testing.T) {
+	t.Setenv("PICCOLO_REMOTE_FAKE_ACME", "1")
+	t.Setenv("PICCOLO_DISABLE_MDNS", "1")
+
+	tempDir := t.TempDir()
+	t.Setenv("PICCOLO_STATE_DIR", tempDir)
+	paths.SetRootForTest(tempDir)
+	t.Cleanup(func() { paths.SetRootForTest("") })
+	srv := createGinTestServer(t, tempDir)
+	sessionCookie, csrfToken := setupTestAdminSession(t, srv)
+
+	configurePayload := map[string]interface{}{
+		"endpoint":        "wss://nexus.example.com/connect",
+		"device_secret":   "super-secret",
+		"solver":          "http-01",
+		"tld":             "example.com",
+		"portal_hostname": "piccolo.example.com",
+	}
+	body, _ := json.Marshal(configurePayload)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/remote/configure", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	attachAuth(req, sessionCookie, csrfToken)
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("configure status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	if status := waitForCertificateDomain(t, srv.remoteManager, "piccolo.example.com", 5*time.Second); !strings.EqualFold(status, "ok") {
+		for _, cert := range srv.remoteManager.ListCertificates() {
+			if hasDomain(cert, "piccolo.example.com") {
+				t.Logf("portal certificate status=%s reason=%s", cert.Status, cert.FailureReason)
+			}
+		}
+		t.Fatalf("expected portal certificate to be issued, got status=%q", status)
+	}
+
+	wordpress := "name: wordpress\nimage: docker.io/library/wordpress:6\nlisteners:\n  - name: web\n    guest_port: 80\n    flow: tcp\n    protocol: http\n  - name: \"Web App\"\n    guest_port: 8080\n    flow: tcp\n    protocol: http\n"
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/v1/apps", strings.NewReader(wordpress))
+	req.Header.Set("Content-Type", "application/x-yaml")
+	attachAuth(req, sessionCookie, csrfToken)
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("install status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	if status := waitForCertificateDomain(t, srv.remoteManager, "web.example.com", 5*time.Second); !strings.EqualFold(status, "ok") {
+		for _, cert := range srv.remoteManager.ListCertificates() {
+			if hasDomain(cert, "web.example.com") {
+				t.Logf("alias certificate status=%s reason=%s", cert.Status, cert.FailureReason)
+			}
+		}
+		t.Fatalf("expected app listener certificate to be issued, got status=%q", status)
+	}
+	for _, cert := range srv.remoteManager.ListCertificates() {
+		for _, d := range cert.Domains {
+			if strings.Contains(d, " ") {
+				t.Fatalf("unexpected certificate queued for domain with space: %s status=%s", d, cert.Status)
+			}
+		}
+	}
+
+	remoteStatus := srv.remoteManager.Status()
+	if remoteStatus.PortalHostname != "piccolo.example.com" {
+		t.Fatalf("expected portal hostname to persist, got %s", remoteStatus.PortalHostname)
+	}
+}
+
+func waitForCertificateDomain(t *testing.T, mgr *remote.Manager, domain string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		certs := mgr.ListCertificates()
+		foundStatus := ""
+		for _, cert := range certs {
+			for _, d := range cert.Domains {
+				if strings.EqualFold(d, domain) {
+					foundStatus = cert.Status
+					if strings.EqualFold(cert.Status, "ok") {
+						return cert.Status
+					}
+				}
+			}
+		}
+		if foundStatus != "" {
+			time.Sleep(25 * time.Millisecond)
+			continue
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	for _, cert := range mgr.ListCertificates() {
+		for _, d := range cert.Domains {
+			if strings.EqualFold(d, domain) {
+				return cert.Status
+			}
+		}
+	}
+	return ""
+}
+
+func hasDomain(cert remote.Certificate, domain string) bool {
+	for _, d := range cert.Domains {
+		if strings.EqualFold(d, domain) {
+			return true
+		}
+	}
+	return false
 }

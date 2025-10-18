@@ -448,7 +448,11 @@ func (m *Manager) Configure(req ConfigureRequest) error {
 		return errors.New("tld required")
 	}
 
-	portalHost := normalizePortalHost(tld, strings.TrimSpace(req.PortalHostname))
+	rawPortal := strings.TrimSpace(req.PortalHostname)
+	if rawPortal == "" {
+		return errors.New("portal hostname required")
+	}
+	portalHost := normalizePortalHost(tld, rawPortal)
 	if portalHost == "" {
 		return errors.New("portal hostname invalid")
 	}
@@ -1078,7 +1082,11 @@ func (m *Manager) MarkGuideVerified(info GuideVerification) error {
 		cfg.TLD = strings.TrimSpace(info.TLD)
 	}
 	if info.PortalHostname != "" {
-		cfg.PortalHostname = normalizePortalHost(cfg.TLD, info.PortalHostname)
+		host := normalizePortalHost(cfg.TLD, info.PortalHostname)
+		if host == "" {
+			return errors.New("portal hostname invalid")
+		}
+		cfg.PortalHostname = host
 	}
 	now := m.now()
 	cfg.GuideVerifiedAt = &now
@@ -1296,21 +1304,21 @@ func deriveACMEEmail(tld, portal string) string {
 }
 
 func normalizePortalHost(tld, portal string) string {
-	tld = strings.TrimSpace(tld)
-	portal = strings.TrimSpace(portal)
+	tld = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(tld)), ".")
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(portal)), ".")
+	if host == "" {
+		return ""
+	}
 	if tld == "" {
-		return portal
+		return host
 	}
-	if portal == "" {
-		return fmt.Sprintf("portal.%s", tld)
+	if host == tld || strings.HasSuffix(host, "."+tld) {
+		return host
 	}
-	if portal == tld || strings.HasSuffix(portal, "."+tld) {
-		return portal
+	if !strings.Contains(host, ".") {
+		return host + "." + tld
 	}
-	if !strings.Contains(portal, ".") {
-		return fmt.Sprintf("%s.%s", portal, tld)
-	}
-	return portal
+	return host
 }
 
 func stringPtr(s string) *string {

@@ -38,3 +38,12 @@ func ControlDir() string   { return Join("control") }
 func ExportsDir() string   { return Join("exports") }
 func BootstrapDir() string { return Join("bootstrap") }
 func VolumesDir() string   { return Join("volumes") }
+
+// SetRootForTest resets the cached root so tests can override PICCOLO_STATE_DIR.
+func SetRootForTest(dir string) {
+	if dir != "" {
+		os.Setenv("PICCOLO_STATE_DIR", dir)
+	}
+	root = ""
+	once = sync.Once{}
+}
