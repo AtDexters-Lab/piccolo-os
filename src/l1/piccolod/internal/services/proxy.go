@@ -237,7 +237,12 @@ func applyForwardHeaders(r *http.Request, ep ServiceEndpoint) {
 	proto := resolveProto(r, ep)
 	ensureHeader(r, "X-Forwarded-Proto", proto)
 	if host != "" {
-		ensureHeader(r, "X-Forwarded-Host", host)
+		forwardHost := host
+		if hostPort != "" {
+			forwardHost = net.JoinHostPort(host, hostPort)
+		}
+		ensureHeader(r, "X-Forwarded-Host", forwardHost)
+		host = forwardHost
 	}
 
 	port := resolvePortHeader(r, proto, hostPort)

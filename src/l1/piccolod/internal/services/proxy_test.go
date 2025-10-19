@@ -134,6 +134,7 @@ func TestHTTPProxyForwardHeadersRespectTLSHints(t *testing.T) {
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			headers := map[string]string{
 				"proto":     r.Header.Get("X-Forwarded-Proto"),
+				"host":      r.Header.Get("X-Forwarded-Host"),
 				"forwarded": r.Header.Get("Forwarded"),
 				"port":      r.Header.Get("X-Forwarded-Port"),
 			}
@@ -208,6 +209,10 @@ func TestHTTPProxyForwardHeadersRespectTLSHints(t *testing.T) {
 		if strings.Contains(headers["forwarded"], "proto=https") {
 			t.Fatalf("unexpected forwarded proto=https for plain request: %q", headers["forwarded"])
 		}
+		expectedHost := fmt.Sprintf("127.0.0.1:%d", public)
+		if headers["host"] != expectedHost {
+			t.Fatalf("expected X-Forwarded-Host=%s for plain request, got %q", expectedHost, headers["host"])
+		}
 		if headers["port"] != strconv.Itoa(public) {
 			t.Fatalf("expected X-Forwarded-Port=%d for plain request, got %q", public, headers["port"])
 		}
@@ -232,6 +237,10 @@ func TestHTTPProxyForwardHeadersRespectTLSHints(t *testing.T) {
 		}
 		if !strings.Contains(strings.ToLower(headers["forwarded"]), "proto=https") {
 			t.Fatalf("expected forwarded proto=https, got %q", headers["forwarded"])
+		}
+		expectedHost := fmt.Sprintf("127.0.0.1:%d", public)
+		if headers["host"] != expectedHost {
+			t.Fatalf("expected X-Forwarded-Host=%s when hint present, got %q", expectedHost, headers["host"])
 		}
 		if headers["port"] != "8443" {
 			t.Fatalf("expected X-Forwarded-Port=8443 when hint present, got %q", headers["port"])
