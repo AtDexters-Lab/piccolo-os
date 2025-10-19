@@ -172,10 +172,16 @@ func (m *TlsMux) serveTLSConn(c net.Conn, services *ServiceManager) {
 		c.Close()
 		return
 	}
+	if services != nil {
+		services.markProxyTLS(upstream)
+	}
 	backendAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(upstream))
 	backend, err := net.DialTimeout("tcp", backendAddr, 5*time.Second)
 	if err != nil {
 		log.Printf("WARN: tlsmux upstream dial %s failed: %v", backendAddr, err)
+		if services != nil {
+			services.cancelProxyTLS(upstream)
+		}
 		c.Close()
 		return
 	}

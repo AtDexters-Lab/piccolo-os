@@ -42,7 +42,7 @@ func TestAppManager_Install(t *testing.T) {
 		Name:      "test-app",
 		Image:     "nginx:alpine",
 		Type:      "user",
-		Listeners: []api.AppListener{{Name: "web", GuestPort: 80, Flow: "tcp", Protocol: "http"}},
+		Listeners: []api.AppListener{{Name: "web", GuestPort: 80, Flow: api.FlowTCP, Protocol: api.ListenerProtocolHTTP}},
 		Environment: map[string]string{
 			"ENV_VAR": "test-value",
 		},

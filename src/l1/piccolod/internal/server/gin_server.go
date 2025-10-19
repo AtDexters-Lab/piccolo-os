@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"piccolod/internal/api"
 	"piccolod/internal/app"
 	authpkg "piccolod/internal/auth"
 	"piccolod/internal/cluster"
@@ -152,7 +153,7 @@ func (r *serviceRemoteResolver) IsRemoteHostname(host string) bool {
 
 func (r *serviceRemoteResolver) SetTlsMuxPort(p int) { r.mu.Lock(); r.tlsMuxPort = p; r.mu.Unlock() }
 
-func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int) (int, bool) {
+func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int, isTLS bool) (int, bool) {
 	h := strings.TrimSuffix(strings.ToLower(hostname), ".")
 	r.mu.RLock()
 	portal := r.portal
@@ -166,7 +167,7 @@ func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int) (int, b
 		if remotePort == 80 {
 			return portalPort, true
 		}
-		if tlsMuxPort > 0 {
+		if isTLS && tlsMuxPort > 0 {
 			return tlsMuxPort, true
 		}
 		// Fallback to portalPort if mux not running (unit tests)
@@ -190,37 +191,31 @@ func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int) (int, b
 	// Listener host
 	if listener != "" {
 		if ep, ok := r.services.ResolveListener(listener, remotePort); ok {
-			switch strings.ToLower(ep.Flow) {
-			case "tls":
-				// App terminates TLS end-to-end (passthrough)
-				return ep.PublicPort, true
-			default: // "tcp" or empty
-				if remotePort == 80 {
-					return ep.PublicPort, true
-				}
-				if tlsMuxPort > 0 {
-					return tlsMuxPort, true
-				}
-				// Fallback to HTTP path if mux not running
+			if ep.Flow == api.FlowTLS {
 				return ep.PublicPort, true
 			}
+			if remotePort == 80 {
+				return ep.PublicPort, true
+			}
+			if isTLS && tlsMuxPort > 0 {
+				return tlsMuxPort, true
+			}
+			return ep.PublicPort, true
 		}
 	}
 
 	// Fallback by port only (rare): apply same flow policy when we find an ep
 	if ep, ok := r.services.ResolveByRemotePort(remotePort); ok {
-		switch strings.ToLower(ep.Flow) {
-		case "tls":
-			return ep.PublicPort, true
-		default:
-			if remotePort == 80 {
-				return ep.PublicPort, true
-			}
-			if tlsMuxPort > 0 {
-				return tlsMuxPort, true
-			}
+		if ep.Flow == api.FlowTLS {
 			return ep.PublicPort, true
 		}
+		if remotePort == 80 {
+			return ep.PublicPort, true
+		}
+		if isTLS && tlsMuxPort > 0 {
+			return tlsMuxPort, true
+		}
+		return ep.PublicPort, true
 	}
 
 	return 0, false

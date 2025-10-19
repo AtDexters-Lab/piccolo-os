@@ -15,24 +15,24 @@ import (
 	"piccolod/internal/persistence"
 )
 
-func determineScheme(flow, protocol string) string {
-	proto := strings.ToLower(protocol)
-	flowLower := strings.ToLower(flow)
-	switch proto {
-	case "https", "tls":
-		return "https"
-	case "wss":
-		return "wss"
-	case "ws", "websocket":
-		if flowLower == "tls" {
+func determineScheme(flow api.ListenerFlow, protocol api.ListenerProtocol) string {
+	switch protocol {
+	case api.ListenerProtocolHTTP:
+		if flow == api.FlowTLS {
+			return "https"
+		}
+		return "http"
+	case api.ListenerProtocolWebsocket:
+		if flow == api.FlowTLS {
 			return "wss"
 		}
 		return "ws"
+	default:
+		if flow == api.FlowTLS {
+			return "https"
+		}
+		return "http"
 	}
-	if flowLower == "tls" {
-		return "https"
-	}
-	return "http"
 }
 
 func (s *GinServer) queueAppRemoteCertificates(appName string) {
@@ -57,12 +57,13 @@ func (s *GinServer) queueAppRemoteCertificates(appName string) {
 	}
 	hosts := map[string]struct{}{}
 	for _, ep := range endpoints {
-		flow := strings.ToLower(strings.TrimSpace(ep.Flow))
-		proto := strings.ToLower(strings.TrimSpace(ep.Protocol))
-		if flow == "tls" {
+		if ep.Flow == api.FlowTLS {
 			continue
 		}
-		if proto != "http" && proto != "ws" && proto != "websocket" {
+		switch ep.Protocol {
+		case api.ListenerProtocolHTTP, api.ListenerProtocolWebsocket:
+			// allowed
+		default:
 			continue
 		}
 		name := strings.ToLower(strings.TrimSpace(ep.Name))

@@ -8,7 +8,7 @@ import (
 func TestReconcile_AddRemoveChange(t *testing.T) {
 	m := NewServiceManager()
 	// Seed existing app endpoints
-	eps, err := m.AllocateForApp("app", []api.AppListener{{Name: "a", GuestPort: 80, Flow: "tcp", Protocol: "raw"}})
+	eps, err := m.AllocateForApp("app", []api.AppListener{{Name: "a", GuestPort: 80, Flow: api.FlowTCP, Protocol: api.ListenerProtocolRaw}})
 	if err != nil {
 		t.Fatalf("alloc: %v", err)
 	}
@@ -20,8 +20,8 @@ func TestReconcile_AddRemoveChange(t *testing.T) {
 
 	// Reconcile: change guest port for a, add b, remove nothing
 	rec, _, err := m.Reconcile("app", []api.AppListener{
-		{Name: "a", GuestPort: 8080, Flow: "tcp", Protocol: "raw"},
-		{Name: "b", GuestPort: 22, Flow: "tcp", Protocol: "raw"},
+		{Name: "a", GuestPort: 8080, Flow: api.FlowTCP, Protocol: api.ListenerProtocolRaw},
+		{Name: "b", GuestPort: 22, Flow: api.FlowTCP, Protocol: api.ListenerProtocolRaw},
 	})
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)

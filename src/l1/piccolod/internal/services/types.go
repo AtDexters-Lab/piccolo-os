@@ -15,8 +15,8 @@ type ServiceEndpoint struct {
 	GuestPort   int
 	HostBind    int // 127.0.0.1:HostBind → container:GuestPort
 	PublicPort  int // 0.0.0.0:PublicPort → HostBind
-	Flow        string
-	Protocol    string
+	Flow        api.ListenerFlow
+	Protocol    api.ListenerProtocol
 	Middleware  []api.AppProtocolMiddleware
 	RemotePorts []int
 }

@@ -53,13 +53,11 @@ func SetDefaults(app *api.AppDefinition) {
 
 	// Listeners defaults
 	for i := range app.Listeners {
-		// Default flow is tcp
-		if strings.TrimSpace(app.Listeners[i].Flow) == "" {
-			app.Listeners[i].Flow = "tcp"
+		if app.Listeners[i].Flow == api.FlowUnknown {
+			app.Listeners[i].Flow = api.FlowTCP
 		}
-		// Default protocol is raw
-		if strings.TrimSpace(app.Listeners[i].Protocol) == "" {
-			app.Listeners[i].Protocol = "raw"
+		if app.Listeners[i].Protocol == api.ListenerProtocolUnknown {
+			app.Listeners[i].Protocol = api.ListenerProtocolRaw
 		}
 	}
 }
@@ -190,21 +188,15 @@ func validateListeners(listeners []api.AppListener) error {
 		}
 		guestPorts[l.GuestPort] = l.Name
 
-		// flow default handled in SetDefaults; ensure value is one of tcp|tls if provided
-		flow := strings.ToLower(strings.TrimSpace(l.Flow))
-		if flow != "tcp" && flow != "tls" {
+		if l.Flow != api.FlowTCP && l.Flow != api.FlowTLS {
 			return fmt.Errorf("listener '%s' flow must be 'tcp' or 'tls'", l.Name)
 		}
 
-		// protocol is a hint; allow empty or known values
-		prot := strings.ToLower(strings.TrimSpace(l.Protocol))
-		switch prot {
-		case "", "raw", "http", "websocket":
-			// ok; empty normalized to raw by SetDefaults
+		switch l.Protocol {
+		case api.ListenerProtocolRaw, api.ListenerProtocolHTTP, api.ListenerProtocolWebsocket:
+			// ok
 		default:
-			// Accept arbitrary token but keep it simple for now
-			// Return error to catch typos early
-			return fmt.Errorf("listener '%s' protocol '%s' not supported in v1", l.Name, l.Protocol)
+			return fmt.Errorf("listener '%s' protocol '%s' not supported in v1", l.Name, l.Protocol.String())
 		}
 
 		// middleware entries: ensure names present

@@ -134,9 +134,9 @@ func (a *BackendAdapter) connectHandler() backend.ConnectHandler {
 
 		localPort := 0
 		if a.resolver != nil {
-			if port, ok := a.resolver.Resolve(req.OriginalHostname, req.Port); ok {
+			if port, ok := a.resolver.Resolve(req.OriginalHostname, req.Port, req.IsTLS); ok {
 				localPort = port
-			} else if port, ok := a.resolver.Resolve(req.Hostname, req.Port); ok {
+			} else if port, ok := a.resolver.Resolve(req.Hostname, req.Port, req.IsTLS); ok {
 				localPort = port
 			} else {
 				return nil, backend.ErrNoRoute

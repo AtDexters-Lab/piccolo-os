@@ -1,5 +1,13 @@
 package api
 
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
 // Container represents the data structure for a container in our public API.
 type Container struct {
 	ID    string `json:"id"`
@@ -19,6 +27,173 @@ type CreateContainerRequest struct {
 type Resources struct {
 	CPU    float64 `json:"cpu_cores,omitempty"` // e.g., 0.5 for half a core
 	Memory int64   `json:"memory_mb,omitempty"` // Memory in Megabytes
+}
+
+// ListenerFlow enumerates supported transport flows for an app listener.
+type ListenerFlow uint8
+
+const (
+	FlowUnknown ListenerFlow = iota
+	FlowTCP
+	FlowTLS
+)
+
+var flowToString = map[ListenerFlow]string{
+	FlowTCP: "tcp",
+	FlowTLS: "tls",
+}
+
+var flowFromString = map[string]ListenerFlow{
+	"tcp": FlowTCP,
+	"tls": FlowTLS,
+}
+
+// String returns the token representation of the flow.
+func (f ListenerFlow) String() string {
+	if s, ok := flowToString[f]; ok {
+		return s
+	}
+	return ""
+}
+
+// MarshalJSON converts the flow enum back to its token.
+func (f ListenerFlow) MarshalJSON() ([]byte, error) {
+	if f == FlowUnknown {
+		return json.Marshal("")
+	}
+	return json.Marshal(f.String())
+}
+
+// UnmarshalJSON parses a flow token.
+func (f *ListenerFlow) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	flow, err := parseListenerFlow(raw)
+	if err != nil {
+		return err
+	}
+	*f = flow
+	return nil
+}
+
+// MarshalYAML implements yaml.Marshaler.
+func (f ListenerFlow) MarshalYAML() (interface{}, error) {
+	if f == FlowUnknown {
+		return nil, nil
+	}
+	return f.String(), nil
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler.
+func (f *ListenerFlow) UnmarshalYAML(value *yaml.Node) error {
+	var raw string
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	flow, err := parseListenerFlow(raw)
+	if err != nil {
+		return err
+	}
+	*f = flow
+	return nil
+}
+
+func parseListenerFlow(raw string) (ListenerFlow, error) {
+	token := strings.ToLower(strings.TrimSpace(raw))
+	if token == "" {
+		return FlowUnknown, nil
+	}
+	if flow, ok := flowFromString[token]; ok {
+		return flow, nil
+	}
+	return FlowUnknown, fmt.Errorf("invalid listener flow '%s'", raw)
+}
+
+// ListenerProtocol enumerates supported protocols for an app listener.
+type ListenerProtocol uint8
+
+const (
+	ListenerProtocolUnknown ListenerProtocol = iota
+	ListenerProtocolRaw
+	ListenerProtocolHTTP
+	ListenerProtocolWebsocket
+)
+
+var protocolToString = map[ListenerProtocol]string{
+	ListenerProtocolRaw:       "raw",
+	ListenerProtocolHTTP:      "http",
+	ListenerProtocolWebsocket: "websocket",
+}
+
+var protocolFromString = map[string]ListenerProtocol{
+	"raw":       ListenerProtocolRaw,
+	"http":      ListenerProtocolHTTP,
+	"websocket": ListenerProtocolWebsocket,
+}
+
+// String returns the token representation of the protocol.
+func (p ListenerProtocol) String() string {
+	if s, ok := protocolToString[p]; ok {
+		return s
+	}
+	return ""
+}
+
+// MarshalJSON converts the protocol enum back to its token.
+func (p ListenerProtocol) MarshalJSON() ([]byte, error) {
+	if p == ListenerProtocolUnknown {
+		return json.Marshal("")
+	}
+	return json.Marshal(p.String())
+}
+
+// UnmarshalJSON parses a protocol token.
+func (p *ListenerProtocol) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	proto, err := parseListenerProtocol(raw)
+	if err != nil {
+		return err
+	}
+	*p = proto
+	return nil
+}
+
+// MarshalYAML implements yaml.Marshaler.
+func (p ListenerProtocol) MarshalYAML() (interface{}, error) {
+	if p == ListenerProtocolUnknown {
+		return nil, nil
+	}
+	return p.String(), nil
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler.
+func (p *ListenerProtocol) UnmarshalYAML(value *yaml.Node) error {
+	var raw string
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	proto, err := parseListenerProtocol(raw)
+	if err != nil {
+		return err
+	}
+	*p = proto
+	return nil
+}
+
+func parseListenerProtocol(raw string) (ListenerProtocol, error) {
+	token := strings.ToLower(strings.TrimSpace(raw))
+	if token == "" {
+		return ListenerProtocolUnknown, nil
+	}
+	if proto, ok := protocolFromString[token]; ok {
+		return proto, nil
+	}
+	return ListenerProtocolUnknown, fmt.Errorf("invalid listener protocol '%s'", raw)
 }
 
 // DiskInfo provides detailed, human-readable information about a physical disk.
@@ -66,8 +241,8 @@ type AppDefinition struct {
 type AppListener struct {
 	Name        string                  `yaml:"name" json:"name"`
 	GuestPort   int                     `yaml:"guest_port" json:"guest_port"`
-	Flow        string                  `yaml:"flow,omitempty" json:"flow,omitempty"`         // "tcp" | "tls" (default: tcp)
-	Protocol    string                  `yaml:"protocol,omitempty" json:"protocol,omitempty"` // hint: "http" | "websocket" | "raw" | etc.
+	Flow        ListenerFlow            `yaml:"flow,omitempty" json:"flow,omitempty"`
+	Protocol    ListenerProtocol        `yaml:"protocol,omitempty" json:"protocol,omitempty"`
 	Middleware  []AppProtocolMiddleware `yaml:"protocol_middleware,omitempty" json:"protocol_middleware,omitempty"`
 	RemotePorts []int                   `yaml:"remote_ports,omitempty" json:"remote_ports,omitempty"`
 }

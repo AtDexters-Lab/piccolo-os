@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"piccolod/internal/api"
 	"piccolod/internal/remote"
 )
 
@@ -67,10 +68,12 @@ func (s *GinServer) handleRemoteConfigure(c *gin.Context) {
 	if strings.EqualFold(configureReq.Solver, "http-01") && configureReq.TLD != "" && s.remoteManager != nil {
 		hosts := map[string]struct{}{}
 		for _, ep := range s.serviceManager.GetAll() {
-			if strings.EqualFold(ep.Flow, "tls") {
+			if ep.Flow == api.FlowTLS {
 				continue
 			}
-			if !strings.EqualFold(ep.Protocol, "http") && !strings.EqualFold(ep.Protocol, "websocket") {
+			switch ep.Protocol {
+			case api.ListenerProtocolHTTP, api.ListenerProtocolWebsocket:
+			default:
 				continue
 			}
 			if ep.Name == "" {
