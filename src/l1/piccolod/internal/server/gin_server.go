@@ -153,6 +153,16 @@ func (r *serviceRemoteResolver) IsRemoteHostname(host string) bool {
 
 func (r *serviceRemoteResolver) SetTlsMuxPort(p int) { r.mu.Lock(); r.tlsMuxPort = p; r.mu.Unlock() }
 
+func (r *serviceRemoteResolver) RecordConnectionHint(localPort, sourcePort, remotePort int, isTLS bool) {
+	if r.services == nil || sourcePort <= 0 {
+		return
+	}
+	if localPort == r.port {
+		return
+	}
+	r.services.RegisterProxyHint(localPort, sourcePort, remotePort, isTLS)
+}
+
 func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int, isTLS bool) (int, bool) {
 	h := strings.TrimSuffix(strings.ToLower(hostname), ".")
 	r.mu.RLock()

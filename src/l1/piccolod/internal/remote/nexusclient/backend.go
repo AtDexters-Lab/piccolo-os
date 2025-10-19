@@ -147,7 +147,16 @@ func (a *BackendAdapter) connectHandler() backend.ConnectHandler {
 		}
 		target := fmt.Sprintf("127.0.0.1:%d", localPort)
 		var d net.Dialer
-		return d.DialContext(ctx, "tcp", target)
+		conn, err := d.DialContext(ctx, "tcp", target)
+		if err != nil {
+			return nil, err
+		}
+		if recorder, ok := a.resolver.(interface{ RecordConnectionHint(int, int, int, bool) }); ok {
+			if addr, ok := conn.LocalAddr().(*net.TCPAddr); ok {
+				recorder.RecordConnectionHint(localPort, addr.Port, req.Port, req.IsTLS)
+			}
+		}
+		return conn, nil
 	}
 }
 

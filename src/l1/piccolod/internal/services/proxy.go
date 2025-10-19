@@ -17,75 +17,56 @@ import (
 	"piccolod/internal/api"
 )
 
+type connectionHint struct {
+	isTLS      bool
+	remotePort int
+}
+
+type hintContextKey struct{}
+
 // ProxyManager manages TCP listeners and proxies traffic based on ServiceEndpoint
 type ProxyManager struct {
 	mu        sync.Mutex
 	listeners map[int]net.Listener // by public port
-	httpState map[int]*httpProxyState
+	hints     map[int]map[int]connectionHint
 	wg        sync.WaitGroup
 	acme      http.Handler
 }
 
 func NewProxyManager() *ProxyManager {
-	return &ProxyManager{
-		listeners: make(map[int]net.Listener),
-		httpState: make(map[int]*httpProxyState),
+	return &ProxyManager{listeners: make(map[int]net.Listener)}
+}
+
+func (p *ProxyManager) registerHint(listenerPort, sourcePort int, hint connectionHint) {
+	if sourcePort <= 0 {
+		return
 	}
-}
-
-type httpProxyState struct {
-	tlsHints chan struct{}
-}
-
-type httpsHintKey struct{}
-
-func newHTTPProxyState() *httpProxyState {
-	return &httpProxyState{tlsHints: make(chan struct{}, 64)}
-}
-
-func (s *httpProxyState) markTLS() {
-	select {
-	case s.tlsHints <- struct{}{}:
-	default:
-	}
-}
-
-func (s *httpProxyState) consumeTLS() bool {
-	select {
-	case <-s.tlsHints:
-		return true
-	default:
-		return false
-	}
-}
-
-func (p *ProxyManager) ensureHTTPState(port int) *httpProxyState {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	state, ok := p.httpState[port]
-	if !ok {
-		state = newHTTPProxyState()
-		p.httpState[port] = state
+	if p.hints == nil {
+		p.hints = make(map[int]map[int]connectionHint)
 	}
-	return state
+	m := p.hints[listenerPort]
+	if m == nil {
+		m = make(map[int]connectionHint)
+		p.hints[listenerPort] = m
+	}
+	m[sourcePort] = hint
 }
 
-func (p *ProxyManager) markHTTPS(port int) {
+func (p *ProxyManager) consumeHint(listenerPort, sourcePort int) (connectionHint, bool) {
 	p.mu.Lock()
-	state, ok := p.httpState[port]
-	p.mu.Unlock()
-	if ok {
-		state.markTLS()
+	defer p.mu.Unlock()
+	if m := p.hints[listenerPort]; m != nil {
+		if hint, ok := m[sourcePort]; ok {
+			delete(m, sourcePort)
+			if len(m) == 0 {
+				delete(p.hints, listenerPort)
+			}
+			return hint, true
+		}
 	}
-}
-
-func (p *ProxyManager) cancelHTTPSHint(port int) {
-	p.mu.Lock()
-	state, ok := p.httpState[port]
-	p.mu.Unlock()
-	if ok {
-		state.consumeTLS()
-	}
+	return connectionHint{}, false
 }
 
 // SetAcmeHandler registers a handler to serve HTTP-01 challenges for all HTTP proxies.
@@ -178,8 +159,6 @@ func (p *ProxyManager) startHTTPProxy(ln net.Listener, ep ServiceEndpoint) {
 	rp := httputil.NewSingleHostReverseProxy(u)
 	// Basic transport tuning; defaults are fine for v1
 
-	state := p.ensureHTTPState(ep.PublicPort)
-
 	// Default middleware chain (stubs)
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		applyForwardHeaders(r, ep)
@@ -206,8 +185,10 @@ func (p *ProxyManager) startHTTPProxy(ln net.Listener, ep ServiceEndpoint) {
 		srv := &http.Server{
 			Handler: handler,
 			ConnContext: func(ctx context.Context, c net.Conn) context.Context {
-				if state.consumeTLS() {
-					ctx = context.WithValue(ctx, httpsHintKey{}, true)
+				if addr, ok := c.RemoteAddr().(*net.TCPAddr); ok {
+					if hint, ok := p.consumeHint(ep.PublicPort, addr.Port); ok {
+						ctx = context.WithValue(ctx, hintContextKey{}, hint)
+					}
 				}
 				return ctx
 			},
@@ -237,6 +218,13 @@ func basicRateLimit(next http.Handler) http.Handler { // placeholder
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r)
 	})
+}
+
+func hintFromRequest(r *http.Request) (connectionHint, bool) {
+	if hint, ok := r.Context().Value(hintContextKey{}).(connectionHint); ok {
+		return hint, true
+	}
+	return connectionHint{}, false
 }
 
 func applyForwardHeaders(r *http.Request, ep ServiceEndpoint) {
@@ -303,7 +291,7 @@ func requestArrivedViaTLS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	if v, ok := r.Context().Value(httpsHintKey{}).(bool); ok && v {
+	if hint, ok := hintFromRequest(r); ok && hint.isTLS {
 		return true
 	}
 	return false
@@ -312,6 +300,9 @@ func requestArrivedViaTLS(r *http.Request) bool {
 func resolvePortHeader(r *http.Request, proto, hostPort string) string {
 	if v := r.Header.Get("X-Forwarded-Port"); v != "" {
 		return v
+	}
+	if hint, ok := hintFromRequest(r); ok && hint.remotePort > 0 {
+		return strconv.Itoa(hint.remotePort)
 	}
 	if hostPort != "" {
 		return hostPort
@@ -372,7 +363,7 @@ func (p *ProxyManager) StopAll() {
 	for port, ln := range p.listeners {
 		_ = ln.Close()
 		delete(p.listeners, port)
-		delete(p.httpState, port)
+		delete(p.hints, port)
 	}
 	p.mu.Unlock()
 	p.wg.Wait()
@@ -385,7 +376,7 @@ func (p *ProxyManager) StopPort(port int) {
 		_ = ln.Close()
 		delete(p.listeners, port)
 	}
-	delete(p.httpState, port)
+	delete(p.hints, port)
 	p.mu.Unlock()
 }
 

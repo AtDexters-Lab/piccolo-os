@@ -161,6 +161,15 @@ func (m *TlsMux) serveTLSConn(c net.Conn, services *ServiceManager) {
 	if state.ServerName != "" {
 		host = strings.TrimSuffix(strings.ToLower(state.ServerName), ".")
 	}
+	var (
+		hint     connectionHint
+		haveHint bool
+	)
+	if services != nil {
+		if addr, ok := tlsConn.RemoteAddr().(*net.TCPAddr); ok {
+			hint, haveHint = services.consumeProxyHint(m.Port(), addr.Port)
+		}
+	}
 	if host == "" {
 		m.mu.RLock()
 		host = m.portalHost
@@ -172,19 +181,27 @@ func (m *TlsMux) serveTLSConn(c net.Conn, services *ServiceManager) {
 		c.Close()
 		return
 	}
-	if services != nil {
-		services.markProxyTLS(upstream)
-	}
-	backendAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(upstream))
-	backend, err := net.DialTimeout("tcp", backendAddr, 5*time.Second)
-	if err != nil {
-		log.Printf("WARN: tlsmux upstream dial %s failed: %v", backendAddr, err)
-		if services != nil {
-			services.cancelProxyTLS(upstream)
+backendAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(upstream))
+backend, err := net.DialTimeout("tcp", backendAddr, 5*time.Second)
+if err != nil {
+	log.Printf("WARN: tlsmux upstream dial %s failed: %v", backendAddr, err)
+	// Hint already consumed; nothing further to clean up on failure.
+	c.Close()
+	return
+}
+if services != nil {
+	if addr, ok := backend.LocalAddr().(*net.TCPAddr); ok {
+		remotePort := 0
+		if haveHint && hint.remotePort > 0 {
+			remotePort = hint.remotePort
 		}
-		c.Close()
-		return
+		isTLS := true
+		if haveHint {
+			isTLS = hint.isTLS || isTLS
+		}
+		services.RegisterProxyHint(upstream, addr.Port, remotePort, isTLS)
 	}
+}
 	// Bi-directional copy: cleartext HTTP over TLS to upstream HTTP
 	go func() {
 		io.Copy(backend, tlsConn)

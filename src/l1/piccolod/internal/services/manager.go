@@ -185,18 +185,18 @@ func (m *ServiceManager) StopRuntimeEvents() {
 // ProxyManager returns the underlying ProxyManager.
 func (m *ServiceManager) ProxyManager() *ProxyManager { return m.proxyManager }
 
-func (m *ServiceManager) markProxyTLS(port int) {
-	if port <= 0 || m.proxyManager == nil {
+func (m *ServiceManager) RegisterProxyHint(listenerPort, sourcePort, remotePort int, isTLS bool) {
+	if listenerPort <= 0 || sourcePort <= 0 || m.proxyManager == nil {
 		return
 	}
-	m.proxyManager.markHTTPS(port)
+	m.proxyManager.registerHint(listenerPort, sourcePort, connectionHint{isTLS: isTLS, remotePort: remotePort})
 }
 
-func (m *ServiceManager) cancelProxyTLS(port int) {
-	if port <= 0 || m.proxyManager == nil {
-		return
+func (m *ServiceManager) consumeProxyHint(listenerPort, sourcePort int) (connectionHint, bool) {
+	if listenerPort <= 0 || sourcePort <= 0 || m.proxyManager == nil {
+		return connectionHint{}, false
 	}
-	m.proxyManager.cancelHTTPSHint(port)
+	return m.proxyManager.consumeHint(listenerPort, sourcePort)
 }
 
 // LastObservedRole reports the most recent leadership role seen for a resource.

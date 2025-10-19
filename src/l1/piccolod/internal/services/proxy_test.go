@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -107,7 +108,7 @@ func TestProxy_PassthroughTCP(t *testing.T) {
 
 func TestApplyForwardHeadersUsesTLSHint(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://web.example.com", nil)
-	req = req.WithContext(context.WithValue(req.Context(), httpsHintKey{}, true))
+	req = req.WithContext(context.WithValue(req.Context(), hintContextKey{}, connectionHint{isTLS: true}))
 	ep := ServiceEndpoint{Flow: api.FlowTCP, Protocol: api.ListenerProtocolHTTP}
 
 	applyForwardHeaders(req, ep)
@@ -134,6 +135,7 @@ func TestHTTPProxyForwardHeadersRespectTLSHints(t *testing.T) {
 			headers := map[string]string{
 				"proto":     r.Header.Get("X-Forwarded-Proto"),
 				"forwarded": r.Header.Get("Forwarded"),
+				"port":      r.Header.Get("X-Forwarded-Port"),
 			}
 			select {
 			case backendReqs <- headers:
@@ -164,17 +166,34 @@ func TestHTTPProxyForwardHeadersRespectTLSHints(t *testing.T) {
 	// Give proxy time to bind
 	time.Sleep(100 * time.Millisecond)
 
+	var (
+		nextHint connectionHint
+		hintMu   sync.Mutex
+	)
 	transport := &http.Transport{
 		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			if tcpAddr, ok := conn.LocalAddr().(*net.TCPAddr); ok {
+				hintMu.Lock()
+				hint := nextHint
+				hintMu.Unlock()
+				pm.registerHint(ep.PublicPort, tcpAddr.Port, hint)
+			}
+			return conn, nil
+		},
 	}
 	defer transport.CloseIdleConnections()
-	client := http.Client{
-		Timeout:   2 * time.Second,
-		Transport: transport,
-	}
+	client := http.Client{Timeout: 2 * time.Second, Transport: transport}
 	target := fmt.Sprintf("http://127.0.0.1:%d/", public)
 
 	// Plain HTTP request (no TLS hint)
+	hintMu.Lock()
+	nextHint = connectionHint{}
+	hintMu.Unlock()
 	resp, err := client.Get(target)
 	if err != nil {
 		t.Fatalf("plain http get: %v", err)
@@ -189,12 +208,16 @@ func TestHTTPProxyForwardHeadersRespectTLSHints(t *testing.T) {
 		if strings.Contains(headers["forwarded"], "proto=https") {
 			t.Fatalf("unexpected forwarded proto=https for plain request: %q", headers["forwarded"])
 		}
+		if headers["port"] != strconv.Itoa(public) {
+			t.Fatalf("expected X-Forwarded-Port=%d for plain request, got %q", public, headers["port"])
+		}
 	case <-time.After(time.Second):
 		t.Fatalf("timeout waiting for backend request (plain http)")
 	}
-
-	// Mark upcoming request as TLS-terminated at Piccolo
-	pm.markHTTPS(public)
+	// Mark upcoming request as TLS-terminated at Piccolo and originating from remote port 8443
+	hintMu.Lock()
+	nextHint = connectionHint{isTLS: true, remotePort: 8443}
+	hintMu.Unlock()
 
 	resp, err = client.Get(target)
 	if err != nil {
@@ -209,6 +232,9 @@ func TestHTTPProxyForwardHeadersRespectTLSHints(t *testing.T) {
 		}
 		if !strings.Contains(strings.ToLower(headers["forwarded"]), "proto=https") {
 			t.Fatalf("expected forwarded proto=https, got %q", headers["forwarded"])
+		}
+		if headers["port"] != "8443" {
+			t.Fatalf("expected X-Forwarded-Port=8443 when hint present, got %q", headers["port"])
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("timeout waiting for backend request (tls hint)")
