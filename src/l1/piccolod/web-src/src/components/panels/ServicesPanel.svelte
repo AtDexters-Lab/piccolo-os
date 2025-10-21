@@ -1,16 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { apiProd } from '@api/client';
-  import { buildServiceLink, buildRemoteServiceLink } from '@lib/serviceLinks';
   let data: any = null; let loading = true; let error = '';
   onMount(async () => {
     try { data = await apiProd('/services'); }
     catch (e: any) { error = e?.message || 'Failed to load services'; }
     finally { loading = false; }
   });
-
-  const serviceLink = (service: any): string | null => buildServiceLink(service);
-  const remoteServiceLink = (service: any): string | null => buildRemoteServiceLink(service);
 </script>
 
 <div class="p-4 bg-white rounded border">
@@ -23,18 +19,18 @@
     <p class="text-sm text-gray-700 mb-2">{data.services?.length || 0} running</p>
     <ul class="text-sm list-disc ml-5 space-y-1">
       {#each (data.services?.slice(0,5) ?? []) as s}
-        <li>
-          <span class="font-mono">{s.app}</span>/{s.name}
-          {#if serviceLink(s)}
-            → <a class="text-blue-600 underline" href={serviceLink(s) || '#'} target="_blank" rel="noopener">{serviceLink(s)}</a>
-          {/if}
+        <li class="flex flex-col">
+          <div class="flex items-center justify-between gap-2">
+            <a class="font-semibold text-blue-600 hover:underline" href={`#/apps/${encodeURIComponent(s.app)}`}>
+              {s.app}
+            </a>
+            <span class="text-xs text-slate-500 uppercase tracking-wide">{s.protocol?.toUpperCase?.() || s.protocol}</span>
+          </div>
+          <div class="text-xs text-slate-500">
+            Listener: <span class="font-mono text-slate-700">{s.name}</span>
+          </div>
           {#if s?.remote_host}
-            <span class="ml-2 text-gray-500">Remote:</span>
-            {#if remoteServiceLink(s)}
-              <a class="ml-1 text-blue-600 underline" href={remoteServiceLink(s) || '#'} target="_blank" rel="noopener">{s.remote_host}</a>
-            {:else}
-              <span class="ml-1 font-mono text-gray-600">{s.remote_host}</span>
-            {/if}
+            <span class="text-xs text-slate-500">Remote: <span class="font-mono text-slate-700">{s.remote_host}</span></span>
           {/if}
         </li>
       {/each}

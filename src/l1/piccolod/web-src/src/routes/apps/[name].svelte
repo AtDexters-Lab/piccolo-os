@@ -139,33 +139,67 @@
     {#if (data?.data?.services ?? []).length === 0}
       <p class="text-sm text-gray-600">No running services.</p>
     {:else}
-      <ul class="text-sm space-y-1 list-disc ml-5">
+      <div class="grid gap-4 md:grid-cols-2">
         {#each data.data.services as service}
-          <li>
-            <span class="font-medium">{service.name}</span>
-            <span class="text-gray-600"> — {service.protocol?.toUpperCase?.() || service.protocol}</span>
-            {#if serviceLink(service)}
-              <span> · <span class="text-gray-500">Local:</span>
-                {#if isRunning}
-                  <a class="text-blue-600 underline" href={serviceLink(service) || '#'} target="_blank" rel="noopener">Open</a>
-                {:else}
-                  <span class="text-gray-400 cursor-not-allowed" title="Start the app to open this endpoint">Open</span>
-                {/if}
+          <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-base font-semibold text-slate-900 flex items-center gap-2">
+                  {service.name}
+                  <span class="text-xs font-medium uppercase tracking-wide text-slate-500">
+                    {service.protocol?.toUpperCase?.() || service.protocol}
+                  </span>
+                </p>
+                <p class="text-xs text-slate-500 mt-1">
+                  Guest {service.guest_port ?? '—'} · Host {service.host_port ?? '—'} · Public {service.public_port ?? '—'}
+                </p>
+              </div>
+              <span class={`px-2 py-0.5 text-xs font-semibold rounded-full ${isRunning ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                {isRunning ? 'Running' : 'Stopped'}
               </span>
-            {/if}
-            {#if service?.remote_host}
-              <span> · <span class="text-gray-500">Remote:</span>
-                {#if remoteServiceLink(service) && isRunning}
-                  <a class="text-blue-600 underline" href={remoteServiceLink(service) || '#'} target="_blank" rel="noopener">{service.remote_host}</a>
+            </div>
+            <div class="mt-4 space-y-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Local</span>
+                {#if serviceLink(service)}
+                  {#if isRunning}
+                    <a
+                      class="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                      href={serviceLink(service) || '#'}
+                      target="_blank"
+                      rel="noopener"
+                    >
+                      Open
+                    </a>
+                  {:else}
+                    <span class="text-xs text-slate-400">Start the app to open</span>
+                  {/if}
                 {:else}
-                  <span class="text-gray-600 font-mono">{service.remote_host}</span>
+                  <span class="text-xs text-slate-400">No local endpoint published</span>
                 {/if}
-              </span>
-            {/if}
-          </li>
+              </div>
+              {#if service?.remote_host}
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Remote</span>
+                  {#if remoteServiceLink(service) && isRunning}
+                    <a
+                      class="inline-flex items-center gap-1 rounded-md border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                      href={remoteServiceLink(service) || '#'}
+                      target="_blank"
+                      rel="noopener"
+                    >
+                      {service.remote_host}
+                    </a>
+                  {:else}
+                    <span class="text-xs font-mono text-slate-500">{service.remote_host}</span>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          </div>
         {/each}
-      </ul>
-      <p class="text-xs text-gray-500 mt-2">Remote access publishes listener hosts as <code>listener.user-domain</code>; ports follow the `remote_ports` setting or default to 80/443.</p>
+      </div>
+      <p class="text-xs text-gray-500 mt-3">Remote access publishes listener hosts as <code>listener.user-domain</code>; ports follow the <code>remote_ports</code> setting or default to 80/443.</p>
     {/if}
   </div>
 {/if}
