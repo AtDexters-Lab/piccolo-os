@@ -139,18 +139,18 @@
     {#if (data?.data?.services ?? []).length === 0}
       <p class="text-sm text-gray-600">No running services.</p>
     {:else}
-      <div class="grid gap-4 md:grid-cols-2">
+      <div class="grid gap-3">
         {#each data.data.services as service}
-          <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
-            <div class="flex items-start justify-between gap-3">
+          <div class="rounded border border-slate-200 bg-white p-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p class="text-base font-semibold text-slate-900 flex items-center gap-2">
+                <p class="flex items-center gap-2 text-base font-semibold text-slate-900">
                   {service.name}
                   <span class="text-xs font-medium uppercase tracking-wide text-slate-500">
                     {service.protocol?.toUpperCase?.() || service.protocol}
                   </span>
                 </p>
-                <p class="text-xs text-slate-500 mt-1">
+                <p class="mt-1 text-xs text-slate-500">
                   Guest {service.guest_port ?? '—'} · Host {service.host_port ?? '—'} · Public {service.public_port ?? '—'}
                 </p>
               </div>
@@ -158,13 +158,13 @@
                 {isRunning ? 'Running' : 'Stopped'}
               </span>
             </div>
-            <div class="mt-4 space-y-3">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Local</span>
+            <div class="mt-4 grid gap-3 sm:grid-cols-[80px_minmax(0,1fr)] sm:items-center">
+              <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 sm:text-right">Local</span>
+              <div>
                 {#if serviceLink(service)}
                   {#if isRunning}
                     <a
-                      class="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                      class="inline-flex items-center justify-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
                       href={serviceLink(service) || '#'}
                       target="_blank"
                       rel="noopener"
@@ -178,12 +178,13 @@
                   <span class="text-xs text-slate-400">No local endpoint published</span>
                 {/if}
               </div>
+
               {#if service?.remote_host}
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Remote</span>
+                <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 sm:text-right">Remote</span>
+                <div>
                   {#if remoteServiceLink(service) && isRunning}
                     <a
-                      class="inline-flex items-center gap-1 rounded-md border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                      class="inline-flex items-center justify-center gap-1 rounded-md border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
                       href={remoteServiceLink(service) || '#'}
                       target="_blank"
                       rel="noopener"
