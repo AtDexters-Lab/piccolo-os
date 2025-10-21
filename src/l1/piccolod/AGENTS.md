@@ -106,3 +106,21 @@ Notes:
   - `storage_and_encryption.feature`
   - `updates_and_rollback.feature`
   - `README.md`
+
+## Bug‑Fix Workflow (Test‑First + RCA)
+- Principle: fixes are test‑driven and root‑cause oriented; we avoid one‑off patches.
+- Steps:
+  - Add a failing test in the closest package (unit preferred). Use `testdata/` for fixtures and update OpenAPI tests when API shape is involved.
+  - Reproduce and instrument: rely on existing logs/health/events; do not over‑log in production paths.
+  - Apply a minimal, layered fix (respect `internal/*` boundaries: server ↔ app/services ↔ persistence ↔ remote). Keep policy in the right module.
+  - Turn the suite green (`go test ./...`) and extend with boundary/edge tests covering sibling flows uncovered by the RCA.
+  - Document RCA in the PR (template below) and, if systemic, update docs under `docs/runtime/*` or `docs/persistence/*` with the refined approach.
+- Commits/PRs:
+  - Conventional Commits (`fix(app):`, `test(server):`, `refactor(persistence):`, `docs:`).
+  - PR must contain: failing test, fix, RCA, extrapolated tests, and test outputs.
+- RCA template:
+  - Symptom → concise description and reproduction.
+  - Root cause → exact code path/assumption.
+  - Fix → what changed and why it is correct.
+  - Extrapolation → related flows now covered by tests.
+  - Follow‑ups → design/doc tickets if architecture needs adjustment.

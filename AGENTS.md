@@ -62,3 +62,23 @@
   - `storage_and_encryption.feature`
   - `updates_and_rollback.feature`
   - `README.md`
+
+## Bug‑Fix Workflow (Test‑First + RCA)
+- Goal: every bug becomes a reproducible test, a minimal fix, and a documented learning that prevents class‑siblings.
+- Process:
+  - Write a failing test first (prefer unit; escalate to integration only if needed). Place under the affected package with `*_test.go`; fixtures go in `testdata/`.
+  - Observe and log: capture the exact symptom and inputs; if API, align with `docs/api/openapi.yaml` and add/adjust contract tests when relevant.
+  - Fix minimally at the correct layer (avoid cross‑cutting hacks). Keep changes cohesive with existing abstractions (events, dispatcher, supervisor, repos).
+  - Green test: run `go test ./...` and ensure coverage does not drop. Add additional tests for boundary cases discovered during debugging.
+  - RCA (root cause analysis): document summary, cause, and durable fix in the PR description (see template below). Extrapolate to sibling flows and add tests for those too.
+  - Architecture alignment: if the fix reveals a systemic gap (e.g., lock‑state gating, routing policy, header invariants), record a follow‑up in `docs/runtime/*` or `docs/persistence/*` and reference it from the PR.
+- Commit/PR hygiene:
+  - Use Conventional Commits (`fix(server): …`, `test(services): …`, `docs: …`).
+  - PR must include: failing test diff, fix, RCA, affected flows, and `go test` output.
+- RCA template (include in PR):
+  - Symptom: one‑line user‑visible effect.
+  - Trigger: inputs/state leading to failure.
+  - Root cause: specific code path/assumption.
+  - Fix: what changed and why this is sufficient.
+  - Extrapolation: other flows/edges covered with new tests.
+  - Residual risk & follow‑ups: tickets/docs created.
