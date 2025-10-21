@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { apiProd } from '@api/client';
-  import { buildServiceLink } from '@lib/serviceLinks';
+  import { buildServiceLink, buildRemoteServiceLink } from '@lib/serviceLinks';
   let data: any = null; let loading = true; let error = '';
   onMount(async () => {
     try { data = await apiProd('/services'); }
@@ -10,6 +10,7 @@
   });
 
   const serviceLink = (service: any): string | null => buildServiceLink(service);
+  const remoteServiceLink = (service: any): string | null => buildRemoteServiceLink(service);
 </script>
 
 <div class="p-4 bg-white rounded border">
@@ -26,6 +27,14 @@
           <span class="font-mono">{s.app}</span>/{s.name}
           {#if serviceLink(s)}
             → <a class="text-blue-600 underline" href={serviceLink(s) || '#'} target="_blank" rel="noopener">{serviceLink(s)}</a>
+          {/if}
+          {#if s?.remote_host}
+            <span class="ml-2 text-gray-500">Remote:</span>
+            {#if remoteServiceLink(s)}
+              <a class="ml-1 text-blue-600 underline" href={remoteServiceLink(s) || '#'} target="_blank" rel="noopener">{s.remote_host}</a>
+            {:else}
+              <span class="ml-1 font-mono text-gray-600">{s.remote_host}</span>
+            {/if}
           {/if}
         </li>
       {/each}

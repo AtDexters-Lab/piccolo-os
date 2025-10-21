@@ -2810,6 +2810,8 @@ export interface components {
             public_port?: number;
             /** @description Explicit ports advertised on the remote listener hostname; defaults to [80, 443]. */
             remote_ports?: number[];
+            /** @description Fully-qualified hostname published for remote access. */
+            remote_host?: string | null;
             flow?: string;
             protocol?: string;
             middleware?: Record<string, never>[];

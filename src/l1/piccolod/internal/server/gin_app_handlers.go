@@ -13,6 +13,7 @@ import (
 	"piccolod/internal/api"
 	"piccolod/internal/app"
 	"piccolod/internal/persistence"
+	"piccolod/internal/remote"
 )
 
 func determineScheme(flow api.ListenerFlow, protocol api.ListenerProtocol) string {
@@ -261,7 +262,17 @@ func (s *GinServer) handleGinAppGet(c *gin.Context) {
 	// Include services inline
 	services, _ := s.serviceManager.GetByApp(appName)
 	serviceStatus := make([]gin.H, 0, len(services))
+	var remoteStatus *remote.Status
+	if s.remoteManager != nil {
+		st := s.remoteManager.Status()
+		remoteStatus = &st
+	}
 	for _, ep := range services {
+		remoteHost := s.remoteServiceHostname(remoteStatus, ep)
+		var remoteHostValue interface{}
+		if remoteHost != "" {
+			remoteHostValue = remoteHost
+		}
 		serviceStatus = append(serviceStatus, gin.H{
 			"app":          ep.App,
 			"name":         ep.Name,
@@ -269,6 +280,7 @@ func (s *GinServer) handleGinAppGet(c *gin.Context) {
 			"host_port":    ep.HostBind,
 			"public_port":  ep.PublicPort,
 			"remote_ports": ep.RemotePorts,
+			"remote_host":  remoteHostValue,
 			"flow":         ep.Flow,
 			"protocol":     ep.Protocol,
 			"middleware":   ep.Middleware,

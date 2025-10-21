@@ -624,7 +624,17 @@ func (s *GinServer) handleGinRoot(c *gin.Context) {
 func (s *GinServer) handleGinServicesAll(c *gin.Context) {
 	eps := s.serviceManager.GetAll()
 	out := make([]gin.H, 0, len(eps))
+	var remoteStatus *remote.Status
+	if s.remoteManager != nil {
+		st := s.remoteManager.Status()
+		remoteStatus = &st
+	}
 	for _, ep := range eps {
+		remoteHost := s.remoteServiceHostname(remoteStatus, ep)
+		var remoteHostValue interface{}
+		if remoteHost != "" {
+			remoteHostValue = remoteHost
+		}
 		out = append(out, gin.H{
 			"app":          ep.App,
 			"name":         ep.Name,
@@ -632,6 +642,7 @@ func (s *GinServer) handleGinServicesAll(c *gin.Context) {
 			"host_port":    ep.HostBind,
 			"public_port":  ep.PublicPort,
 			"remote_ports": ep.RemotePorts,
+			"remote_host":  remoteHostValue,
 			"flow":         ep.Flow,
 			"protocol":     ep.Protocol,
 			"middleware":   ep.Middleware,
@@ -650,7 +661,17 @@ func (s *GinServer) handleGinServicesByApp(c *gin.Context) {
 		return
 	}
 	out := make([]gin.H, 0, len(eps))
+	var remoteStatus *remote.Status
+	if s.remoteManager != nil {
+		st := s.remoteManager.Status()
+		remoteStatus = &st
+	}
 	for _, ep := range eps {
+		remoteHost := s.remoteServiceHostname(remoteStatus, ep)
+		var remoteHostValue interface{}
+		if remoteHost != "" {
+			remoteHostValue = remoteHost
+		}
 		out = append(out, gin.H{
 			"app":          ep.App,
 			"name":         ep.Name,
@@ -658,6 +679,7 @@ func (s *GinServer) handleGinServicesByApp(c *gin.Context) {
 			"host_port":    ep.HostBind,
 			"public_port":  ep.PublicPort,
 			"remote_ports": ep.RemotePorts,
+			"remote_host":  remoteHostValue,
 			"flow":         ep.Flow,
 			"protocol":     ep.Protocol,
 			"middleware":   ep.Middleware,
@@ -665,6 +687,25 @@ func (s *GinServer) handleGinServicesByApp(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"services": out})
+}
+
+func (s *GinServer) remoteServiceHostname(status *remote.Status, ep services.ServiceEndpoint) string {
+	if s == nil || status == nil || !status.Enabled {
+		return ""
+	}
+	tld := strings.Trim(strings.TrimSuffix(strings.ToLower(status.TLD), "."), " ")
+	if tld == "" {
+		return ""
+	}
+	name := strings.TrimSpace(ep.Name)
+	if name == "" {
+		return ""
+	}
+	label := strings.ToLower(name)
+	if !isValidDNSLabel(label) {
+		return ""
+	}
+	return label + "." + tld
 }
 
 func (s *GinServer) handlePersistenceControlExport(c *gin.Context) {

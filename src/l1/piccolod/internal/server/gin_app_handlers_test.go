@@ -220,6 +220,84 @@ func TestGinAppAPI_List(t *testing.T) {
 	}
 }
 
+func TestGinAppServices_RemoteHost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tempDir := t.TempDir()
+	srv := createGinTestServer(t, tempDir)
+	sessionCookie, csrf := setupTestAdminSession(t, srv)
+
+	if err := srv.remoteManager.Configure(remote.ConfigureRequest{
+		Endpoint:       "wss://nexus.example.com/connect",
+		DeviceSecret:   "secret-value",
+		Solver:         "http-01",
+		TLD:            "example.com",
+		PortalHostname: "portal.example.com",
+	}); err != nil {
+		t.Fatalf("remote configure: %v", err)
+	}
+	status := srv.remoteManager.Status()
+	if !status.Enabled {
+		t.Fatalf("remote status not enabled: %+v", status)
+	}
+	if strings.TrimSpace(status.TLD) == "" {
+		t.Fatalf("remote status missing tld: %+v", status)
+	}
+	if host := srv.remoteServiceHostname(&status, services.ServiceEndpoint{Name: "web"}); host == "" {
+		t.Fatalf("remote hostname derivation failed")
+	}
+	srv.refreshRemoteRuntime()
+
+	_, err := srv.appManager.Install(context.Background(), &api.AppDefinition{
+		Name:  "blog",
+		Image: "docker.io/library/nginx:alpine",
+		Type:  "user",
+		Listeners: []api.AppListener{{
+			Name:      "web",
+			GuestPort: 80,
+			Flow:      api.FlowTCP,
+			Protocol:  api.ListenerProtocolHTTP,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("install app: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/apps/blog", nil)
+	attachAuth(req, sessionCookie, csrf)
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp GinAppResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("response data not object: %#v", resp.Data)
+	}
+	rawServices, ok := data["services"].([]interface{})
+	if !ok || len(rawServices) == 0 {
+		t.Fatalf("expected services list in response: %#v", data)
+	}
+	first, ok := rawServices[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("service entry not object: %#v", rawServices[0])
+	}
+
+	remoteHost, ok := first["remote_host"].(string)
+	if !ok {
+		t.Fatalf("expected remote_host field on service: %#v", first)
+	}
+	if remoteHost != "web.example.com" {
+		t.Fatalf("unexpected remote_host %q", remoteHost)
+	}
+}
+
 // TestGinAppAPI_GetApp tests GET /api/v1/apps/:name endpoint with Gin
 func TestGinAppAPI_GetApp(t *testing.T) {
 	gin.SetMode(gin.TestMode)

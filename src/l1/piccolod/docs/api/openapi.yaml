@@ -957,6 +957,10 @@ components:
           type: array
           items: { type: integer }
           description: Explicit ports advertised on the remote listener hostname; defaults to [80, 443].
+        remote_host:
+          type: string
+          nullable: true
+          description: Fully-qualified hostname published for remote access.
         flow: { type: string }
         protocol: { type: string }
         middleware: { type: array, items: { type: object } }

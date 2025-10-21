@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { apiProd } from '@api/client';
   import { toast } from '@stores/ui';
-  import { buildServiceLink } from '@lib/serviceLinks';
+  import { buildServiceLink, buildRemoteServiceLink } from '@lib/serviceLinks';
 
   export let params: { name: string };
 
@@ -81,6 +81,7 @@
   }
 
   const serviceLink = (service: any): string | null => buildServiceLink(service);
+  const remoteServiceLink = (service: any): string | null => buildRemoteServiceLink(service);
 </script>
 
 <h2 class="text-xl font-semibold mb-4">App: {params.name}</h2>
@@ -144,11 +145,20 @@
             <span class="font-medium">{service.name}</span>
             <span class="text-gray-600"> — {service.protocol?.toUpperCase?.() || service.protocol}</span>
             {#if serviceLink(service)}
-              <span> ·
+              <span> · <span class="text-gray-500">Local:</span>
                 {#if isRunning}
                   <a class="text-blue-600 underline" href={serviceLink(service) || '#'} target="_blank" rel="noopener">Open</a>
                 {:else}
                   <span class="text-gray-400 cursor-not-allowed" title="Start the app to open this endpoint">Open</span>
+                {/if}
+              </span>
+            {/if}
+            {#if service?.remote_host}
+              <span> · <span class="text-gray-500">Remote:</span>
+                {#if remoteServiceLink(service) && isRunning}
+                  <a class="text-blue-600 underline" href={remoteServiceLink(service) || '#'} target="_blank" rel="noopener">{service.remote_host}</a>
+                {:else}
+                  <span class="text-gray-600 font-mono">{service.remote_host}</span>
                 {/if}
               </span>
             {/if}
