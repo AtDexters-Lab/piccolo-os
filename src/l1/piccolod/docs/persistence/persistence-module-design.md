@@ -50,7 +50,7 @@ VolumeManager consults the app’s cluster mode when allocating volumes and rela
 - API middleware can eventually rely on the event stream instead of polled crypto checks to gate mutating requests.
 
 ## ControlStore
-- Physical store: target design remains SQLite in WAL mode with `synchronous=FULL`, mounted on the control volume. The current checkpoint uses an AES-GCM sealed JSON payload persisted under `control/control.enc` so we can exercise encrypted repos before the SQLite schema lands.
+- Physical store: target design remains SQLite in WAL mode with `synchronous=FULL`, mounted on the control volume. The current checkpoint uses an AES-GCM sealed JSON payload persisted under `ciphertext/control/control.enc` so we can exercise encrypted repos before the SQLite schema lands.
 - Exposes domain repositories (`AuthRepo`, `RemoteRepo`, `AppStateRepo`, `AuditRepo`, etc.) instead of raw SQL handles. `AuthRepo` now persists the Argon2id admin password hash and initialization flag; reads/writes return `ErrLocked` until the control store is unlocked with the SDEK.
 - `RemoteRepo` stores the full remote-manager configuration as an encrypted blob so remote API calls are gated by the same lock semantics (HTTP 423 until unlock) and replicate cleanly with the control shard.
 - Only the leader performs writes. Transactions commit through the repositories; the interim JSON payload still flushes via fsync, and the upcoming SQLite layer will assume that role.

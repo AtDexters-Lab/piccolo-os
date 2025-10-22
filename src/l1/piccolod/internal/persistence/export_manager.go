@@ -34,12 +34,12 @@ type exportPayload struct {
 }
 
 func (m *fileExportManager) RunControlPlane(ctx context.Context) (ExportArtifact, error) {
-	return m.writeExport(ctx, ExportKindControlOnly, filepath.Join(m.root, "control", "control.enc"), filepath.Join(m.root, "exports", "control", "control-plane.pcv"))
+	return m.writeExport(ctx, ExportKindControlOnly, filepath.Join(m.root, "ciphertext", "control", "control.enc"), filepath.Join(m.root, "exports", "control", "control-plane.pcv"))
 }
 
 func (m *fileExportManager) RunFullData(ctx context.Context) (ExportArtifact, error) {
 	// Until application volumes are implemented, reuse the control snapshot as a placeholder payload.
-	return m.writeExport(ctx, ExportKindFullData, filepath.Join(m.root, "control", "control.enc"), filepath.Join(m.root, "exports", "full", "full-data.pcv"))
+	return m.writeExport(ctx, ExportKindFullData, filepath.Join(m.root, "ciphertext", "control", "control.enc"), filepath.Join(m.root, "exports", "full", "full-data.pcv"))
 }
 
 func (m *fileExportManager) ImportControlPlane(ctx context.Context, artifact ExportArtifact, opts ImportOptions) error {

@@ -169,7 +169,7 @@ func TestEncryptedControlStoreLifecycle(t *testing.T) {
 	}
 
 	// Ensure file does not contain plaintext values
-	data, err := os.ReadFile(filepath.Join(dir, "control", "control.enc"))
+	data, err := os.ReadFile(filepath.Join(dir, "ciphertext", "control", "control.enc"))
 	if err != nil {
 		t.Fatalf("read encrypted file: %v", err)
 	}

@@ -10,10 +10,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"piccolod/internal/crypt"
 	"piccolod/internal/state/paths"
@@ -35,6 +40,88 @@ func (execRunner) Run(ctx context.Context, name string, args []string, stdin []b
 	return cmd.Run()
 }
 
+func configureForegroundAttrs(cmd *exec.Cmd) {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	attr := &syscall.SysProcAttr{
+		Setpgid:   true,
+		Pdeathsig: syscall.SIGTERM,
+	}
+	cmd.SysProcAttr = attr
+}
+
+type mountProcess interface {
+	Wait() <-chan error
+	Signal(os.Signal) error
+	Kill() error
+	Pid() int
+}
+
+type mountLauncher interface {
+	Launch(ctx context.Context, path string, args []string, stdin []byte) (mountProcess, error)
+}
+
+type mountWaiter func(mountPoint string, timeout time.Duration) error
+
+type execMountLauncher struct{}
+
+func (execMountLauncher) Launch(ctx context.Context, path string, args []string, stdin []byte) (mountProcess, error) {
+	cmd := exec.CommandContext(ctx, path, args...)
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	configureForegroundAttrs(cmd)
+	if err := cmd.Start(); err != nil {
+		stdinPipe.Close()
+		return nil, err
+	}
+	if stdin != nil {
+		if _, err := io.Copy(stdinPipe, bytes.NewReader(stdin)); err != nil {
+			stdinPipe.Close()
+			_ = cmd.Process.Kill()
+			return nil, err
+		}
+	}
+	stdinPipe.Close()
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	return &execMountProcess{cmd: cmd, done: done}, nil
+}
+
+type execMountProcess struct {
+	cmd  *exec.Cmd
+	done chan error
+}
+
+func (p *execMountProcess) Wait() <-chan error { return p.done }
+
+func (p *execMountProcess) Signal(sig os.Signal) error {
+	if p.cmd.Process == nil {
+		return errors.New("process not started")
+	}
+	return p.cmd.Process.Signal(sig)
+}
+
+func (p *execMountProcess) Kill() error {
+	if p.cmd.Process == nil {
+		return errors.New("process not started")
+	}
+	return p.cmd.Process.Kill()
+}
+
+func (p *execMountProcess) Pid() int {
+	if p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
+}
+
 // FileVolumeManager orchestrates gocryptfs-backed volumes rooted in PICCOLO_STATE_DIR.
 type fileVolumeManager struct {
 	root           string
@@ -43,6 +130,8 @@ type fileVolumeManager struct {
 	gocryptfsPath  string
 	fusermountPath string
 	volumes        map[string]*volumeEntry
+	launcher       mountLauncher
+	waitMount      mountWaiter
 	mu             sync.RWMutex
 }
 
@@ -52,6 +141,7 @@ type volumeEntry struct {
 	metadata      volumeMetadata
 	metadataReady bool
 	role          VolumeRole
+	process       mountProcess
 }
 
 type volumeMetadata struct {
@@ -65,6 +155,13 @@ const (
 	metadataVersion    = 1
 )
 
+var mountPointReplacer = strings.NewReplacer(
+	`\040`, " ",
+	`\011`, "\t",
+	`\012`, "\n",
+	`\134`, `\`,
+)
+
 func newFileVolumeManager(root string, crypto *crypt.Manager) *fileVolumeManager {
 	if root == "" {
 		root = paths.Root()
@@ -76,11 +173,13 @@ func newFileVolumeManager(root string, crypto *crypt.Manager) *fileVolumeManager
 		gocryptfsPath:  defaultGocryptfsBinary(),
 		fusermountPath: defaultFusermountBinary(),
 		volumes:        make(map[string]*volumeEntry),
+		launcher:       execMountLauncher{},
+		waitMount:      waitForMountReady,
 	}
 }
 
 // Helper for tests.
-func newFileVolumeManagerWithDeps(root string, crypto *crypt.Manager, runner commandRunner, gocryptfsPath, fusermountPath string) *fileVolumeManager {
+func newFileVolumeManagerWithDeps(root string, crypto *crypt.Manager, runner commandRunner, gocryptfsPath, fusermountPath string, launcher mountLauncher, waiter mountWaiter) *fileVolumeManager {
 	mgr := newFileVolumeManager(root, crypto)
 	if runner != nil {
 		mgr.runner = runner
@@ -90,6 +189,12 @@ func newFileVolumeManagerWithDeps(root string, crypto *crypt.Manager, runner com
 	}
 	if fusermountPath != "" {
 		mgr.fusermountPath = fusermountPath
+	}
+	if launcher != nil {
+		mgr.launcher = launcher
+	}
+	if waiter != nil {
+		mgr.waitMount = waiter
 	}
 	return mgr
 }
@@ -160,13 +265,25 @@ func (f *fileVolumeManager) Attach(ctx context.Context, handle VolumeHandle, opt
 		return err
 	}
 
-	args := []string{"-q", "-passfile", "/dev/stdin"}
+	args := []string{"-f", "-q", "-passfile", "/dev/stdin"}
 	if opts.Role == VolumeRoleFollower {
 		args = append(args, "-ro")
 	}
 	args = append(args, entry.cipherDir, entry.handle.MountDir)
-	if err := f.runner.Run(ctx, f.gocryptfsPath, args, append(passphrase, '\n')); err != nil {
+
+	proc, err := f.launcher.Launch(ctx, f.gocryptfsPath, args, append(passphrase, '\n'))
+	if err != nil {
 		return fmt.Errorf("mount volume %s: %w", handle.ID, err)
+	}
+	if err := f.waitMount(entry.handle.MountDir, 5*time.Second); err != nil {
+		_ = proc.Signal(syscall.SIGTERM)
+		select {
+		case <-proc.Wait():
+		case <-time.After(2 * time.Second):
+			_ = proc.Kill()
+			<-proc.Wait()
+		}
+		return fmt.Errorf("wait for mount %s: %w", handle.ID, err)
 	}
 
 	mode := []byte("rw")
@@ -183,6 +300,7 @@ func (f *fileVolumeManager) Attach(ctx context.Context, handle VolumeHandle, opt
 	f.mu.Lock()
 	entry.role = opts.Role
 	entry.metadataReady = true
+	entry.process = proc
 	f.mu.Unlock()
 	return nil
 }
@@ -192,6 +310,7 @@ func (f *fileVolumeManager) Detach(ctx context.Context, handle VolumeHandle) err
 	if err := f.runner.Run(ctx, f.fusermountPath, args, nil); err != nil {
 		return fmt.Errorf("detach volume %s: %w", handle.ID, err)
 	}
+	f.awaitProcessExit(handle.ID)
 	return nil
 }
 
@@ -305,6 +424,72 @@ func (f *fileVolumeManager) unwrapVolumeKey(ctx context.Context, meta volumeMeta
 		return nil, err
 	}
 	return passphrase, nil
+}
+
+func (f *fileVolumeManager) awaitProcessExit(volumeID string) {
+	f.mu.Lock()
+	entry, ok := f.volumes[volumeID]
+	if !ok {
+		f.mu.Unlock()
+		return
+	}
+	proc := entry.process
+	entry.process = nil
+	f.mu.Unlock()
+	if proc == nil {
+		return
+	}
+	select {
+	case <-proc.Wait():
+	case <-time.After(2 * time.Second):
+		_ = proc.Kill()
+		<-proc.Wait()
+	}
+}
+
+func waitForMountReady(mountPoint string, timeout time.Duration) error {
+	mountPoint = filepath.Clean(mountPoint)
+	deadline := time.Now().Add(timeout)
+	for {
+		mounted, err := isMountPoint(mountPoint)
+		if err != nil {
+			return err
+		}
+		if mounted {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for mount %s", mountPoint)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func isMountPoint(mountPoint string) (bool, error) {
+	data, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return false, err
+	}
+	target := filepath.Clean(mountPoint)
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, " ")
+		if len(fields) < 5 {
+			continue
+		}
+		pathField := decodeMountPoint(fields[4])
+		if pathField == target {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func decodeMountPoint(raw string) string {
+	return mountPointReplacer.Replace(raw)
 }
 
 func generatePassphrase() ([]byte, error) {

@@ -66,12 +66,12 @@ func newEncryptedControlStore(stateDir string, kp keyProvider) (*encryptedContro
 	if base == "" {
 		base = paths.Root()
 	}
-	controlDir := filepath.Join(base, "control")
-	if err := os.MkdirAll(controlDir, 0o700); err != nil {
+	cipherDir := filepath.Join(base, "ciphertext", "control")
+	if err := os.MkdirAll(cipherDir, 0o700); err != nil {
 		return nil, err
 	}
 	return &encryptedControlStore{
-		filePath:  filepath.Join(controlDir, "control.enc"),
+		filePath:  filepath.Join(cipherDir, "control.enc"),
 		keySource: kp,
 		state: controlState{
 			apps: make(map[string]AppRecord),

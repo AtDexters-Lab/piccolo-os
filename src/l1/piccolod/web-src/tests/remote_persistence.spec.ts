@@ -139,7 +139,7 @@ test.describe('remote persistence across restart', () => {
       expect(diskConfigBefore.enabled).toBeTruthy();
       expect(diskConfigBefore.portal_hostname).toBe(REMOTE_HOST);
     } else {
-      const controlStorePath = path.join(stateDir, 'control', 'control.enc');
+      const controlStorePath = path.join(stateDir, 'ciphertext', 'control', 'control.enc');
       expect(fs.existsSync(controlStorePath)).toBeTruthy();
     }
 
@@ -172,7 +172,7 @@ test.describe('remote persistence across restart', () => {
       expect(diskConfigAfter.enabled).toBeTruthy();
       expect(diskConfigAfter.portal_hostname).toBe(REMOTE_HOST);
     } else {
-      const controlStorePath = path.join(stateDir, 'control', 'control.enc');
+      const controlStorePath = path.join(stateDir, 'ciphertext', 'control', 'control.enc');
       expect(fs.existsSync(controlStorePath)).toBeTruthy();
     }
     await api2.dispose();

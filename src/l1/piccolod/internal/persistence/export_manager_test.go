@@ -11,7 +11,7 @@ import (
 
 func TestFileExportManager_RunControlPlane(t *testing.T) {
 	root := t.TempDir()
-	controlDir := filepath.Join(root, "control")
+	controlDir := filepath.Join(root, "ciphertext", "control")
 	if err := os.MkdirAll(controlDir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -54,10 +54,14 @@ func TestFileExportManager_RunControlPlane(t *testing.T) {
 
 func TestFileExportManager_RunFullData(t *testing.T) {
 	root := t.TempDir()
-	controlDir := filepath.Join(root, "control")
-	os.MkdirAll(controlDir, 0o700)
+	controlDir := filepath.Join(root, "ciphertext", "control")
+	if err := os.MkdirAll(controlDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
 	sample := []byte("control-snapshot")
-	os.WriteFile(filepath.Join(controlDir, "control.enc"), sample, 0o600)
+	if err := os.WriteFile(filepath.Join(controlDir, "control.enc"), sample, 0o600); err != nil {
+		t.Fatalf("write control: %v", err)
+	}
 
 	mgr := newFileExportManager(root)
 	art, err := mgr.RunFullData(context.Background())

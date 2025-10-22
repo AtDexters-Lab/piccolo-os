@@ -3,6 +3,8 @@ package persistence
 import (
 	"context"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -42,6 +44,8 @@ type Module struct {
 	consensus          ConsensusManager
 	crypto             *crypt.Manager
 	stateDir           string
+	bootstrapHandle    VolumeHandle
+	controlHandle      VolumeHandle
 	commitMu           sync.Mutex
 	lastCommitRevision uint64
 	pollCancel         context.CancelFunc
@@ -140,12 +144,16 @@ func (m *Module) ensureCoreVolumes(ctx context.Context) error {
 		return nil
 	}
 	bootstrapReq := VolumeRequest{ID: "bootstrap", Class: VolumeClassBootstrap, ClusterMode: ClusterModeStateful}
-	if _, err := m.volumes.EnsureVolume(ctx, bootstrapReq); err != nil {
+	if handle, err := m.volumes.EnsureVolume(ctx, bootstrapReq); err != nil {
 		return err
+	} else {
+		m.bootstrapHandle = handle
 	}
 	controlReq := VolumeRequest{ID: "control", Class: VolumeClassControl, ClusterMode: ClusterModeStateful}
-	if _, err := m.volumes.EnsureVolume(ctx, controlReq); err != nil {
+	if handle, err := m.volumes.EnsureVolume(ctx, controlReq); err != nil {
 		return err
+	} else {
+		m.controlHandle = handle
 	}
 	return nil
 }
@@ -221,9 +229,12 @@ func (m *Module) setLockState(ctx context.Context, locked bool) error {
 	}
 	if locked {
 		store.Lock()
-		return nil
+		return m.detachVolumeIfMounted(ctx, m.controlHandle)
 	}
-	return store.Unlock(ctx)
+	if err := store.Unlock(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 // SwapBootstrap allows wiring a real bootstrap store after construction.
@@ -286,8 +297,25 @@ func (m *Module) Shutdown(ctx context.Context) error {
 	if m.control != nil {
 		_ = m.control.Close(ctx)
 	}
+	if err := m.detachVolumeIfMounted(ctx, m.controlHandle); err != nil {
+		log.Printf("WARN: persistence failed to detach control volume: %v", err)
+	}
 	// Other sub-components expose explicit Stop methods when implemented.
 	return nil
+}
+
+func (m *Module) detachVolumeIfMounted(ctx context.Context, handle VolumeHandle) error {
+	if m.volumes == nil || handle.ID == "" || handle.MountDir == "" {
+		return nil
+	}
+	marker := filepath.Join(handle.MountDir, ".cipher")
+	if _, err := os.Stat(marker); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return m.volumes.Detach(ctx, handle)
 }
 func (m *Module) publishLockState(locked bool) {
 	if m.events == nil {
