@@ -3,8 +3,12 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test';
 export const ADMIN_PASSWORD = process.env.PICCOLO_E2E_ADMIN_PASSWORD || 'password';
 
 export async function seedAdmin(request: APIRequestContext, password: string = ADMIN_PASSWORD): Promise<void> {
-  await request.post('/api/v1/auth/setup', { data: { password } }).catch(() => {});
-  await request.post('/api/v1/crypto/setup', { data: { password } }).catch(() => {});
+  await request.post('/api/v1/crypto/setup', { data: { password }, failOnStatusCode: false }).catch(() => {});
+  const setup = await request.post('/api/v1/auth/setup', { data: { password }, failOnStatusCode: false }).catch(() => undefined);
+  if (setup && setup.status() === 423) {
+    await request.post('/api/v1/crypto/unlock', { data: { password }, failOnStatusCode: false }).catch(() => {});
+    await request.post('/api/v1/auth/setup', { data: { password }, failOnStatusCode: false }).catch(() => {});
+  }
 }
 
 export async function login(page: Page, password: string = ADMIN_PASSWORD): Promise<void> {

@@ -33,6 +33,26 @@ var (
 	envKeyPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 )
 
+var portInUseRe = regexp.MustCompile(`:(\d+): bind: address already in use`)
+
+// PortInUseError indicates Podman failed to bind the requested host port.
+type PortInUseError struct {
+	Port   int
+	Output string
+	Err    error
+}
+
+func (e *PortInUseError) Error() string {
+	if e.Port > 0 {
+		return fmt.Sprintf("podman port %d already in use: %v", e.Port, e.Err)
+	}
+	return fmt.Sprintf("podman host port already in use: %v", e.Err)
+}
+
+func (e *PortInUseError) Unwrap() error {
+	return e.Err
+}
+
 // ValidateContainerName validates container/image names for security
 func ValidateContainerName(name string) error {
 	if name == "" {
@@ -177,25 +197,18 @@ type ResourceLimits struct {
 	CPU    string
 }
 
-// CreateContainer creates a container using pre-validated arguments
-func (p *PodmanCLI) CreateContainer(ctx context.Context, spec ContainerCreateSpec) (string, error) {
-	// All inputs must be validated before calling this method
-
-	// Build command with pre-validated arguments
+func buildRunArgs(spec ContainerCreateSpec) []string {
 	args := []string{"run", "-d"}
 
-	// Add name
 	if spec.Name != "" {
-		args = append(args, "--name", spec.Name)
+		args = append(args, "--name", spec.Name, "--replace")
 	}
 
-	// Add port mappings - SECURITY: Force localhost binding for fortress architecture
 	for _, port := range spec.Ports {
 		args = append(args, "--publish",
 			fmt.Sprintf("127.0.0.1:%d:%d", port.Host, port.Container))
 	}
 
-	// Add volume mappings
 	for _, volume := range spec.Volumes {
 		volumeArg := fmt.Sprintf("%s:%s", volume.Host, volume.Container)
 		if volume.Options != "" {
@@ -204,7 +217,6 @@ func (p *PodmanCLI) CreateContainer(ctx context.Context, spec ContainerCreateSpe
 		args = append(args, "--volume", volumeArg)
 	}
 
-	// Add resource limits
 	if spec.Resources.Memory != "" {
 		args = append(args, "--memory", spec.Resources.Memory)
 	}
@@ -212,32 +224,46 @@ func (p *PodmanCLI) CreateContainer(ctx context.Context, spec ContainerCreateSpe
 		args = append(args, "--cpus", spec.Resources.CPU)
 	}
 
-	// Add environment variables (pre-validated keys and values)
 	for key, value := range spec.Environment {
 		args = append(args, "--env", fmt.Sprintf("%s=%s", key, value))
 	}
 
-	// Add network mode
 	if spec.NetworkMode != "" {
 		args = append(args, "--network", spec.NetworkMode)
 	}
 
-	// Add restart policy
 	if spec.RestartPolicy != "" {
 		args = append(args, "--restart", spec.RestartPolicy)
 	}
 
-	// Add image (must be last positional argument)
 	if spec.Image != "" {
 		args = append(args, spec.Image)
 	}
 
+	return args
+}
+
+// CreateContainer creates a container using pre-validated arguments
+func (p *PodmanCLI) CreateContainer(ctx context.Context, spec ContainerCreateSpec) (string, error) {
+	// All inputs must be validated before calling this method
+
 	// Execute command using exec.CommandContext (no shell interpretation)
+	args := buildRunArgs(spec)
 	cmd := exec.CommandContext(ctx, "podman", args...)
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
-		return "", fmt.Errorf("podman run failed: %w, output: %s", err, string(output))
+		outStr := string(output)
+		if strings.Contains(outStr, "address already in use") {
+			port := 0
+			if match := portInUseRe.FindStringSubmatch(outStr); len(match) == 2 {
+				if parsed, perr := strconv.Atoi(match[1]); perr == nil {
+					port = parsed
+				}
+			}
+			return "", &PortInUseError{Port: port, Output: outStr, Err: fmt.Errorf("podman run failed: %w", err)}
+		}
+		return "", fmt.Errorf("podman run failed: %w, output: %s", err, outStr)
 	}
 
 	// Extract container ID from output - look for the actual hex container ID

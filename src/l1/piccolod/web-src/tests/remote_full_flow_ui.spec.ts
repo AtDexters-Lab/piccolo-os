@@ -15,6 +15,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PICCOLO_BIN = path.resolve(__dirname, '../../piccolod');
 
+test.skip(process.env.E2E_REMOTE_STACK !== '1', 'E2E_REMOTE_STACK=1 required for full remote flow');
+
 test.describe.configure({ timeout: 10 * 60 * 1000 });
 test.describe('Remote full flow (UI-driven)', () => {
   let stateDir: string;

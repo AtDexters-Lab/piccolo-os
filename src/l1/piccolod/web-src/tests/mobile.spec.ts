@@ -4,7 +4,6 @@ import { ADMIN_PASSWORD, ensureSignedIn } from './support/session';
 // Run on the 'mobile-chromium' project (Pixel 5) from config
 test.describe('Mobile layout', () => {
   test('no horizontal scroll and nav toggle works + app action', async ({ page }) => {
-    if (test.info().project.name !== 'mobile-chromium') test.skip();
     await ensureSignedIn(page, ADMIN_PASSWORD);
     await page.goto('/');
     // Assert no horizontal scroll
@@ -31,7 +30,6 @@ test.describe('Mobile layout', () => {
   });
 
   test('visual tour (mobile screenshots)', async ({ page }) => {
-    if (test.info().project.name !== 'mobile-chromium') test.skip();
     await ensureSignedIn(page, ADMIN_PASSWORD);
     const shots: Array<{ url: string; waitFor: string; name: string }> = [
       { url: '/', waitFor: 'h2:text("Dashboard")', name: 'm00_dashboard' },
@@ -48,7 +46,6 @@ test.describe('Mobile layout', () => {
     }
   });
   test('menu button is clearly tappable on mobile', async ({ page }) => {
-    if (test.info().project.name !== 'mobile-chromium') test.skip();
     await ensureSignedIn(page, ADMIN_PASSWORD);
     await page.goto('/');
     const menuBtn = page.getByRole('button', { name: 'Menu' });

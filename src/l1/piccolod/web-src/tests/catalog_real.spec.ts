@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { ADMIN_PASSWORD, ensureSignedIn } from './support/session';
 
-test.describe('Catalog + YAML install (real API)', () => {
+test.describe.serial('Catalog + YAML install (real API)', () => {
   test('validate and attempt install from catalog template', async ({ page }) => {
     const adminPass = ADMIN_PASSWORD;
     await ensureSignedIn(page, adminPass);
@@ -12,7 +12,13 @@ test.describe('Catalog + YAML install (real API)', () => {
     const st = await page.request.get('/api/v1/crypto/status').then(r => r.json());
     if (!st.initialized) await page.request.post('/api/v1/crypto/setup', { headers: { 'X-CSRF-Token': csrf }, data: { password: adminPass } });
     const st2 = await page.request.get('/api/v1/crypto/status').then(r => r.json());
-    if (!st2.locked) await page.request.post('/api/v1/crypto/lock', { headers: { 'X-CSRF-Token': csrf } });
+    if (!st2.locked) {
+      await page.request.post('/api/v1/crypto/lock', { headers: { 'X-CSRF-Token': csrf } });
+      await expect.poll(async () => {
+        const status = await page.request.get('/api/v1/crypto/status').then(r => r.json());
+        return status.locked as boolean;
+      }, { timeout: 5000 }).toBe(true);
+    }
 
     // Load catalog + template
     const cat = await page.request.get('/api/v1/catalog').then(r => r.json());

@@ -1,19 +1,20 @@
 import { test, expect } from '@playwright/test';
+import { ADMIN_PASSWORD, seedAdmin } from './support/session';
 
 // Installs a minimal HTTP app (nginx) via the real API and verifies
 // the managed proxy serves it locally. Requires Podman with network access.
 // Fails fast with clear messaging if container runtime is unavailable.
 
-test.describe('Service install (nginx) and local proxy', () => {
-  const adminPass = process.env.PICCOLO_E2E_ADMIN_PASSWORD || 'password';
+test.describe.serial('Service install (nginx) and local proxy', () => {
+  const adminPass = process.env.PICCOLO_E2E_ADMIN_PASSWORD || ADMIN_PASSWORD;
   const appName = process.env.PICCOLO_E2E_APP || 'nginxdemo';
 
   test('install, reach via proxy, uninstall', async ({ request }) => {
     // Admin + session
-    await request.post('/api/v1/auth/setup', { data: { password: adminPass } }).catch(() => {});
+    await seedAdmin(request, adminPass);
     const login = await request.post('/api/v1/auth/login', { data: { username: 'admin', password: adminPass } });
     expect(login.ok()).toBeTruthy();
-    const csrf = await request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string);
+    let csrf = await request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string);
 
     // Ensure crypto initialized and unlocked
     const st = await request.get('/api/v1/crypto/status').then(r => r.json());
@@ -23,8 +24,12 @@ test.describe('Service install (nginx) and local proxy', () => {
     }
     const st2 = await request.get('/api/v1/crypto/status').then(r => r.json());
     if (st2.locked) {
-      const u = await request.post('/api/v1/crypto/unlock', { headers: { 'X-CSRF-Token': csrf }, data: { password: adminPass } });
-      expect(u.ok()).toBeTruthy();
+    const u = await request.post('/api/v1/crypto/unlock', { headers: { 'X-CSRF-Token': csrf }, data: { password: adminPass } });
+    expect(u.ok()).toBeTruthy();
+    await expect.poll(async () => {
+      const status = await request.get('/api/v1/crypto/status').then(r => r.json());
+      return status.locked as boolean;
+    }, { timeout: 5000 }).toBe(false);
       await expect.poll(async () => {
         const unlocked = await request.get('/api/v1/crypto/status').then(r => r.json());
         return unlocked.locked as boolean;
@@ -42,6 +47,8 @@ test.describe('Service install (nginx) and local proxy', () => {
       '    protocol: http',
       ''
     ].join('\n');
+
+    csrf = await request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string);
 
     const install = await request.post('/api/v1/apps', {
       headers: { 'Content-Type': 'application/x-yaml', 'X-CSRF-Token': csrf },

@@ -21,6 +21,18 @@ const serverCmd = process.env.E2E_REMOTE_STACK === '1'
   ? `bash -c "rm -rf .e2e-state && ${baseEnv} ${stateEnv} ${acmeEnv} ${caEnv} ${sslEnv} ./piccolod"`
   : `bash -c "rm -rf .e2e-state && ${stubEnv} ${stateEnv} ./piccolod"`;
 
+const lockSensitiveSpecs = [
+  'tests/catalog_real.spec.ts',
+  'tests/crypto_real.spec.ts',
+  'tests/crypto_recovery_real.spec.ts',
+  'tests/services_install_http.spec.ts',
+  'tests/unlock_first_real.spec.ts',
+  'tests/crypto_ui_real.spec.ts',
+  'tests/auth_csrf_real.spec.ts',
+  'tests/dashboard_real.spec.ts',
+  'tests/services_real.spec.ts',
+];
+
 export default defineConfig({
   testDir: './tests',
   globalSetup: './global-setup.ts',
@@ -43,11 +55,12 @@ export default defineConfig({
     command: serverCmd,
     port: 8080,
     timeout: 120000,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     cwd: path.resolve(__dirname, '..'),
   },
   projects: [
-    { name: 'chromium', testMatch: ['tests/**/*.spec.ts', '!tests/mobile.spec.ts'], use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', testMatch: ['tests/**/*.spec.ts'], testIgnore: ['tests/mobile.spec.ts', ...lockSensitiveSpecs], use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium-lock', testMatch: lockSensitiveSpecs, use: { ...devices['Desktop Chrome'] }, workers: 1, retries: 0, fullyParallel: false, dependencies: ['chromium', 'mobile-chromium'] },
     { name: 'mobile-chromium', testMatch: ['tests/mobile.spec.ts'], use: { ...devices['Pixel 5'] } },
   ],
 });

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Unlock-first login UI (real API)', () => {
+test.describe.serial('Unlock-first login UI (real API)', () => {
   const adminPass = 'password';
 
   test('shows unlock box immediately when locked and unlocks to dashboard', async ({ page, request, context }) => {

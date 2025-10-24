@@ -2,11 +2,15 @@ package server
 
 import (
 	"errors"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"piccolod/internal/crypt"
 	"piccolod/internal/persistence"
+
+	"github.com/gin-gonic/gin"
 )
 
 // cookie name as per OpenAPI cookieAuth
@@ -43,6 +47,15 @@ func (s *GinServer) clearSessionCookie(c *gin.Context) {
 		Secure:   false,
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+func (s *GinServer) recordLoginFailure() bool {
+	s.loginFailures++
+	return s.loginFailures >= 5
+}
+
+func (s *GinServer) resetLoginFailures() {
+	s.loginFailures = 0
 }
 
 func (s *GinServer) getSession(c *gin.Context) (id string, ok bool) {
@@ -124,28 +137,53 @@ func (s *GinServer) handleAuthLogin(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	// Simple rate limit: if many failures recently, return 429 with small backoff
-	if s.loginFailures >= 5 {
-		c.Header("Retry-After", "5")
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too Many Requests"})
+	username := strings.TrimSpace(body.Username)
+	if username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "username required"})
 		return
 	}
 	// Single local admin account; verify password only
-	ok, err := s.authManager.Verify(c.Request.Context(), "admin", body.Password)
+	ctx := c.Request.Context()
+	ok, err := s.authManager.Verify(ctx, username, body.Password)
 	if err != nil {
-		if errors.Is(err, persistence.ErrLocked) {
-			c.JSON(http.StatusLocked, gin.H{"error": "storage locked; unlock Piccolo to continue"})
+		if errors.Is(err, persistence.ErrLocked) && s.cryptoManager != nil {
+			if unlockErr := s.cryptoManager.Unlock(body.Password); unlockErr != nil {
+				if errors.Is(unlockErr, crypt.ErrNotInitialized) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "not initialized"})
+					return
+				}
+				if s.recordLoginFailure() {
+					c.Header("Retry-After", "5")
+					c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too Many Requests"})
+				} else {
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+				}
+				return
+			}
+			if notifyErr := s.notifyPersistenceLockState(ctx, false); notifyErr != nil {
+				log.Printf("WARN: auth login persistence unlock failed: %v", notifyErr)
+			}
+			ok, err = s.authManager.Verify(ctx, username, body.Password)
+		}
+		if err != nil {
+			if errors.Is(err, persistence.ErrLocked) {
+				c.JSON(http.StatusLocked, gin.H{"error": "storage locked; unlock Piccolo to continue"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify credentials"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify credentials"})
-		return
 	}
 	if !ok {
-		s.loginFailures++
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		if s.recordLoginFailure() {
+			c.Header("Retry-After", "5")
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too Many Requests"})
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		}
 		return
 	}
-	s.loginFailures = 0
+	s.resetLoginFailures()
 	sess := s.sessions.Create("admin", 3600) // 1h default
 	s.setSessionCookie(c, sess.ID, time.Hour)
 	c.JSON(http.StatusOK, gin.H{"message": "ok"})

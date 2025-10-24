@@ -66,5 +66,14 @@ test.describe('Crypto recovery + rewrap (real API)', () => {
       const tryUnlock = await page.request.post('/api/v1/crypto/unlock', { headers: { 'X-CSRF-Token': csrf }, data: { password: currentPass } });
       expect(tryUnlock.ok()).toBeTruthy();
     }
+
+    // Restore default admin password to keep subsequent tests deterministic.
+    if (newPass !== adminPassA) {
+      const resetCsrf = await page.request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string);
+      await page.request.post('/api/v1/auth/password', {
+        headers: { 'X-CSRF-Token': resetCsrf },
+        data: { old_password: newPass, new_password: adminPassA },
+      }).catch(() => {});
+    }
   });
 });

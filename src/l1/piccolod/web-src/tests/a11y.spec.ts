@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
       const text = msg.text();
-      if (/Failed to load resource: .* (404|401|403)/.test(text)) return;
+      if (/Failed to load resource: .* (404|401|403|423)/.test(text)) return;
       throw new Error(`Console error: ${text}`);
     }
   });

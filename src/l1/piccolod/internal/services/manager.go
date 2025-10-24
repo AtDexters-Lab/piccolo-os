@@ -19,20 +19,27 @@ import (
 
 // ServiceManager coordinates listener allocation, registry, and proxy startup
 type ServiceManager struct {
-	allocator    *PortAllocator
-	registry     map[string]map[string]ServiceEndpoint // app -> name -> endpoint
-	proxyManager *ProxyManager
-	mu           sync.RWMutex
-	stopCh       chan struct{}
-	wg           sync.WaitGroup
-	containerIDs map[string]string // app -> containerID (optional)
-	eventsMu     sync.Mutex
-	eventCancel  context.CancelFunc
-	statusMu     sync.RWMutex
-	leadership   map[string]cluster.Role
-	locked       bool
-	unpublisher  PortUnpublisher
-	publisher    PortPublisher
+	allocator      *PortAllocator
+	registry       map[string]map[string]ServiceEndpoint // app -> name -> endpoint
+	proxyManager   *ProxyManager
+	mu             sync.RWMutex
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
+	containerIDs   map[string]string // app -> containerID (optional)
+	eventsMu       sync.Mutex
+	eventCancel    context.CancelFunc
+	statusMu       sync.RWMutex
+	leadership     map[string]cluster.Role
+	unpublisher    PortUnpublisher
+	publisher      PortPublisher
+	lockReader     LockStateReader
+	lockOverrideMu sync.RWMutex
+	lockOverride   *bool
+}
+
+// LockStateReader exposes the control lock state for services.
+type LockStateReader interface {
+	ControlLocked() bool
 }
 
 func NewServiceManager() *ServiceManager {
@@ -150,13 +157,10 @@ func (m *ServiceManager) ObserveRuntimeEvents(bus *events.Bus) {
 					log.Printf("WARN: service-manager received unexpected lock payload: %#v", evt.Payload)
 					continue
 				}
-				m.statusMu.Lock()
-				m.locked = payload.Locked
 				state := "unlocked"
 				if payload.Locked {
 					state = "locked"
 				}
-				m.statusMu.Unlock()
 				log.Printf("INFO: service-manager observed control lock state=%s", state)
 			case <-ctx.Done():
 				return
@@ -209,11 +213,42 @@ func (m *ServiceManager) LastObservedRole(resource string) cluster.Role {
 	return cluster.RoleUnknown
 }
 
-// Locked reports the last observed lock state propagated from persistence.
+// Locked reports the current control lock state.
 func (m *ServiceManager) Locked() bool {
-	m.statusMu.RLock()
-	defer m.statusMu.RUnlock()
-	return m.locked
+	m.lockOverrideMu.RLock()
+	if m.lockOverride != nil {
+		locked := *m.lockOverride
+		m.lockOverrideMu.RUnlock()
+		return locked
+	}
+	reader := m.lockReader
+	m.lockOverrideMu.RUnlock()
+	if reader != nil {
+		return reader.ControlLocked()
+	}
+	return false
+}
+
+// SetLockReader wires a shared lock reader for authoritative lock checks.
+func (m *ServiceManager) SetLockReader(reader LockStateReader) {
+	m.lockOverrideMu.Lock()
+	m.lockReader = reader
+	m.lockOverrideMu.Unlock()
+}
+
+// ForceLockState allows tests to override the observed lock state.
+func (m *ServiceManager) ForceLockState(lock bool) {
+	m.lockOverrideMu.Lock()
+	val := lock
+	m.lockOverride = &val
+	m.lockOverrideMu.Unlock()
+}
+
+// ClearLockOverride clears any forced lock state override.
+func (m *ServiceManager) ClearLockOverride() {
+	m.lockOverrideMu.Lock()
+	m.lockOverride = nil
+	m.lockOverrideMu.Unlock()
 }
 
 // RestoreFromPodman rebuilds proxies for an app using existing host-bind ports.
@@ -306,6 +341,13 @@ func (m *ServiceManager) AllocateForApp(appName string, listeners []api.AppListe
 	}
 
 	return endpoints, nil
+}
+
+// ReserveHostPort permanently reserves a host-bind port to avoid future allocation.
+func (m *ServiceManager) ReserveHostPort(port int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.allocator.ReserveHost(port)
 }
 
 // GetAll returns all service endpoints across all apps

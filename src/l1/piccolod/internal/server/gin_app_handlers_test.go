@@ -704,7 +704,7 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 
 	// Create filesystem app manager with service manager
 	svcMgr := services.NewServiceManager()
-	appMgr, err := app.NewAppManagerWithServices(mockContainer, tempDir, svcMgr)
+    appMgr, err := app.NewAppManagerWithServices(mockContainer, tempDir, svcMgr, nil)
 	if err != nil {
 		t.Fatalf("Failed to create app manager: %v", err)
 	}

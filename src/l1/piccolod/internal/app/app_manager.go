@@ -29,9 +29,11 @@ type AppManager struct {
 	eventCancel      context.CancelFunc
 	eventsWG         sync.WaitGroup
 	stateMu          sync.RWMutex
-	locked           bool
 	leadershipMu     sync.RWMutex
 	leadershipState  map[string]cluster.Role
+	lockReader       LockStateReader
+	lockOverrideMu   sync.RWMutex
+	lockOverride     *bool
 }
 
 var (
@@ -39,8 +41,15 @@ var (
 	ErrNotLeader = errors.New("app manager: not leader")
 )
 
+// LockStateReader exposes the control lock state.
+type LockStateReader interface {
+	ControlLocked() bool
+}
+
+const maxInstallPortRetries = 5
+
 // NewAppManagerWithServices creates a new filesystem-based app manager with an injected ServiceManager
-func NewAppManagerWithServices(containerManager ContainerManager, stateDir string, serviceManager *services.ServiceManager) (*AppManager, error) {
+func NewAppManagerWithServices(containerManager ContainerManager, stateDir string, serviceManager *services.ServiceManager, lockReader LockStateReader) (*AppManager, error) {
 	stateManager, err := NewFilesystemStateManager(stateDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create state manager: %w", err)
@@ -50,8 +59,8 @@ func NewAppManagerWithServices(containerManager ContainerManager, stateDir strin
 		containerManager: containerManager,
 		stateManager:     stateManager,
 		serviceManager:   serviceManager,
-		locked:           true,
 		leadershipState:  make(map[string]cluster.Role),
+		lockReader:       lockReader,
 	}, nil
 }
 
@@ -121,7 +130,6 @@ func (m *AppManager) ObserveRuntimeEvents(bus *events.Bus) {
 					log.Printf("WARN: app-manager received unexpected lock payload: %#v", evt.Payload)
 					continue
 				}
-				m.setLocked(payload.Locked)
 				state := "unlocked"
 				if payload.Locked {
 					state = "locked"
@@ -148,18 +156,6 @@ func (m *AppManager) StopRuntimeEvents() {
 	m.eventsWG.Wait()
 }
 
-func (m *AppManager) setLocked(val bool) {
-	m.stateMu.Lock()
-	m.locked = val
-	m.stateMu.Unlock()
-}
-
-func (m *AppManager) isLocked() bool {
-	m.stateMu.RLock()
-	defer m.stateMu.RUnlock()
-	return m.locked
-}
-
 // LastObservedRole returns the most recently observed leadership role for the provided resource.
 func (m *AppManager) LastObservedRole(resource string) cluster.Role {
 	m.leadershipMu.RLock()
@@ -171,7 +167,7 @@ func (m *AppManager) LastObservedRole(resource string) cluster.Role {
 }
 
 func (m *AppManager) ensureUnlocked() error {
-	if m.isLocked() {
+	if m.currentLockState() {
 		return ErrLocked
 	}
 	return nil
@@ -220,17 +216,50 @@ func (m *AppManager) enterFollower(ctx context.Context) {
 
 // Locked reports the last observed lock state.
 func (m *AppManager) Locked() bool {
-	return m.isLocked()
+	return m.currentLockState()
 }
 
 // ForceLockState allows tests or orchestration code to override the lock flag directly.
 func (m *AppManager) ForceLockState(lock bool) {
-	m.setLocked(lock)
+	m.lockOverrideMu.Lock()
+	defer m.lockOverrideMu.Unlock()
+	val := lock
+	m.lockOverride = &val
+}
+
+// ClearLockOverride removes any explicit override and resumes using the shared reader.
+func (m *AppManager) ClearLockOverride() {
+	m.lockOverrideMu.Lock()
+	defer m.lockOverrideMu.Unlock()
+	m.lockOverride = nil
+}
+
+// SetLockReader wires a shared lock reader for authoritative lock checks.
+func (m *AppManager) SetLockReader(reader LockStateReader) {
+	m.lockOverrideMu.Lock()
+	m.lockReader = reader
+	m.lockOverrideMu.Unlock()
+}
+
+func (m *AppManager) currentLockState() bool {
+	m.lockOverrideMu.RLock()
+	if m.lockOverride != nil {
+		locked := *m.lockOverride
+		m.lockOverrideMu.RUnlock()
+		return locked
+	}
+	reader := m.lockReader
+	m.lockOverrideMu.RUnlock()
+	if reader != nil {
+		return reader.ControlLocked()
+	}
+	return false
 }
 
 // NewAppManager creates a new filesystem-based app manager with default ServiceManager
 func NewAppManager(containerManager ContainerManager, stateDir string) (*AppManager, error) {
-	return NewAppManagerWithServices(containerManager, stateDir, services.NewServiceManager())
+	svc := services.NewServiceManager()
+	return NewAppManagerWithServices(containerManager, stateDir, svc, nil)
 }
 
 // RestoreServices rebuilds service proxies for running apps based on current container port bindings.
@@ -281,11 +310,25 @@ func (m *AppManager) Install(ctx context.Context, appDef *api.AppDefinition) (*A
 		return nil, fmt.Errorf("app already exists: %s", appDef.Name)
 	}
 
+	return m.installWithRetries(ctx, appDef, 0)
+}
+
+func (m *AppManager) installWithRetries(ctx context.Context, appDef *api.AppDefinition, attempt int) (*AppInstance, error) {
+	if attempt >= maxInstallPortRetries {
+		return nil, fmt.Errorf("failed to install %s: exhausted host-port retries", appDef.Name)
+	}
+
 	// Allocate services and convert to container spec
 	endpoints, err := m.serviceManager.AllocateForApp(appDef.Name, appDef.Listeners)
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate service ports: %w", err)
 	}
+	cleanupServices := true
+	defer func() {
+		if cleanupServices {
+			m.serviceManager.RemoveApp(appDef.Name)
+		}
+	}()
 
 	containerSpec, err := m.appDefToContainerSpec(appDef, endpoints)
 	if err != nil {
@@ -295,6 +338,20 @@ func (m *AppManager) Install(ctx context.Context, appDef *api.AppDefinition) (*A
 	// Create container
 	containerID, err := m.containerManager.CreateContainer(ctx, containerSpec)
 	if err != nil {
+		var portErr *container.PortInUseError
+		if errors.As(err, &portErr) {
+			cleanupServices = false
+			m.serviceManager.RemoveApp(appDef.Name)
+			log.Printf("WARN: retrying install for %s due to host port conflict port=%d attempt=%d", appDef.Name, portErr.Port, attempt)
+			if portErr.Port > 0 {
+				_ = m.serviceManager.ReserveHostPort(portErr.Port)
+			} else {
+				for _, ep := range endpoints {
+					_ = m.serviceManager.ReserveHostPort(ep.HostBind)
+				}
+			}
+			return m.installWithRetries(ctx, appDef, attempt+1)
+		}
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
 	// Record container ID for watcher reconciliation
@@ -319,8 +376,12 @@ func (m *AppManager) Install(ctx context.Context, appDef *api.AppDefinition) (*A
 	if err := m.stateManager.StoreApp(app, appDef); err != nil {
 		// Cleanup container if storage fails
 		_ = m.containerManager.RemoveContainer(ctx, containerID)
+		m.serviceManager.RemoveApp(appDef.Name)
+		cleanupServices = false
 		return nil, fmt.Errorf("failed to store app: %w", err)
 	}
+
+	cleanupServices = false
 
 	return app, nil
 }

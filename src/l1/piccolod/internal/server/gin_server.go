@@ -267,7 +267,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// TLS mux (loopback, remote-only) — created now, started when remote is configured
 	tlsMux := services.NewTlsMux(svcMgr)
 	// Wire ACME HTTP-01 handler into HTTP proxies (set after remote manager init)
-	appMgr, err := app.NewAppManagerWithServices(podmanCLI, "", svcMgr)
+	appMgr, err := app.NewAppManagerWithServices(podmanCLI, "", svcMgr, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init app manager: %w", err)
 	}
@@ -286,6 +286,9 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to init persistence module: %w", err)
 	}
+
+	appMgr.SetLockReader(persist)
+	svcMgr.SetLockReader(persist)
 
 	// Set Gin to release mode for production (can be overridden by GIN_MODE env var)
 	gin.SetMode(gin.ReleaseMode)

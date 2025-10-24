@@ -49,6 +49,8 @@ type Module struct {
 	commitMu           sync.Mutex
 	lastCommitRevision uint64
 	pollCancel         context.CancelFunc
+	lockStateMu        sync.RWMutex
+	lockState          bool
 }
 
 // Ensure Module satisfies the Service interface.
@@ -76,6 +78,7 @@ func NewService(opts Options) (*Module, error) {
 		leadership: opts.Leadership,
 		crypto:     opts.Crypto,
 		stateDir:   stateDir,
+		lockState:  true,
 	}
 
 	if mod.events == nil {
@@ -223,17 +226,29 @@ func (m *Module) setLockState(ctx context.Context, locked bool) error {
 	store, ok := m.control.(lockableControlStore)
 	if !ok {
 		if locked {
+			m.lockStateMu.Lock()
+			m.lockState = true
+			m.lockStateMu.Unlock()
 			return nil
 		}
 		return ErrNotImplemented
 	}
 	if locked {
 		store.Lock()
-		return m.detachVolumeIfMounted(ctx, m.controlHandle)
+		if err := m.detachVolumeIfMounted(ctx, m.controlHandle); err != nil {
+			return err
+		}
+		m.lockStateMu.Lock()
+		m.lockState = true
+		m.lockStateMu.Unlock()
+		return nil
 	}
 	if err := store.Unlock(ctx); err != nil {
 		return err
 	}
+	m.lockStateMu.Lock()
+	m.lockState = false
+	m.lockStateMu.Unlock()
 	return nil
 }
 
@@ -327,6 +342,13 @@ func (m *Module) publishLockState(locked bool) {
 			Locked: locked,
 		},
 	})
+}
+
+// ControlLocked reports whether the control store is currently locked.
+func (m *Module) ControlLocked() bool {
+	m.lockStateMu.RLock()
+	defer m.lockStateMu.RUnlock()
+	return m.lockState
 }
 
 type revisionReporter interface {

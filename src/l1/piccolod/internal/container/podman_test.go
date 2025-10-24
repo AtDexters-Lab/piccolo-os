@@ -242,6 +242,24 @@ func TestValidateContainerSpec(t *testing.T) {
 	}
 }
 
+func TestBuildRunArgsIncludesReplaceForNamedContainers(t *testing.T) {
+	spec := ContainerCreateSpec{
+		Name:  "nginxdemo",
+		Image: "docker.io/library/nginx:alpine",
+	}
+	args := buildRunArgs(spec)
+	foundReplace := false
+	for _, arg := range args {
+		if arg == "--replace" {
+			foundReplace = true
+			break
+		}
+	}
+	if !foundReplace {
+		t.Fatalf("expected --replace flag in args, got %v", args)
+	}
+}
+
 // TestPodmanCLI_CreateContainer tests container creation (requires Podman)
 func TestPodmanCLI_CreateContainer(t *testing.T) {
 	// Skip if running in CI without Podman

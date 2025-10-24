@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,23 @@ import (
 	"piccolod/internal/events"
 	"piccolod/internal/router"
 )
+
+type stubLockReader struct {
+	mu     sync.RWMutex
+	locked bool
+}
+
+func (s *stubLockReader) ControlLocked() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.locked
+}
+
+func (s *stubLockReader) set(locked bool) {
+	s.mu.Lock()
+	s.locked = locked
+	s.mu.Unlock()
+}
 
 // TestAppManager_Install tests app installation with filesystem persistence
 func TestAppManager_Install(t *testing.T) {
@@ -291,26 +309,25 @@ func TestAppManagerLeadershipTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	reader := &stubLockReader{}
+	manager.SetLockReader(reader)
+	reader.set(true)
+	if !manager.Locked() {
+		t.Fatalf("expected manager to report locked when reader reports locked")
+	}
+
+	reader.set(false)
+	if manager.Locked() {
+		t.Fatalf("expected manager to report unlocked when reader reports unlocked")
+	}
+
 	bus := events.NewBus()
 	manager.ObserveRuntimeEvents(bus)
 	defer manager.StopRuntimeEvents()
 
-	// Unlock event should flip the locked flag
-	bus.Publish(events.Event{Topic: events.TopicLockStateChanged, Payload: events.LockStateChanged{Locked: false}})
-	deadline := time.Now().Add(100 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if !manager.Locked() {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if manager.Locked() {
-		t.Fatalf("expected manager to report unlocked after event")
-	}
-
 	// Leadership event should be recorded
 	bus.Publish(events.Event{Topic: events.TopicLeadershipRoleChanged, Payload: events.LeadershipChanged{Resource: "control", Role: cluster.RoleLeader}})
-	deadline = time.Now().Add(100 * time.Millisecond)
+	deadline := time.Now().Add(100 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if manager.LastObservedRole("control") == cluster.RoleLeader {
 			break
@@ -319,19 +336,6 @@ func TestAppManagerLeadershipTracking(t *testing.T) {
 	}
 	if manager.LastObservedRole("control") != cluster.RoleLeader {
 		t.Fatalf("expected control role=leader, got %s", manager.LastObservedRole("control"))
-	}
-
-	// Relock event should set locked to true
-	bus.Publish(events.Event{Topic: events.TopicLockStateChanged, Payload: events.LockStateChanged{Locked: true}})
-	deadline = time.Now().Add(100 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if manager.Locked() {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if !manager.Locked() {
-		t.Fatalf("expected manager to report locked after event")
 	}
 }
 
@@ -708,7 +712,7 @@ func TestAppManager_BlockedWhenLocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAppManager: %v", err)
 	}
-	mgr.setLocked(true)
+	mgr.ForceLockState(true)
 	ctx := context.Background()
 	_, err = mgr.Install(ctx, &api.AppDefinition{
 		Name: "locked-app", Image: "nginx:latest", Type: "user",

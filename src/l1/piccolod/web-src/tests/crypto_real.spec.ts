@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { ADMIN_PASSWORD, ensureSignedIn } from './support/session';
 
-test.describe('Crypto setup and unlock (real API)', () => {
+test.describe.serial('Crypto setup and unlock (real API)', () => {
   test('setup -> locked gates app install -> unlock allows reaching handler', async ({ page }) => {
     const adminPass = ADMIN_PASSWORD;
     await ensureSignedIn(page, adminPass);

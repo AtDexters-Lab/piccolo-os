@@ -1,12 +1,30 @@
 package services
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"piccolod/internal/cluster"
 	"piccolod/internal/events"
 )
+
+type stubServiceLockReader struct {
+	mu     sync.RWMutex
+	locked bool
+}
+
+func (s *stubServiceLockReader) ControlLocked() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.locked
+}
+
+func (s *stubServiceLockReader) set(locked bool) {
+	s.mu.Lock()
+	s.locked = locked
+	s.mu.Unlock()
+}
 
 func TestServiceManagerLeadershipTracking(t *testing.T) {
 	mgr := NewServiceManager()
@@ -28,18 +46,15 @@ func TestServiceManagerLeadershipTracking(t *testing.T) {
 
 func TestServiceManagerLockTracking(t *testing.T) {
 	mgr := NewServiceManager()
-	bus := events.NewBus()
-	mgr.ObserveRuntimeEvents(bus)
-	defer mgr.StopRuntimeEvents()
-
-	bus.Publish(events.Event{Topic: events.TopicLockStateChanged, Payload: events.LockStateChanged{Locked: true}})
-
-	deadline := time.Now().Add(100 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if mgr.Locked() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	reader := &stubServiceLockReader{}
+	mgr.SetLockReader(reader)
+	reader.set(true)
+	if !mgr.Locked() {
+		t.Fatalf("expected Locked() to reflect reader locked state")
 	}
-	t.Fatalf("expected Locked() to report true")
+
+	reader.set(false)
+	if mgr.Locked() {
+		t.Fatalf("expected Locked() to reflect reader unlocked state")
+	}
 }
