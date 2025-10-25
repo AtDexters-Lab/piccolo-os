@@ -6,12 +6,13 @@ import (
 )
 
 var (
-	ErrNotImplemented    = errors.New("persistence: not implemented")
-	ErrInvalidCommand    = errors.New("persistence: invalid command payload")
-	ErrLocked            = errors.New("persistence: locked")
-	ErrNotLeader         = errors.New("persistence: not leader")
-	ErrCryptoUnavailable = errors.New("persistence: crypto unavailable")
-	ErrNotFound          = errors.New("persistence: not found")
+	ErrNotImplemented          = errors.New("persistence: not implemented")
+	ErrInvalidCommand          = errors.New("persistence: invalid command payload")
+	ErrLocked                  = errors.New("persistence: locked")
+	ErrNotLeader               = errors.New("persistence: not leader")
+	ErrCryptoUnavailable       = errors.New("persistence: crypto unavailable")
+	ErrNotFound                = errors.New("persistence: not found")
+	ErrVolumeMetadataCorrupted = errors.New("persistence: volume metadata corrupted")
 )
 
 // Bootstrap -----------------------------------------------------------------

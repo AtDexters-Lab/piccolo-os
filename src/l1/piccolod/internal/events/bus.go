@@ -17,12 +17,23 @@ const (
 	TopicControlHealth         Topic = "control_health"
 	TopicControlStoreCommit    Topic = "control_store_commit"
 	TopicRemoteConfigChanged   Topic = "remote_config_changed"
+	TopicVolumeStateChanged    Topic = "volume_state_changed"
 )
 
 // Event represents a message broadcast on the event bus.
 type Event struct {
 	Topic   Topic
 	Payload any
+}
+
+type VolumeStateChanged struct {
+	ID          string
+	Desired     string
+	Observed    string
+	Role        string
+	Generation  int
+	NeedsRepair bool
+	LastError   string
 }
 
 // LeadershipChanged describes a leadership role update for a resource.

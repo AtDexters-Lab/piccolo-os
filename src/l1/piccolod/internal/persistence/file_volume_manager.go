@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"piccolod/internal/crypt"
+	"piccolod/internal/events"
 	"piccolod/internal/state/paths"
 )
 
@@ -132,6 +133,9 @@ type fileVolumeManager struct {
 	volumes        map[string]*volumeEntry
 	launcher       mountLauncher
 	waitMount      mountWaiter
+	stateRoot      string
+	bus            *events.Bus
+	roleChecker    func(string, VolumeRole) bool
 	mu             sync.RWMutex
 }
 
@@ -150,9 +154,24 @@ type volumeMetadata struct {
 	Nonce      string `json:"nonce"`
 }
 
+type volumeState struct {
+	Desired     string    `json:"desired_state"`
+	Observed    string    `json:"observed_state"`
+	Role        string    `json:"role"`
+	LastError   string    `json:"last_error,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Generation  int       `json:"generation"`
+	NeedsRepair bool      `json:"needs_repair"`
+	Description string    `json:"description,omitempty"`
+}
+
 const (
-	volumeMetadataName = "piccolo.volume.json"
-	metadataVersion    = 1
+	volumeMetadataName   = "piccolo.volume.json"
+	metadataVersion      = 1
+	volumeStateMounted   = "mounted"
+	volumeStateUnmounted = "unmounted"
+	volumeStatePending   = "pending"
+	volumeStateError     = "error"
 )
 
 var mountPointReplacer = strings.NewReplacer(
@@ -162,7 +181,7 @@ var mountPointReplacer = strings.NewReplacer(
 	`\134`, `\`,
 )
 
-func newFileVolumeManager(root string, crypto *crypt.Manager) *fileVolumeManager {
+func newFileVolumeManager(root string, crypto *crypt.Manager, bus *events.Bus) *fileVolumeManager {
 	if root == "" {
 		root = paths.Root()
 	}
@@ -175,12 +194,15 @@ func newFileVolumeManager(root string, crypto *crypt.Manager) *fileVolumeManager
 		volumes:        make(map[string]*volumeEntry),
 		launcher:       execMountLauncher{},
 		waitMount:      waitForMountReady,
+		stateRoot:      filepath.Join(root, "volumes"),
+		bus:            bus,
+		roleChecker:    func(string, VolumeRole) bool { return true },
 	}
 }
 
 // Helper for tests.
 func newFileVolumeManagerWithDeps(root string, crypto *crypt.Manager, runner commandRunner, gocryptfsPath, fusermountPath string, launcher mountLauncher, waiter mountWaiter) *fileVolumeManager {
-	mgr := newFileVolumeManager(root, crypto)
+	mgr := newFileVolumeManager(root, crypto, nil)
 	if runner != nil {
 		mgr.runner = runner
 	}
@@ -197,6 +219,16 @@ func newFileVolumeManagerWithDeps(root string, crypto *crypt.Manager, runner com
 		mgr.waitMount = waiter
 	}
 	return mgr
+}
+
+func (f *fileVolumeManager) setRoleChecker(fn func(string, VolumeRole) bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if fn == nil {
+		f.roleChecker = func(string, VolumeRole) bool { return true }
+		return
+	}
+	f.roleChecker = fn
 }
 
 func defaultGocryptfsBinary() string {
@@ -219,11 +251,31 @@ func defaultFusermountBinary() string {
 	return "fusermount3"
 }
 
-func (f *fileVolumeManager) EnsureVolume(ctx context.Context, req VolumeRequest) (VolumeHandle, error) {
+func (f *fileVolumeManager) getOrCreateEntry(id string) *volumeEntry {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if entry, ok := f.volumes[id]; ok {
+		return entry
+	}
+	entry := &volumeEntry{
+		handle: VolumeHandle{
+			ID:       id,
+			MountDir: filepath.Join(f.root, "mounts", id),
+		},
+		cipherDir: filepath.Join(f.root, "ciphertext", id),
+	}
+	f.volumes[id] = entry
+	return entry
+}
 
-	if entry, ok := f.volumes[req.ID]; ok {
+func (f *fileVolumeManager) EnsureVolume(ctx context.Context, req VolumeRequest) (VolumeHandle, error) {
+	f.mu.RLock()
+	entry, ok := f.volumes[req.ID]
+	f.mu.RUnlock()
+	if ok {
+		if err := f.reconcileVolumeState(ctx, entry); err != nil {
+			return entry.handle, err
+		}
 		return entry.handle, nil
 	}
 
@@ -236,24 +288,36 @@ func (f *fileVolumeManager) EnsureVolume(ctx context.Context, req VolumeRequest)
 		return VolumeHandle{}, fmt.Errorf("ensure volume %s mount: %w", req.ID, err)
 	}
 
-	handle := VolumeHandle{ID: req.ID, MountDir: mountDir}
-	entry := &volumeEntry{handle: handle, cipherDir: cipherDir}
+	entry = &volumeEntry{
+		handle:    VolumeHandle{ID: req.ID, MountDir: mountDir},
+		cipherDir: cipherDir,
+	}
 	if err := f.ensureMetadata(ctx, entry); err != nil {
 		if !errors.Is(err, crypt.ErrLocked) && !errors.Is(err, crypt.ErrNotInitialized) {
 			return VolumeHandle{}, err
 		}
 	}
 
+	f.mu.Lock()
 	f.volumes[req.ID] = entry
-	return handle, nil
+	f.mu.Unlock()
+
+	if err := f.reconcileVolumeState(ctx, entry); err != nil {
+		return entry.handle, err
+	}
+	return entry.handle, nil
 }
 
 func (f *fileVolumeManager) Attach(ctx context.Context, handle VolumeHandle, opts AttachOptions) error {
 	f.mu.RLock()
 	entry, ok := f.volumes[handle.ID]
+	checker := f.roleChecker
 	f.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("attach: unknown volume %s", handle.ID)
+	}
+	if opts.Role == VolumeRoleLeader && checker != nil && !checker(handle.ID, opts.Role) {
+		return fmt.Errorf("attach: leadership not granted for volume %s", handle.ID)
 	}
 
 	if err := f.ensureMetadata(ctx, entry); err != nil {
@@ -265,6 +329,10 @@ func (f *fileVolumeManager) Attach(ctx context.Context, handle VolumeHandle, opt
 		return err
 	}
 
+	if err := f.recordVolumeState(handle.ID, volumeStateMounted, volumeStatePending, opts.Role, nil); err != nil {
+		return err
+	}
+
 	args := []string{"-f", "-q", "-passfile", "/dev/stdin"}
 	if opts.Role == VolumeRoleFollower {
 		args = append(args, "-ro")
@@ -273,6 +341,7 @@ func (f *fileVolumeManager) Attach(ctx context.Context, handle VolumeHandle, opt
 
 	proc, err := f.launcher.Launch(ctx, f.gocryptfsPath, args, append(passphrase, '\n'))
 	if err != nil {
+		_ = f.recordVolumeState(handle.ID, volumeStateMounted, volumeStateError, opts.Role, err)
 		return fmt.Errorf("mount volume %s: %w", handle.ID, err)
 	}
 	if err := f.waitMount(entry.handle.MountDir, 5*time.Second); err != nil {
@@ -283,6 +352,7 @@ func (f *fileVolumeManager) Attach(ctx context.Context, handle VolumeHandle, opt
 			_ = proc.Kill()
 			<-proc.Wait()
 		}
+		_ = f.recordVolumeState(handle.ID, volumeStateMounted, volumeStateError, opts.Role, err)
 		return fmt.Errorf("wait for mount %s: %w", handle.ID, err)
 	}
 
@@ -302,15 +372,31 @@ func (f *fileVolumeManager) Attach(ctx context.Context, handle VolumeHandle, opt
 	entry.metadataReady = true
 	entry.process = proc
 	f.mu.Unlock()
+	if err := f.recordVolumeState(handle.ID, volumeStateMounted, volumeStateMounted, opts.Role, nil); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (f *fileVolumeManager) Detach(ctx context.Context, handle VolumeHandle) error {
+	role := VolumeRoleUnknown
+	f.mu.RLock()
+	if entry, ok := f.volumes[handle.ID]; ok {
+		role = entry.role
+	}
+	f.mu.RUnlock()
+	if err := f.recordVolumeState(handle.ID, volumeStateUnmounted, volumeStatePending, role, nil); err != nil {
+		return err
+	}
 	args := []string{"-u", handle.MountDir}
 	if err := f.runner.Run(ctx, f.fusermountPath, args, nil); err != nil {
+		_ = f.recordVolumeState(handle.ID, volumeStateUnmounted, volumeStateError, role, err)
 		return fmt.Errorf("detach volume %s: %w", handle.ID, err)
 	}
 	f.awaitProcessExit(handle.ID)
+	if err := f.recordVolumeState(handle.ID, volumeStateUnmounted, volumeStateUnmounted, role, nil); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -321,19 +407,23 @@ func (f *fileVolumeManager) RoleStream(volumeID string) (<-chan VolumeRole, erro
 }
 
 func (f *fileVolumeManager) ensureMetadata(ctx context.Context, entry *volumeEntry) error {
-	if entry.metadataReady {
-		return nil
-	}
 	metaPath := filepath.Join(entry.cipherDir, volumeMetadataName)
 	if data, err := os.ReadFile(metaPath); err == nil {
 		var meta volumeMetadata
 		if err := json.Unmarshal(data, &meta); err != nil {
-			return err
+			return fmt.Errorf("%w: %v", ErrVolumeMetadataCorrupted, err)
+		}
+		if meta.WrappedKey == "" || meta.Nonce == "" {
+			return fmt.Errorf("%w: missing fields", ErrVolumeMetadataCorrupted)
 		}
 		entry.metadata = meta
 		entry.metadataReady = true
 		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read volume metadata %s: %w", metaPath, err)
 	}
+
+	entry.metadataReady = false
 
 	passphrase, err := generatePassphrase()
 	if err != nil {
@@ -360,6 +450,181 @@ func (f *fileVolumeManager) ensureMetadata(ctx context.Context, entry *volumeEnt
 	entry.metadata = meta
 	entry.metadataReady = true
 	return nil
+}
+
+func (f *fileVolumeManager) recordVolumeState(volumeID string, desired string, observed string, role VolumeRole, cause error) error {
+	if volumeID == "" {
+		return nil
+	}
+	prev, err := f.readVolumeState(volumeID)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	state := volumeState{
+		Desired:   desired,
+		Observed:  observed,
+		Role:      string(role),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if cause != nil {
+		state.LastError = cause.Error()
+	} else if prev.LastError != "" && observed != volumeStateError {
+		// Clear stale errors once we transition back to a stable state.
+		state.LastError = ""
+	}
+	state.Generation = prev.Generation + 1
+	state.NeedsRepair = prev.NeedsRepair
+	if observed == volumeStateError || cause != nil {
+		state.NeedsRepair = true
+	}
+	if (observed == volumeStateMounted || observed == volumeStateUnmounted) && cause == nil && observed == desired {
+		state.NeedsRepair = false
+	}
+	if err := f.writeVolumeState(volumeID, state); err != nil {
+		return err
+	}
+	f.publishVolumeEvent(volumeID, state)
+	return nil
+}
+
+func (f *fileVolumeManager) readVolumeState(volumeID string) (volumeState, error) {
+	path := filepath.Join(f.stateRoot, volumeID, "state.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return volumeState{}, err
+	}
+	var state volumeState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return volumeState{}, err
+	}
+	return state, nil
+}
+
+func (f *fileVolumeManager) publishVolumeEvent(volumeID string, state volumeState) {
+	if f.bus == nil {
+		return
+	}
+	f.bus.Publish(events.Event{
+		Topic: events.TopicVolumeStateChanged,
+		Payload: events.VolumeStateChanged{
+			ID:          volumeID,
+			Desired:     state.Desired,
+			Observed:    state.Observed,
+			Role:        state.Role,
+			Generation:  state.Generation,
+			NeedsRepair: state.NeedsRepair,
+			LastError:   state.LastError,
+		},
+	})
+}
+
+func (f *fileVolumeManager) reconcileVolumeState(ctx context.Context, entry *volumeEntry) error {
+	state, err := f.readVolumeState(entry.handle.ID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	mounted, err := isMountPoint(entry.handle.MountDir)
+	if err != nil {
+		return err
+	}
+	role := parseVolumeRole(state.Role)
+	if state.Desired == volumeStateMounted && !mounted {
+		checker := f.roleChecker
+		if state.Role == string(VolumeRoleLeader) && checker != nil && !checker(entry.handle.ID, VolumeRoleLeader) {
+			return nil
+		}
+		if role == VolumeRoleUnknown {
+			return f.recordVolumeState(entry.handle.ID, state.Desired, volumeStateError, role, fmt.Errorf("volume %s missing mount and role unknown", entry.handle.ID))
+		}
+		if err := f.Attach(ctx, entry.handle, AttachOptions{Role: role}); err != nil {
+			return err
+		}
+		return nil
+	}
+	if state.Desired == volumeStateUnmounted && mounted {
+		if err := f.Detach(ctx, entry.handle); err != nil {
+			return err
+		}
+		return nil
+	}
+	if state.NeedsRepair && state.Desired == volumeStateMounted && mounted {
+		return f.recordVolumeState(entry.handle.ID, state.Desired, volumeStateMounted, role, nil)
+	}
+	if state.NeedsRepair && state.Desired == volumeStateUnmounted && !mounted {
+		return f.recordVolumeState(entry.handle.ID, state.Desired, volumeStateUnmounted, role, nil)
+	}
+	return nil
+}
+
+func parseVolumeRole(role string) VolumeRole {
+	switch role {
+	case string(VolumeRoleLeader):
+		return VolumeRoleLeader
+	case string(VolumeRoleFollower):
+		return VolumeRoleFollower
+	default:
+		return VolumeRoleUnknown
+	}
+}
+
+func (f *fileVolumeManager) reconcileAllVolumeStates() error {
+	entries, err := os.ReadDir(f.stateRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		volID := entry.Name()
+		volEntry := f.getOrCreateEntry(volID)
+		if err := f.reconcileVolumeState(context.Background(), volEntry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *fileVolumeManager) writeVolumeState(volumeID string, state volumeState) error {
+	dir := filepath.Join(f.stateRoot, volumeID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "state-*.tmp")
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(tmp)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(&state); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	finalPath := filepath.Join(dir, "state.json")
+	if err := os.Rename(tmp.Name(), finalPath); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := syncDir(dir); err != nil {
+		return err
+	}
+	return syncDir(f.stateRoot)
 }
 
 func (f *fileVolumeManager) sealVolumeKey(ctx context.Context, passphrase []byte) (volumeMetadata, error) {
@@ -499,6 +764,15 @@ func generatePassphrase() ([]byte, error) {
 	}
 	encoded := base64.RawStdEncoding.EncodeToString(raw)
 	return []byte(encoded), nil
+}
+
+func syncDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 var _ VolumeManager = (*fileVolumeManager)(nil)

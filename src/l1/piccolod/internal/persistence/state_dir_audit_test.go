@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"piccolod/internal/cluster"
 	"piccolod/internal/crypt"
 	"piccolod/internal/state/paths"
 )
@@ -77,7 +78,10 @@ func TestPersistenceStateDirHasNoPlaintextArtifacts(t *testing.T) {
 	}
 
 	if err := mod.Volumes().Attach(ctx, controlHandle, AttachOptions{Role: VolumeRoleLeader}); err != nil {
-		t.Fatalf("attach control volume: %v", err)
+		mod.leadership.Set(cluster.ResourceKernel, cluster.RoleLeader)
+		if err := mod.Volumes().Attach(ctx, controlHandle, AttachOptions{Role: VolumeRoleLeader}); err != nil {
+			t.Fatalf("attach control volume: %v", err)
+		}
 	}
 
 	plaintextPath := filepath.Join(controlHandle.MountDir, "audit.txt")
@@ -112,7 +116,7 @@ func inspectStateDirForPlaintext(t *testing.T, root string) []string {
 		}
 
 		allowDir := func(rel string) bool {
-			if rel == "crypto" || rel == "ciphertext" || rel == "mounts" {
+			if rel == "crypto" || rel == "ciphertext" || rel == "mounts" || rel == "volumes" {
 				return true
 			}
 			if strings.HasPrefix(rel, "ciphertext"+string(filepath.Separator)) {
@@ -123,6 +127,19 @@ func inspectStateDirForPlaintext(t *testing.T, root string) []string {
 				return true
 			}
 			return false
+		}
+
+		if strings.HasPrefix(rel, "volumes"+string(filepath.Separator)) {
+			parts := strings.Split(rel, string(filepath.Separator))
+			if len(parts) == 2 && d.IsDir() {
+				// volumes/<id>
+				return nil
+			}
+			if len(parts) == 3 && parts[2] == "state.json" && !d.IsDir() {
+				return nil
+			}
+			unexpected = append(unexpected, rel)
+			return nil
 		}
 
 		if d.IsDir() {

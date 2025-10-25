@@ -11,11 +11,14 @@ The goal is to transition the persistence module from scaffolding into the produ
 - Centralize all state paths via `internal/state/paths` and fail builds/tests if new code embeds `/var/lib/piccolod` directly.
 - Keep VolumeManager/DeviceManager/ExportManager as stubs but ensure the module no longer panics when unlocked.
 
-## Phase 1 – Volume orchestration
+## Phase 1 – Volume orchestration (ship-ready)
 - Implement a minimal storage adapter that can create encrypted directories per volume (initially using gocryptfs-style wrapping with the in-process SDEK).
 - Teach VolumeManager to ensure/attach/detach volumes for the control plane and application namespaces.
 - Mount the bootstrap volume at `PICCOLO_STATE_DIR` before other modules attempt persistence writes.
-- Have persistence publish role updates per volume and verify service/app managers respond (stop followers, mount leaders RW).
+- Maintain a journal at `volumes/<id>/state.json` that records `desired_state`, `observed_state`, `role`, `generation`, `needs_repair`, and the last error. All writes are temp-file + fsync + rename so crash recovery reads a consistent snapshot.
+- Publish every journal transition on `events.TopicVolumeStateChanged` with the same payload so supervisors, the portal, and cluster coordination can react without scraping the filesystem.
+- On startup, sweep the journal and reconcile reality: auto-reattach/detach volumes to match intent, clear `needs_repair` once the desired state is observed, and flag failures so higher layers can block leadership promotion or user writes.
+- Have persistence publish role updates per volume and verify service/app managers respond (stop followers, mount leaders RW). Followers must default to read-only/detached until the leadership registry authorizes promotion.
 
 ## Phase 2 – Control-store repos & API surface
 - Flesh out repositories (`AuthRepo`, `RemoteRepo`, `AppStateRepo`, etc.) with schema-level validation and transactional guarantees.

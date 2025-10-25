@@ -109,7 +109,24 @@ func NewService(opts Options) (*Module, error) {
 		if mod.crypto == nil {
 			return nil, ErrCryptoUnavailable
 		}
-		mod.volumes = newFileVolumeManager(mod.stateDir, mod.crypto)
+		mod.volumes = newFileVolumeManager(mod.stateDir, mod.crypto, mod.events)
+	}
+	if fm, ok := mod.volumes.(*fileVolumeManager); ok {
+		if fm.bus == nil {
+			fm.bus = mod.events
+		}
+		fm.setRoleChecker(func(volumeID string, role VolumeRole) bool {
+			if role != VolumeRoleLeader {
+				return true
+			}
+			if volumeID == "control" {
+				if mod.leadership == nil {
+					return false
+				}
+				return mod.leadership.Current(cluster.ResourceKernel) == cluster.RoleLeader
+			}
+			return true
+		})
 	}
 	if mod.devices == nil {
 		mod.devices = newNoopDeviceManager()
@@ -145,6 +162,11 @@ func NewService(opts Options) (*Module, error) {
 func (m *Module) ensureCoreVolumes(ctx context.Context) error {
 	if m.volumes == nil {
 		return nil
+	}
+	if fm, ok := m.volumes.(*fileVolumeManager); ok {
+		if err := fm.reconcileAllVolumeStates(); err != nil {
+			return err
+		}
 	}
 	bootstrapReq := VolumeRequest{ID: "bootstrap", Class: VolumeClassBootstrap, ClusterMode: ClusterModeStateful}
 	if handle, err := m.volumes.EnsureVolume(ctx, bootstrapReq); err != nil {
@@ -324,6 +346,23 @@ func (m *Module) detachVolumeIfMounted(ctx context.Context, handle VolumeHandle)
 		return nil
 	}
 	marker := filepath.Join(handle.MountDir, ".cipher")
+	mounted, err := isMountPoint(handle.MountDir)
+	if err != nil {
+		return err
+	}
+	if !mounted {
+		// The mount disappeared (e.g., after an unclean shutdown) but our
+		// sentinel files remain. Best-effort cleanup so subsequent lock attempts
+		// do not mis-detect a mounted volume.
+		if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		modeMarker := filepath.Join(handle.MountDir, ".mode")
+		if err := os.Remove(modeMarker); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
 	if _, err := os.Stat(marker); err != nil {
 		if os.IsNotExist(err) {
 			return nil
