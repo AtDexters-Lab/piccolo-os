@@ -160,6 +160,18 @@ type Manager struct {
 	baseDir       string
 }
 
+func (m *Manager) certDir() string {
+	if m == nil {
+		return ""
+	}
+	return filepath.Join(m.baseDir, "remote", "certs")
+}
+
+// CertDirectory returns the directory where certificate material is stored.
+func (m *Manager) CertDirectory() string {
+	return m.certDir()
+}
+
 func NewManager(baseDir string) (*Manager, error) {
 	storage, err := newFileStorage(baseDir)
 	if err != nil {
@@ -824,7 +836,7 @@ func (m *Manager) enqueueIssuance(id string, domains []string, commonName string
 	fakeACME := os.Getenv("PICCOLO_REMOTE_FAKE_ACME") == "1"
 	// Fire and forget
 	go func(id string, domains []string, cn string) {
-		certDir := filepath.Join(m.baseDir, "remote", "certs")
+		certDir := m.certDir()
 		outName := outNameFor(id, cn)
 		if fakeACME {
 			expires, err := writeSelfSignedCertificate(certDir, outName, cn, domains)

@@ -390,7 +390,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// Now that remote manager exists, wire ACME challenge handler and cert provider
 	if rm != nil && svcMgr != nil {
 		svcMgr.ProxyManager().SetAcmeHandler(rm.HTTPChallengeHandler())
-		certProv := remote.NewFileCertProvider(filepath.Join(bootstrapDir, "remote", "certs"))
+		certProv := remote.NewFileCertProvider(rm.CertDirectory())
 		tlsMux.SetCertProvider(certProv)
 	}
 	var nexusAdapter nexusclient.Adapter
