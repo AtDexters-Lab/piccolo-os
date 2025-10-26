@@ -82,6 +82,10 @@ func TestRemotePortalHTTPRedirectsToHTTPS(t *testing.T) {
 		TLD:            "example.com",
 	})
 
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for !srv.remoteResolver.IsRemoteHostname(host) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if !srv.remoteResolver.IsRemoteHostname(host) {
 		t.Fatalf("resolver did not recognize remote host %q", host)
 	}

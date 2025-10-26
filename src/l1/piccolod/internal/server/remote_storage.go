@@ -4,27 +4,49 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"piccolod/internal/persistence"
 	"piccolod/internal/remote"
+	"piccolod/internal/state/paths"
 )
 
-type persistenceRemoteStorage struct {
+type bootstrapRemoteStorage struct {
 	repo persistence.RemoteRepo
+	path string
 }
 
-func newPersistenceRemoteStorage(repo persistence.RemoteRepo) remote.Storage {
-	if repo == nil {
-		return nil
+func newBootstrapRemoteStorage(repo persistence.RemoteRepo, baseDir string) remote.Storage {
+	if baseDir == "" {
+		baseDir = paths.Root()
 	}
-	return &persistenceRemoteStorage{repo: repo}
+	return &bootstrapRemoteStorage{
+		repo: repo,
+		path: filepath.Join(baseDir, "remote", "config.json"),
+	}
 }
 
-func (s *persistenceRemoteStorage) Load(ctx context.Context) (remote.Config, error) {
-	if s == nil || s.repo == nil {
-		return remote.Config{}, errors.New("remote storage: repo unavailable")
+func (s *bootstrapRemoteStorage) Load(ctx context.Context) (remote.Config, error) {
+	if s == nil {
+		return remote.Config{}, errors.New("remote storage: unavailable")
 	}
-	cfg, err := s.repo.CurrentConfig(ctx)
+	data, err := os.ReadFile(s.path)
+	if err == nil {
+		var cfg remote.Config
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return remote.Config{}, err
+		}
+		return cfg, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return remote.Config{}, err
+	}
+	if s.repo == nil {
+		return remote.Config{}, nil
+	}
+	repoCfg, err := s.repo.CurrentConfig(ctx)
 	if err != nil {
 		if errors.Is(err, persistence.ErrLocked) {
 			return remote.Config{}, remote.ErrLocked
@@ -34,29 +56,82 @@ func (s *persistenceRemoteStorage) Load(ctx context.Context) (remote.Config, err
 		}
 		return remote.Config{}, err
 	}
-	if len(cfg.Payload) == 0 {
+	if len(repoCfg.Payload) == 0 {
 		return remote.Config{}, nil
 	}
-	var out remote.Config
-	if err := json.Unmarshal(cfg.Payload, &out); err != nil {
+	var cfg remote.Config
+	if err := json.Unmarshal(repoCfg.Payload, &cfg); err != nil {
 		return remote.Config{}, err
 	}
-	return out, nil
+	return cfg, nil
 }
 
-func (s *persistenceRemoteStorage) Save(ctx context.Context, cfg remote.Config) error {
-	if s == nil || s.repo == nil {
-		return errors.New("remote storage: repo unavailable")
+func (s *bootstrapRemoteStorage) Save(ctx context.Context, cfg remote.Config) error {
+	if s == nil {
+		return errors.New("remote storage: unavailable")
 	}
-	payload, err := json.Marshal(&cfg)
+	if cfg.DNSCredentials == nil {
+		cfg.DNSCredentials = map[string]string{}
+	}
+	payload, err := json.MarshalIndent(&cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := s.repo.SaveConfig(ctx, persistence.RemoteConfig{Payload: payload}); err != nil {
-		if errors.Is(err, persistence.ErrLocked) {
-			return remote.ErrLocked
-		}
+	if err := writeAtomicJSON(s.path, payload, 0o600); err != nil {
 		return err
 	}
+	if s.repo != nil {
+		if err := s.repo.SaveConfig(ctx, persistence.RemoteConfig{Payload: payload}); err != nil {
+			if errors.Is(err, persistence.ErrLocked) {
+				return remote.ErrLocked
+			}
+			return err
+		}
+	}
 	return nil
+}
+
+func writeAtomicJSON(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("ensure dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "config-*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		os.Remove(name)
+		return err
+	}
+	return syncDir(dir)
+}
+
+func syncDir(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
 }

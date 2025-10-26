@@ -374,7 +374,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	if bootstrapDir == "" {
 		bootstrapDir = filepath.Join(stateDir, "bootstrap")
 	}
-	remoteStorage := newPersistenceRemoteStorage(persist.Control().Remote())
+	remoteStorage := newBootstrapRemoteStorage(persist.Control().Remote(), bootstrapDir)
 	var rm *remote.Manager
 	if remoteStorage != nil {
 		rm, err = remote.NewManagerWithStorage(remoteStorage, bootstrapDir)
