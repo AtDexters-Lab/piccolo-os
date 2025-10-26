@@ -18,6 +18,7 @@ The goal is to transition the persistence module from scaffolding into the produ
 - Maintain a journal at `volumes/<id>/state.json` that records `desired_state`, `observed_state`, `role`, `generation`, `needs_repair`, and the last error. All writes are temp-file + fsync + rename so crash recovery reads a consistent snapshot.
 - Publish every journal transition on `events.TopicVolumeStateChanged` with the same payload so supervisors, the portal, and cluster coordination can react without scraping the filesystem.
 - On startup, sweep the journal and reconcile reality: auto-reattach/detach volumes to match intent, clear `needs_repair` once the desired state is observed, and flag failures so higher layers can block leadership promotion or user writes.
+- Store pre-unlock runtime assets (remote Nexus config, ACME account cache, portal TLS material) on the bootstrap volume so remote access and HTTPS work before the control store unlocks; reseal with TPM keys when available.
 - Have persistence publish role updates per volume and verify service/app managers respond (stop followers, mount leaders RW). Followers must default to read-only/detached until the leadership registry authorizes promotion.
 
 ## Phase 2 – Control-store repos & API surface

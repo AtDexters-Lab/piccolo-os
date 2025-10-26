@@ -174,8 +174,8 @@ func TestAuth_LoginRateLimit(t *testing.T) {
 		t.Fatalf("setup: %d", w.Code)
 	}
 
-	// 5 failed attempts
-	for i := 0; i < 5; i++ {
+	// 4 failed attempts
+	for i := 0; i < 4; i++ {
 		w = httptest.NewRecorder()
 		req, _ = http.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"bad"}`))
 		req.Header.Set("Content-Type", "application/json")

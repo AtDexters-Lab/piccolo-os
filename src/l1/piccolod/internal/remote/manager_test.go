@@ -63,7 +63,7 @@ func TestRunPreflightSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := newManagerWithDeps(storage, dial, res, fixedNow(time.Unix(1, 0)))
+	m, err := newManagerWithDeps(storage, dir, dial, res, fixedNow(time.Unix(1, 0)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestManager_NexusAdapterLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("storage: %v", err)
 	}
-	m, err := newManagerWithDeps(storage, &stubDialer{}, &stubResolver{}, fixedNow(time.Unix(3, 0)))
+	m, err := newManagerWithDeps(storage, dir, &stubDialer{}, &stubResolver{}, fixedNow(time.Unix(3, 0)))
 	if err != nil {
 		t.Fatalf("manager: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestRunPreflightFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := newManagerWithDeps(storage, dial, res, fixedNow(time.Unix(2, 0)))
+	m, err := newManagerWithDeps(storage, dir, dial, res, fixedNow(time.Unix(2, 0)))
 	if err != nil {
 		t.Fatal(err)
 	}

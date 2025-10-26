@@ -157,33 +157,38 @@ type Manager struct {
 	renewCancel   context.CancelFunc
 	needsReload   atomic.Bool
 	eventsBus     *events.Bus
+	baseDir       string
 }
 
-func NewManager(stateDir string) (*Manager, error) {
-	storage, err := newFileStorage(stateDir)
+func NewManager(baseDir string) (*Manager, error) {
+	storage, err := newFileStorage(baseDir)
 	if err != nil {
 		return nil, err
 	}
-	return newManagerWithDeps(storage, netDialer{}, netResolver{}, func() time.Time { return time.Now().UTC() })
+	return newManagerWithDeps(storage, baseDir, netDialer{}, netResolver{}, func() time.Time { return time.Now().UTC() })
 }
 
-func NewManagerWithStorage(storage Storage) (*Manager, error) {
-	return newManagerWithDeps(storage, netDialer{}, netResolver{}, func() time.Time { return time.Now().UTC() })
+func NewManagerWithStorage(storage Storage, baseDir string) (*Manager, error) {
+	return newManagerWithDeps(storage, baseDir, netDialer{}, netResolver{}, func() time.Time { return time.Now().UTC() })
 }
 
-func newManagerWithDeps(storage Storage, d dialer, r resolver, now func() time.Time) (*Manager, error) {
+func newManagerWithDeps(storage Storage, baseDir string, d dialer, r resolver, now func() time.Time) (*Manager, error) {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
+	}
+	if baseDir == "" {
+		baseDir = paths.Root()
 	}
 	m := &Manager{
 		storage:  storage,
 		dialer:   d,
 		resolver: r,
 		now:      now,
+		baseDir:  baseDir,
 	}
 	m.challenges = NewChallengeManager()
 	// ACME manager (wire later on configure)
-	m.acmeMgr = acme.NewManager(paths.Root(), m.challenges, "", os.Getenv("PICCOLO_ACME_DIR_URL"))
+	m.acmeMgr = acme.NewManager(baseDir, m.challenges, "", os.Getenv("PICCOLO_ACME_DIR_URL"))
 	if storage != nil {
 		cfg, err := storage.Load(context.Background())
 		if err != nil {
@@ -248,11 +253,11 @@ type fileStorage struct {
 	path string
 }
 
-func newFileStorage(stateDir string) (*fileStorage, error) {
-	if stateDir == "" {
-		stateDir = paths.Root()
+func newFileStorage(baseDir string) (*fileStorage, error) {
+	if baseDir == "" {
+		baseDir = paths.Root()
 	}
-	dir := filepath.Join(stateDir, "remote")
+	dir := filepath.Join(baseDir, "remote")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -819,7 +824,7 @@ func (m *Manager) enqueueIssuance(id string, domains []string, commonName string
 	fakeACME := os.Getenv("PICCOLO_REMOTE_FAKE_ACME") == "1"
 	// Fire and forget
 	go func(id string, domains []string, cn string) {
-		certDir := filepath.Join(paths.ControlDir(), "remote", "certs")
+		certDir := filepath.Join(m.baseDir, "remote", "certs")
 		outName := outNameFor(id, cn)
 		if fakeACME {
 			expires, err := writeSelfSignedCertificate(certDir, outName, cn, domains)

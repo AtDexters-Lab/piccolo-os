@@ -15,6 +15,8 @@ type Service interface {
 	Exports() ExportManager
 	StorageAdapter() StorageAdapter
 	Consensus() ConsensusManager
+	BootstrapVolume() VolumeHandle
+	ControlVolume() VolumeHandle
 }
 
 // BootstrapStore manages the device-local bootstrap shard lifecycle.

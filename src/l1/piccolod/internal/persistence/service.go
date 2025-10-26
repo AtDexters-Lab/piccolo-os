@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -173,6 +174,11 @@ func (m *Module) ensureCoreVolumes(ctx context.Context) error {
 		return err
 	} else {
 		m.bootstrapHandle = handle
+		if err := m.volumes.Attach(ctx, handle, AttachOptions{Role: VolumeRoleLeader}); err != nil {
+			if !errors.Is(err, ErrNotImplemented) {
+				log.Printf("WARN: failed to attach bootstrap volume: %v", err)
+			}
+		}
 	}
 	controlReq := VolumeRequest{ID: "control", Class: VolumeClassControl, ClusterMode: ClusterModeStateful}
 	if handle, err := m.volumes.EnsureVolume(ctx, controlReq); err != nil {
@@ -222,6 +228,14 @@ func (m *Module) Bootstrap() BootstrapStore {
 
 func (m *Module) Control() ControlStore {
 	return m.control
+}
+
+func (m *Module) ControlVolume() VolumeHandle {
+	return m.controlHandle
+}
+
+func (m *Module) BootstrapVolume() VolumeHandle {
+	return m.bootstrapHandle
 }
 
 func (m *Module) Volumes() VolumeManager {
@@ -336,6 +350,9 @@ func (m *Module) Shutdown(ctx context.Context) error {
 	}
 	if err := m.detachVolumeIfMounted(ctx, m.controlHandle); err != nil {
 		log.Printf("WARN: persistence failed to detach control volume: %v", err)
+	}
+	if err := m.detachVolumeIfMounted(ctx, m.bootstrapHandle); err != nil {
+		log.Printf("WARN: persistence failed to detach bootstrap volume: %v", err)
 	}
 	// Other sub-components expose explicit Stop methods when implemented.
 	return nil

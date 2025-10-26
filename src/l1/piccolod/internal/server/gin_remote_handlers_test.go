@@ -218,7 +218,8 @@ func cloneRemoteConfig(cfg remote.Config) remote.Config {
 
 func TestRemote_Configure_WhenLocked(t *testing.T) {
 	srv := createGinTestServer(t, t.TempDir())
-	lockedMgr, err := remote.NewManagerWithStorage(lockedRemoteStorage{})
+	baseDir := t.TempDir()
+	lockedMgr, err := remote.NewManagerWithStorage(lockedRemoteStorage{}, baseDir)
 	if err != nil {
 		t.Fatalf("locked manager init: %v", err)
 	}
@@ -248,8 +249,9 @@ func TestRemote_ReloadsConfigAfterUnlockEvent(t *testing.T) {
 
 	storage := newToggledRemoteStorage()
 	storage.SetLocked(false)
+	baseDir := t.TempDir()
 
-	primaryMgr, err := remote.NewManagerWithStorage(storage)
+	primaryMgr, err := remote.NewManagerWithStorage(storage, baseDir)
 	if err != nil {
 		t.Fatalf("primary manager init: %v", err)
 	}
@@ -265,7 +267,7 @@ func TestRemote_ReloadsConfigAfterUnlockEvent(t *testing.T) {
 
 	storage.SetLocked(true)
 
-	restartedMgr, err := remote.NewManagerWithStorage(storage)
+	restartedMgr, err := remote.NewManagerWithStorage(storage, baseDir)
 	if err != nil {
 		t.Fatalf("restarted manager init: %v", err)
 	}

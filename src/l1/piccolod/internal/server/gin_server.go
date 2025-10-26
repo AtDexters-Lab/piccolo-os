@@ -370,12 +370,16 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	s.sessions = authpkg.NewSessionStore()
 
 	// Remote manager
+	bootstrapDir := persist.BootstrapVolume().MountDir
+	if bootstrapDir == "" {
+		bootstrapDir = filepath.Join(stateDir, "bootstrap")
+	}
 	remoteStorage := newPersistenceRemoteStorage(persist.Control().Remote())
 	var rm *remote.Manager
 	if remoteStorage != nil {
-		rm, err = remote.NewManagerWithStorage(remoteStorage)
+		rm, err = remote.NewManagerWithStorage(remoteStorage, bootstrapDir)
 	} else {
-		rm, err = remote.NewManager(stateDir)
+		rm, err = remote.NewManager(bootstrapDir)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("remote manager init: %w", err)
@@ -386,8 +390,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	// Now that remote manager exists, wire ACME challenge handler and cert provider
 	if rm != nil && svcMgr != nil {
 		svcMgr.ProxyManager().SetAcmeHandler(rm.HTTPChallengeHandler())
-		// File-based cert provider under control volume
-		certProv := remote.NewFileCertProvider("")
+		certProv := remote.NewFileCertProvider(filepath.Join(bootstrapDir, "remote", "certs"))
 		tlsMux.SetCertProvider(certProv)
 	}
 	var nexusAdapter nexusclient.Adapter
