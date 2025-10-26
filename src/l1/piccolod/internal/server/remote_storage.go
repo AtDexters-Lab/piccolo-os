@@ -15,18 +15,14 @@ import (
 )
 
 type bootstrapRemoteStorage struct {
-	repo persistence.RemoteRepo
 	path string
 }
 
-func newBootstrapRemoteStorage(repo persistence.RemoteRepo, baseDir string) remote.Storage {
+func newBootstrapRemoteStorage(_ persistence.RemoteRepo, baseDir string) remote.Storage {
 	if baseDir == "" {
 		baseDir = paths.Root()
 	}
-	return &bootstrapRemoteStorage{
-		repo: repo,
-		path: filepath.Join(baseDir, "remote", "config.json"),
-	}
+	return &bootstrapRemoteStorage{path: filepath.Join(baseDir, "remote", "config.json")}
 }
 
 func (s *bootstrapRemoteStorage) Load(ctx context.Context) (remote.Config, error) {
@@ -46,27 +42,7 @@ func (s *bootstrapRemoteStorage) Load(ctx context.Context) (remote.Config, error
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return remote.Config{}, err
 	}
-	if s.repo == nil {
-		return remote.Config{}, nil
-	}
-	repoCfg, err := s.repo.CurrentConfig(ctx)
-	if err != nil {
-		if errors.Is(err, persistence.ErrLocked) {
-			return remote.Config{}, remote.ErrLocked
-		}
-		if errors.Is(err, persistence.ErrNotFound) {
-			return remote.Config{}, nil
-		}
-		return remote.Config{}, err
-	}
-	if len(repoCfg.Payload) == 0 {
-		return remote.Config{}, nil
-	}
-	var cfg remote.Config
-	if err := json.Unmarshal(repoCfg.Payload, &cfg); err != nil {
-		return remote.Config{}, err
-	}
-	return cfg, nil
+	return remote.Config{}, nil
 }
 
 func (s *bootstrapRemoteStorage) Save(ctx context.Context, cfg remote.Config) error {
@@ -82,14 +58,6 @@ func (s *bootstrapRemoteStorage) Save(ctx context.Context, cfg remote.Config) er
 	}
 	if err := writeAtomicJSON(s.path, payload, 0o600); err != nil {
 		return err
-	}
-	if s.repo != nil {
-		if err := s.repo.SaveConfig(ctx, persistence.RemoteConfig{Payload: payload}); err != nil {
-			if errors.Is(err, persistence.ErrLocked) {
-				return remote.ErrLocked
-			}
-			return err
-		}
 	}
 	return nil
 }

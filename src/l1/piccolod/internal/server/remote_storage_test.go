@@ -8,29 +8,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"piccolod/internal/persistence"
 	"piccolod/internal/remote"
 )
 
-type stubRemoteRepo struct {
-	cfg  persistence.RemoteConfig
-	err  error
-	save []persistence.RemoteConfig
-}
-
-func (s *stubRemoteRepo) CurrentConfig(context.Context) (persistence.RemoteConfig, error) {
-	return s.cfg, s.err
-}
-
-func (s *stubRemoteRepo) SaveConfig(_ context.Context, cfg persistence.RemoteConfig) error {
-	s.save = append(s.save, cfg)
-	return s.err
-}
-
 func TestBootstrapRemoteStorage_LoadFromFile(t *testing.T) {
 	dir := t.TempDir()
-	repo := &stubRemoteRepo{}
-	storage := newBootstrapRemoteStorage(repo, dir)
+	storage := newBootstrapRemoteStorage(nil, dir)
 
 	want := remote.Config{Endpoint: "wss://nexus.example.com/connect"}
 	data, _ := json.Marshal(want)
@@ -51,22 +34,6 @@ func TestBootstrapRemoteStorage_LoadFromFile(t *testing.T) {
 	}
 }
 
-func TestBootstrapRemoteStorage_LoadFallbackRepo(t *testing.T) {
-	dir := t.TempDir()
-	want := remote.Config{Endpoint: "wss://nexus.example.com/connect"}
-	payload, _ := json.Marshal(want)
-	repo := &stubRemoteRepo{cfg: persistence.RemoteConfig{Payload: payload}}
-	storage := newBootstrapRemoteStorage(repo, dir)
-
-	got, err := storage.Load(context.Background())
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if got.Endpoint != want.Endpoint {
-		t.Fatalf("expected %s, got %s", want.Endpoint, got.Endpoint)
-	}
-}
-
 func TestBootstrapRemoteStorage_LoadCorruptedFileFallsBack(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "remote", "config.json")
@@ -76,17 +43,14 @@ func TestBootstrapRemoteStorage_LoadCorruptedFileFallsBack(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not-json"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	want := remote.Config{Endpoint: "wss://bootstrap.example.com"}
-	payload, _ := json.Marshal(want)
-	repo := &stubRemoteRepo{cfg: persistence.RemoteConfig{Payload: payload}}
-	storage := newBootstrapRemoteStorage(repo, dir)
+	storage := newBootstrapRemoteStorage(nil, dir)
 
 	got, err := storage.Load(context.Background())
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got.Endpoint != want.Endpoint {
-		t.Fatalf("expected %s, got %s", want.Endpoint, got.Endpoint)
+	if got.Endpoint != "" {
+		t.Fatalf("expected empty endpoint, got %s", got.Endpoint)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected corrupted file removed, stat err=%v", err)
@@ -95,8 +59,7 @@ func TestBootstrapRemoteStorage_LoadCorruptedFileFallsBack(t *testing.T) {
 
 func TestBootstrapRemoteStorage_SaveWritesFileAndRepo(t *testing.T) {
 	dir := t.TempDir()
-	repo := &stubRemoteRepo{}
-	storage := newBootstrapRemoteStorage(repo, dir)
+	storage := newBootstrapRemoteStorage(nil, dir)
 	want := remote.Config{Endpoint: "wss://nexus.example.com/connect"}
 
 	if err := storage.Save(context.Background(), want); err != nil {
@@ -113,26 +76,5 @@ func TestBootstrapRemoteStorage_SaveWritesFileAndRepo(t *testing.T) {
 	}
 	if fromFile.Endpoint != want.Endpoint {
 		t.Fatalf("expected %s, got %s", want.Endpoint, fromFile.Endpoint)
-	}
-	if len(repo.save) != 1 {
-		t.Fatalf("expected repo save, got %d", len(repo.save))
-	}
-	var fromRepo remote.Config
-	if err := json.Unmarshal(repo.save[0].Payload, &fromRepo); err != nil {
-		t.Fatalf("unmarshal repo: %v", err)
-	}
-	if fromRepo.Endpoint != want.Endpoint {
-		t.Fatalf("repo saved wrong data: %+v", fromRepo)
-	}
-}
-
-func TestBootstrapRemoteStorage_SaveLocked(t *testing.T) {
-	dir := t.TempDir()
-	repo := &stubRemoteRepo{err: persistence.ErrLocked}
-	storage := newBootstrapRemoteStorage(repo, dir)
-
-	err := storage.Save(context.Background(), remote.Config{})
-	if !errors.Is(err, remote.ErrLocked) {
-		t.Fatalf("expected remote.ErrLocked, got %v", err)
 	}
 }
