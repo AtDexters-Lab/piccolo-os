@@ -67,6 +67,32 @@ func TestBootstrapRemoteStorage_LoadFallbackRepo(t *testing.T) {
 	}
 }
 
+func TestBootstrapRemoteStorage_LoadCorruptedFileFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "remote", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("not-json"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	want := remote.Config{Endpoint: "wss://bootstrap.example.com"}
+	payload, _ := json.Marshal(want)
+	repo := &stubRemoteRepo{cfg: persistence.RemoteConfig{Payload: payload}}
+	storage := newBootstrapRemoteStorage(repo, dir)
+
+	got, err := storage.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.Endpoint != want.Endpoint {
+		t.Fatalf("expected %s, got %s", want.Endpoint, got.Endpoint)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected corrupted file removed, stat err=%v", err)
+	}
+}
+
 func TestBootstrapRemoteStorage_SaveWritesFileAndRepo(t *testing.T) {
 	dir := t.TempDir()
 	repo := &stubRemoteRepo{}

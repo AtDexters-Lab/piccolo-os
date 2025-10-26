@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -35,12 +36,14 @@ func (s *bootstrapRemoteStorage) Load(ctx context.Context) (remote.Config, error
 	data, err := os.ReadFile(s.path)
 	if err == nil {
 		var cfg remote.Config
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return remote.Config{}, err
+		if parseErr := json.Unmarshal(data, &cfg); parseErr == nil {
+			return cfg, nil
+		} else {
+			log.Printf("WARN: bootstrap remote config parse failed (%v); falling back to repo", parseErr)
+			_ = os.Remove(s.path)
 		}
-		return cfg, nil
 	}
-	if !errors.Is(err, os.ErrNotExist) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return remote.Config{}, err
 	}
 	if s.repo == nil {

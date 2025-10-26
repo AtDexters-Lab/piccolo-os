@@ -89,6 +89,12 @@ func TestRemotePortalHTTPRedirectsToHTTPS(t *testing.T) {
 	if !srv.remoteResolver.IsRemoteHostname(host) {
 		t.Fatalf("resolver did not recognize remote host %q", host)
 	}
+	for srv.tlsMux.Port() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if srv.tlsMux.Port() == 0 {
+		t.Fatalf("tls mux did not start")
+	}
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil)
