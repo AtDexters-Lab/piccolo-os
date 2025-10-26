@@ -39,7 +39,7 @@ func NewManager() *Manager {
 		RecoveryTimeout:       time.Minute * 2,
 	}
 
-	return &Manager{
+	manager := &Manager{
 		interfaces: make(map[string]*InterfaceState),
 		hostname:   "piccolo",
 		port:       80,
@@ -72,6 +72,11 @@ func NewManager() *Manager {
 			LastConflictCheck:  time.Now(),
 		},
 	}
+
+	manager.ipv4SocketFactory = manager.createIPv4Socket
+	manager.ipv6SocketFactory = manager.createIPv6Socket
+
+	return manager
 }
 
 // Start begins advertising the service via mDNS
@@ -112,8 +117,10 @@ func (m *Manager) Start() error {
 	interfaceCount := len(m.interfaces)
 	m.mutex.RUnlock()
 
+	serviceName := m.currentServiceName()
+
 	log.Printf("INFO: Secured dual-stack mDNS server started - advertising %s.local on %d interfaces",
-		m.finalName, interfaceCount)
+		serviceName, interfaceCount)
 	log.Printf("INFO: Security limits - %d queries/sec, %d concurrent, %d packet size",
 		m.securityConfig.MaxQueriesPerSecond, m.securityConfig.MaxConcurrentQueries, m.securityConfig.MaxPacketSize)
 
@@ -209,4 +216,11 @@ func getMachineIDFromHostname() string {
 		return hostname
 	}
 	return ""
+}
+
+// currentServiceName returns the currently advertised service name.
+func (m *Manager) currentServiceName() string {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.finalName
 }

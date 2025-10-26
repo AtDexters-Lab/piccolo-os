@@ -2,6 +2,9 @@ package mdns
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -445,4 +448,53 @@ func TestHealthMonitorInitialization(t *testing.T) {
 	if len(monitor.InterfaceHealth) != 0 {
 		t.Error("InterfaceHealth map should be empty initially")
 	}
+}
+
+func TestHealthMonitorConcurrentMapWrite(t *testing.T) {
+	if os.Getenv("MDNS_HEALTH_PANIC_HELPER") == "1" {
+		runHealthMonitorConcurrentScenario()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestHealthMonitorConcurrentMapWrite")
+	cmd.Env = append(os.Environ(), "MDNS_HEALTH_PANIC_HELPER=1")
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("health monitor operations should be concurrency-safe: %v", err)
+	}
+}
+
+func runHealthMonitorConcurrentScenario() {
+	manager := NewManager()
+	state := createMockInterfaceState("eth0", true, true)
+
+	manager.mutex.Lock()
+	manager.interfaces["eth0"] = state
+	manager.mutex.Unlock()
+
+	var wg sync.WaitGroup
+
+	// Simulate concurrent failure recording.
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 5000; j++ {
+				manager.markInterfaceFailure(state, fmt.Errorf("simulated failure"))
+			}
+		}()
+	}
+
+	// Simultaneously run health checks.
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 2000; j++ {
+				manager.performHealthCheck()
+			}
+		}()
+	}
+
+	wg.Wait()
 }

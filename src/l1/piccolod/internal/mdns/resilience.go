@@ -17,6 +17,9 @@ func (m *Manager) updateInterfaceHealth(state *InterfaceState) {
 	errorCount := atomic.LoadUint64(&state.ErrorCount)
 	failureCount := atomic.LoadUint64(&state.FailureCount)
 
+	state.resilienceMu.Lock()
+	defer state.resilienceMu.Unlock()
+
 	// Start with current health score and adjust based on metrics
 	// Don't reset to 1.0 - this preserves existing degradation
 	healthScore := state.HealthScore
@@ -52,7 +55,9 @@ func (m *Manager) updateInterfaceHealth(state *InterfaceState) {
 
 	// Update interface health
 	state.HealthScore = healthScore
+	m.healthMonitor.mutex.Lock()
 	m.healthMonitor.InterfaceHealth[state.Interface.Name] = healthScore
+	m.healthMonitor.mutex.Unlock()
 
 	log.Printf("DEBUG: Interface %s health updated to %.2f (errors: %d/%d, failures: %d)",
 		state.Interface.Name, healthScore, errorCount, totalQueries, failureCount)
@@ -76,7 +81,10 @@ func (m *Manager) calculateBackoffDuration(state *InterfaceState) time.Duration 
 
 // isInterfaceInBackoff checks if an interface is currently in backoff period
 func (m *Manager) isInterfaceInBackoff(state *InterfaceState) bool {
-	return time.Now().Before(state.BackoffUntil)
+	state.resilienceMu.RLock()
+	backoffUntil := state.BackoffUntil
+	state.resilienceMu.RUnlock()
+	return time.Now().Before(backoffUntil)
 }
 
 // markInterfaceFailure records a failure and updates resilience tracking
@@ -85,11 +93,13 @@ func (m *Manager) markInterfaceFailure(state *InterfaceState, err error) {
 
 	atomic.AddUint64(&state.FailureCount, 1)
 	atomic.AddUint64(&state.RecoveryAttempts, 1) // Increment for exponential backoff
-	state.LastFailure = now
-
 	// Calculate and set backoff period
 	backoff := m.calculateBackoffDuration(state)
+
+	state.resilienceMu.Lock()
+	state.LastFailure = now
 	state.BackoffUntil = now.Add(backoff)
+	state.resilienceMu.Unlock()
 
 	log.Printf("RESILIENCE: Interface %s failed (attempt %d), backing off for %v: %v",
 		state.Interface.Name, atomic.LoadUint64(&state.FailureCount), backoff, err)
@@ -133,7 +143,9 @@ func (m *Manager) attemptInterfaceRecovery(name string, state *InterfaceState) b
 	// Reset failure tracking on successful recovery
 	atomic.StoreUint64(&state.FailureCount, 0)
 	atomic.StoreUint64(&state.RecoveryAttempts, 0)
+	state.resilienceMu.Lock()
 	state.BackoffUntil = time.Time{} // Clear backoff
+	state.resilienceMu.Unlock()
 
 	log.Printf("RESILIENCE: Successfully recovered interface %s", name)
 	m.updateInterfaceHealth(state)
@@ -157,13 +169,18 @@ func (m *Manager) performHealthCheck() {
 	for name, state := range m.interfaces {
 		m.updateInterfaceHealth(state)
 
-		if state.HealthScore >= m.resilienceConfig.MinHealthScore {
+		state.resilienceMu.RLock()
+		healthScore := state.HealthScore
+		stateActive := state.Active
+		state.resilienceMu.RUnlock()
+
+		if healthScore >= m.resilienceConfig.MinHealthScore {
 			healthyInterfaces++
 		}
-		totalHealth += state.HealthScore
+		totalHealth += healthScore
 
 		// Attempt recovery for unhealthy interfaces
-		if !state.Active || state.HealthScore < m.resilienceConfig.MinHealthScore {
+		if !stateActive || healthScore < m.resilienceConfig.MinHealthScore {
 			m.attemptInterfaceRecovery(name, state)
 		}
 	}

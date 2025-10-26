@@ -13,9 +13,16 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
+var (
+	listNetworkInterfaces = net.Interfaces
+	interfaceAddrs        = func(iface *net.Interface) ([]net.Addr, error) {
+		return iface.Addrs()
+	}
+)
+
 // discoverInterfaces finds and sets up all suitable network interfaces
 func (m *Manager) discoverInterfaces() error {
-	interfaces, err := net.Interfaces()
+	interfaces, err := listNetworkInterfaces()
 	if err != nil {
 		return err
 	}
@@ -25,7 +32,8 @@ func (m *Manager) discoverInterfaces() error {
 
 	activeCount := 0
 	for _, iface := range interfaces {
-		if err := m.setupInterface(&iface); err != nil {
+		ifaceCopy := iface
+		if err := m.setupInterface(&ifaceCopy); err != nil {
 			log.Printf("WARN: Failed to setup interface %s: %v", iface.Name, err)
 			// Track interface setup failure for resilience
 			if state, exists := m.interfaces[iface.Name]; exists {
@@ -53,7 +61,7 @@ func (m *Manager) setupInterface(iface *net.Interface) error {
 	}
 
 	// Get all addresses for this interface
-	addrs, err := iface.Addrs()
+	addrs, err := interfaceAddrs(iface)
 	if err != nil {
 		return err
 	}
@@ -97,7 +105,11 @@ func (m *Manager) setupInterface(iface *net.Interface) error {
 
 	// Setup IPv4 socket if available
 	if state.HasIPv4 {
-		ipv4Conn, err := m.createIPv4Socket(iface)
+		factory := m.ipv4SocketFactory
+		if factory == nil {
+			factory = m.createIPv4Socket
+		}
+		ipv4Conn, err := factory(iface)
 		if err != nil {
 			log.Printf("WARN: Failed to create IPv4 socket for %s: %v", iface.Name, err)
 		} else {
@@ -107,7 +119,11 @@ func (m *Manager) setupInterface(iface *net.Interface) error {
 
 	// Setup IPv6 socket if available
 	if state.HasIPv6 {
-		ipv6Conn, err := m.createIPv6Socket(iface)
+		factory := m.ipv6SocketFactory
+		if factory == nil {
+			factory = m.createIPv6Socket
+		}
+		ipv6Conn, err := factory(iface)
 		if err != nil {
 			log.Printf("WARN: Failed to create IPv6 socket for %s: %v", iface.Name, err)
 		} else {
@@ -295,7 +311,7 @@ func (m *Manager) networkMonitor() {
 
 // checkInterfaceChanges detects and handles interface changes
 func (m *Manager) checkInterfaceChanges() {
-	interfaces, err := net.Interfaces()
+	interfaces, err := listNetworkInterfaces()
 	if err != nil {
 		log.Printf("WARN: Failed to check interfaces: %v", err)
 		return
@@ -308,26 +324,27 @@ func (m *Manager) checkInterfaceChanges() {
 
 	// Check each interface
 	for _, iface := range interfaces {
-		seenInterfaces[iface.Name] = true
-		if existing, exists := m.interfaces[iface.Name]; exists {
+		ifaceCopy := iface
+		seenInterfaces[ifaceCopy.Name] = true
+		if existing, exists := m.interfaces[ifaceCopy.Name]; exists {
 			// Interface still exists - check if IP changed
-			if m.hasIPChanged(&iface, existing) {
-				log.Printf("INFO: IP changed on interface %s, reconfiguring", iface.Name)
+			if m.hasIPChanged(&ifaceCopy, existing) {
+				log.Printf("INFO: IP changed on interface %s, reconfiguring", ifaceCopy.Name)
 				if existing.IPv4Conn != nil {
 					existing.IPv4Conn.Close()
 				}
 				if existing.IPv6Conn != nil {
 					existing.IPv6Conn.Close()
 				}
-				m.setupInterface(&iface)
+				m.setupInterface(&ifaceCopy)
 			} else {
 				existing.Active = true
 				existing.LastSeen = time.Now()
 			}
 		} else {
 			// New interface detected
-			log.Printf("INFO: New interface detected: %s", iface.Name)
-			m.setupInterface(&iface)
+			log.Printf("INFO: New interface detected: %s", ifaceCopy.Name)
+			m.setupInterface(&ifaceCopy)
 		}
 	}
 
@@ -348,7 +365,7 @@ func (m *Manager) checkInterfaceChanges() {
 
 // hasIPChanged checks if an interface's IPv4 or IPv6 addresses have changed
 func (m *Manager) hasIPChanged(iface *net.Interface, state *InterfaceState) bool {
-	addrs, err := iface.Addrs()
+	addrs, err := interfaceAddrs(iface)
 	if err != nil {
 		return true // Assume changed if we can't check
 	}
