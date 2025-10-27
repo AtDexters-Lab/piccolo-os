@@ -20,8 +20,7 @@ func (m *Manager) updateInterfaceHealth(state *InterfaceState) {
 	state.resilienceMu.Lock()
 	defer state.resilienceMu.Unlock()
 
-	// Start with current health score and adjust based on metrics
-	// Don't reset to 1.0 - this preserves existing degradation
+	// Start from existing health to accumulate degradation over time
 	healthScore := state.HealthScore
 
 	// Factor in error rate
@@ -169,10 +168,19 @@ func (m *Manager) performHealthCheck() {
 	for name, state := range m.interfaces {
 		m.updateInterfaceHealth(state)
 
-		state.resilienceMu.RLock()
-		healthScore := state.HealthScore
 		stateActive := state.Active
-		state.resilienceMu.RUnlock()
+
+		state.resilienceMu.Lock()
+		healthScore := state.HealthScore
+		if !stateActive {
+			healthScore = 0.0
+			state.HealthScore = 0.0
+		}
+		state.resilienceMu.Unlock()
+
+		m.healthMonitor.mutex.Lock()
+		m.healthMonitor.InterfaceHealth[name] = healthScore
+		m.healthMonitor.mutex.Unlock()
 
 		if healthScore >= m.resilienceConfig.MinHealthScore {
 			healthyInterfaces++

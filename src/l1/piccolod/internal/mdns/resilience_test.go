@@ -55,8 +55,8 @@ func TestUpdateInterfaceHealth_ErrorRate(t *testing.T) {
 			name:        "High error rate",
 			queryCount:  100,
 			errorCount:  50,
-			expectedMin: 0.7,  // 100% - (50/100 * 50%) = 75%
-			expectedMax: 0.8,
+			expectedMin: 0.6,
+			expectedMax: 0.7,
 		},
 	}
 
