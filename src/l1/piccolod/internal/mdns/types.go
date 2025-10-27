@@ -34,6 +34,7 @@ type InterfaceState struct {
 	RecoveryAttempts uint64
 	BackoffUntil     time.Time
 	HealthScore      float64 // 0.0 (unhealthy) to 1.0 (healthy)
+	resilienceMu     sync.RWMutex
 }
 
 // RateLimiter tracks query rates per client IP
@@ -93,6 +94,7 @@ type HealthMonitor struct {
 	RecoveryActive   bool
 	SystemErrors     uint64
 	RecoveryAttempts uint64
+	mutex            sync.RWMutex
 }
 
 // ConflictDetector manages DNS name conflicts and resolution
@@ -102,6 +104,7 @@ type ConflictDetector struct {
 	LastConflictCheck  time.Time
 	ResolutionAttempts uint64
 	CurrentSuffix      string
+	mutex              sync.RWMutex
 }
 
 // ConflictingHost represents a host that conflicts with our name
@@ -148,4 +151,8 @@ type Manager struct {
 
 	// Conflict detection and resolution
 	conflictDetector *ConflictDetector
+
+	// Socket factories (overrideable for tests)
+	ipv4SocketFactory func(*net.Interface) (*net.UDPConn, error)
+	ipv6SocketFactory func(*net.Interface) (*net.UDPConn, error)
 }

@@ -1,9 +1,12 @@
 package mdns
 
 import (
+	"net"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/miekg/dns"
 )
 
 func TestIsRateLimited_NewClient(t *testing.T) {
@@ -127,6 +130,28 @@ func TestIsRateLimited_QueryCountReset(t *testing.T) {
 
 	if client.QueryCount != 1 {
 		t.Errorf("Query count should be reset and then incremented for old queries, got %d", client.QueryCount)
+	}
+}
+
+func TestHandleDualStackQueryCountsQueryOnce(t *testing.T) {
+	manager := NewManager()
+	state := createMockInterfaceState("eth0", true, false)
+	manager.interfaces["eth0"] = state
+
+	msg := dns.Msg{}
+	msg.SetQuestion(manager.finalName+".local.", dns.TypeA)
+
+	data, err := msg.Pack()
+	if err != nil {
+		t.Fatalf("failed to pack DNS query: %v", err)
+	}
+
+	clientAddr := &net.UDPAddr{IP: net.IPv4(192, 168, 1, 50)}
+
+	manager.handleDualStackQuery(data, clientAddr, state, "IPv4")
+
+	if got := manager.securityMetrics.TotalQueries; got != 1 {
+		t.Fatalf("TotalQueries = %d, want 1", got)
 	}
 }
 

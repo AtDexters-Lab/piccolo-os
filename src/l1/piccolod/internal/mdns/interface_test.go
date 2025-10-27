@@ -66,6 +66,69 @@ func TestSetupInterface_InvalidInterface(t *testing.T) {
 	}
 }
 
+func TestDiscoverInterfacesCopiesInterfacePointers(t *testing.T) {
+	origList := listNetworkInterfaces
+	origAddrs := interfaceAddrs
+	defer func() {
+		listNetworkInterfaces = origList
+		interfaceAddrs = origAddrs
+	}()
+
+	iface1 := net.Interface{Name: "eth0", Flags: net.FlagUp | net.FlagMulticast}
+	iface2 := net.Interface{Name: "wlan0", Flags: net.FlagUp | net.FlagMulticast}
+
+	listNetworkInterfaces = func() ([]net.Interface, error) {
+		return []net.Interface{iface1, iface2}, nil
+	}
+
+	interfaceAddrs = func(iface *net.Interface) ([]net.Addr, error) {
+		return []net.Addr{
+			&net.IPNet{
+				IP:   net.IPv4(192, 168, 0, 10),
+				Mask: net.CIDRMask(24, 32),
+			},
+		}, nil
+	}
+
+	manager := NewManager()
+	manager.ipv4SocketFactory = func(*net.Interface) (*net.UDPConn, error) {
+		return net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	}
+	manager.ipv6SocketFactory = func(*net.Interface) (*net.UDPConn, error) {
+		return nil, nil
+	}
+
+	t.Cleanup(func() {
+		close(manager.stopCh)
+		manager.wg.Wait()
+		for _, state := range manager.interfaces {
+			if state.IPv4Conn != nil {
+				state.IPv4Conn.Close()
+			}
+			if state.IPv6Conn != nil {
+				state.IPv6Conn.Close()
+			}
+		}
+	})
+
+	if err := manager.discoverInterfaces(); err != nil {
+		t.Fatalf("discoverInterfaces returned error: %v", err)
+	}
+
+	if len(manager.interfaces) != 2 {
+		t.Fatalf("expected 2 interfaces, got %d", len(manager.interfaces))
+	}
+
+	for name, state := range manager.interfaces {
+		if state.Interface == nil {
+			t.Fatalf("interface %s missing pointer", name)
+		}
+		if state.Interface.Name != name {
+			t.Fatalf("interface pointer reused: key=%q pointer=%q", name, state.Interface.Name)
+		}
+	}
+}
+
 func TestSocketCreation_ErrorPaths(t *testing.T) {
 	manager := createMockManager()
 
