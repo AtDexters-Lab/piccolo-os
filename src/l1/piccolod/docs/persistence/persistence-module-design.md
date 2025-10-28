@@ -22,7 +22,8 @@ All components share a core event bus. The consensus/leader-election layer feeds
 
 ### Bootstrap mount (`PICCOLO_STATE_DIR`)
 - `PICCOLO_STATE_DIR` points to the mount of the bootstrap volume. The volume manager is responsible for provisioning and mounting it before any control-plane writes occur.
-- All durable data (crypto keyset, control-store snapshot, export manifests, volume metadata, auth state) must live under this mount. Modules resolve paths via `internal/state/paths` so no package hard-codes `/var/lib/piccolod`.
+- All durable data (control-store snapshot, export manifests, volume metadata, auth state) must live under this mount. Modules resolve paths via `internal/state/paths` so no package hard-codes `/var/lib/piccolod`.
+- The cryptography keyset (`crypto/keyset.json`) currently remains on the host root. It is already wrapped by the SDEK and keeping it outside the bootstrap volume avoids creating a TPM single point of failure before we finish the TPM-backed unlock workflow. Once TPM wrapping is mandatory we must plan a migration to move the keyset safely onto the bootstrap volume.
 - If the bootstrap volume is unavailable, persistence refuses to unlock/control-store writes; bootstrap provisioning is retried end-to-end instead of writing to the host filesystem.
 
 ## Volume Classes & Replication

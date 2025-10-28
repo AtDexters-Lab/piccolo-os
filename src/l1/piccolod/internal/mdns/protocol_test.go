@@ -12,7 +12,7 @@ import (
 
 func TestDNSQueryParsing_MalformedPackets(t *testing.T) {
 	_ = createMockManager()
-	
+
 	malformedPackets := []struct {
 		name string
 		data []byte
@@ -46,7 +46,7 @@ func TestDNSQueryParsing_MalformedPackets(t *testing.T) {
 
 			msg := new(dns.Msg)
 			err := msg.Unpack(tt.data)
-			
+
 			// Should fail gracefully, not crash
 			if err == nil && len(tt.data) < 12 {
 				t.Errorf("Expected parsing to fail for %s, but it succeeded", tt.name)
@@ -106,7 +106,7 @@ func TestDNSResponseGeneration_InvalidQueries(t *testing.T) {
 			if len(tt.query.Question) == 0 {
 				t.Log("Query has no questions - system should handle gracefully")
 			}
-			
+
 			if len(tt.query.Question) > 0 && len(tt.query.Question[0].Name) > 255 {
 				t.Log("Domain name exceeds DNS limits - system should reject")
 			}
@@ -153,7 +153,7 @@ func TestConcurrentConnections_ResourceUsage(t *testing.T) {
 	for _, ip := range clientIPs {
 		go func(clientIP string) {
 			defer func() { done <- true }()
-			
+
 			// Each client makes multiple requests
 			for j := 0; j < 5; j++ {
 				manager.isRateLimited(clientIP)
@@ -202,22 +202,22 @@ func TestNetworkInterfaceFailure_Recovery(t *testing.T) {
 
 func TestMDNSAnnouncement_MessageFormat(t *testing.T) {
 	// Test that our mDNS announcements are properly formatted
-	
+
 	// This is the kind of test we're missing - actual protocol compliance
 	msg := &dns.Msg{}
 	msg.SetQuestion(dns.Fqdn("piccolo.local"), dns.TypeA)
 
 	// mDNS announcements should have specific properties:
 	// - QR bit should be 1 (response)
-	// - AA bit should be 1 (authoritative answer)  
+	// - AA bit should be 1 (authoritative answer)
 	// - Should be sent to 224.0.0.251:5353
-	
+
 	if !msg.Response {
 		t.Log("mDNS announcement should have Response bit set")
 	}
-	
+
 	if !msg.Authoritative {
-		t.Log("mDNS announcement should have Authoritative bit set") 
+		t.Log("mDNS announcement should have Authoritative bit set")
 	}
 
 	// Test message size limits
@@ -232,15 +232,64 @@ func TestMDNSAnnouncement_MessageFormat(t *testing.T) {
 }
 
 func TestIPv6LinkLocal_mDNSCompliance(t *testing.T) {
-	// This tests the potential bug I suspected earlier
+	origList := listNetworkInterfaces
+	origAddrs := interfaceAddrs
+	defer func() {
+		listNetworkInterfaces = origList
+		interfaceAddrs = origAddrs
+	}()
+
 	linkLocalIP := net.ParseIP("fe80::1234:5678:9abc:def0")
-	
-	// mDNS RFC 6762 says link-local addresses ARE used for mDNS
-	// But our interface filtering code rejects them!
-	
-	if linkLocalIP.IsLinkLocalUnicast() {
-		t.Logf("Link-local IP %s is being filtered out", linkLocalIP)
-		t.Error("POTENTIAL BUG: mDNS uses IPv6 link-local addresses, but our code filters them out")
-		t.Error("See RFC 6762 Section 15 - mDNS uses link-local scope")
+	if linkLocalIP == nil {
+		t.Fatal("failed to parse link-local IPv6 address")
+	}
+
+	iface := net.Interface{Name: "eth0", Flags: net.FlagUp | net.FlagMulticast}
+	listNetworkInterfaces = func() ([]net.Interface, error) {
+		return []net.Interface{iface}, nil
+	}
+
+	ipv4Net := &net.IPNet{IP: net.ParseIP("192.168.1.10"), Mask: net.CIDRMask(24, 32)}
+	ipv6Net := &net.IPNet{IP: linkLocalIP, Mask: net.CIDRMask(64, 128)}
+	interfaceAddrs = func(iface *net.Interface) ([]net.Addr, error) {
+		return []net.Addr{ipv4Net, ipv6Net}, nil
+	}
+
+	manager := NewManager()
+	manager.ipv4SocketFactory = func(*net.Interface) (*net.UDPConn, error) {
+		return net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	}
+	manager.ipv6SocketFactory = func(*net.Interface) (*net.UDPConn, error) {
+		return nil, nil
+	}
+
+	t.Cleanup(func() {
+		close(manager.stopCh)
+		manager.wg.Wait()
+		for _, state := range manager.interfaces {
+			if state.IPv4Conn != nil {
+				state.IPv4Conn.Close()
+			}
+			if state.IPv6Conn != nil {
+				state.IPv6Conn.Close()
+			}
+		}
+	})
+
+	if err := manager.discoverInterfaces(); err != nil {
+		t.Fatalf("discoverInterfaces returned error: %v", err)
+	}
+
+	state, ok := manager.interfaces["eth0"]
+	if !ok {
+		t.Fatal("expected eth0 in interface map")
+	}
+
+	if !state.HasIPv6 {
+		t.Fatal("expected link-local IPv6 to be retained")
+	}
+
+	if state.IPv6 == nil || !state.IPv6.Equal(linkLocalIP) {
+		t.Fatalf("stored IPv6 address mismatch: got %v, want %v", state.IPv6, linkLocalIP)
 	}
 }

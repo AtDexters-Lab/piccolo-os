@@ -380,7 +380,7 @@ func TestGoroutineDeadlockRegression(t *testing.T) {
 	// This test ensures that the manager can start and stop cleanly without deadlocks
 	// Previously, missing defer m.wg.Done() caused hangs on manager.Stop()
 
-	manager := NewManager()
+	manager := newStubbedManager(t, defaultStubNetworkEnv())
 
 	err := manager.Start()
 	if err != nil {
