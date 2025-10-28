@@ -6,39 +6,32 @@ import (
 )
 
 func TestDiscoverInterfaces_RealNetwork(t *testing.T) {
-	manager := createMockManager()
+	manager := newStubbedManager(t, defaultStubNetworkEnv())
 
-	// This will actually try to discover real network interfaces
-	err := manager.discoverInterfaces()
-
-	// This test might reveal real networking issues
-	if err != nil {
-		// If it fails, we found a real bug!
-		t.Errorf("Real network interface discovery failed: %v", err)
+	if err := manager.discoverInterfaces(); err != nil {
+		t.Fatalf("discoverInterfaces returned error: %v", err)
 	}
+	defer manager.Stop()
 
-	// Check if any interfaces were actually set up
 	manager.mutex.RLock()
 	interfaceCount := len(manager.interfaces)
 	manager.mutex.RUnlock()
 
 	if interfaceCount == 0 {
-		t.Error("No interfaces were discovered - possible network setup issue")
+		t.Fatal("expected stub interfaces to be discovered")
 	}
 
-	// Check for resource leaks - do we have hanging connections?
 	manager.mutex.RLock()
 	for name, state := range manager.interfaces {
 		if state.IPv4Conn != nil {
-			// Try to actually use the connection
-			_, err := state.IPv4Conn.Write([]byte("test"))
-			if err != nil {
+			multicastAddr := &net.UDPAddr{IP: net.IPv4(224, 0, 0, 251), Port: 5353}
+			if _, err := state.IPv4Conn.WriteToUDP([]byte("test"), multicastAddr); err != nil {
 				t.Errorf("IPv4 connection for %s appears broken: %v", name, err)
 			}
 		}
 		if state.IPv6Conn != nil {
-			_, err := state.IPv6Conn.Write([]byte("test"))
-			if err != nil {
+			multicastAddr := &net.UDPAddr{IP: net.ParseIP("ff02::fb"), Port: 5353}
+			if _, err := state.IPv6Conn.WriteToUDP([]byte("test"), multicastAddr); err != nil {
 				t.Errorf("IPv6 connection for %s appears broken: %v", name, err)
 			}
 		}
