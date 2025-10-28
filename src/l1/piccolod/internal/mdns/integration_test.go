@@ -32,12 +32,74 @@ func (bt *BugTracker) List() []string {
 
 var integrationBugs = &BugTracker{}
 
+type stubNetworkEnv struct {
+	interfaces []net.Interface
+	addrMap    map[string][]net.Addr
+}
+
+func defaultStubNetworkEnv() stubNetworkEnv {
+	return stubNetworkEnv{
+		interfaces: []net.Interface{
+			{
+				Index: 1,
+				MTU:   1500,
+				Name:  "eth0",
+				Flags: net.FlagUp | net.FlagMulticast,
+			},
+		},
+		addrMap: map[string][]net.Addr{
+			"eth0": {
+				&net.IPNet{IP: net.ParseIP("192.168.1.10"), Mask: net.CIDRMask(24, 32)},
+			},
+		},
+	}
+}
+
+func installStubNetworkEnv(t *testing.T, env stubNetworkEnv) {
+	origList := listNetworkInterfaces
+	origAddrs := interfaceAddrs
+
+	listNetworkInterfaces = func() ([]net.Interface, error) {
+		clones := make([]net.Interface, len(env.interfaces))
+		copy(clones, env.interfaces)
+		return clones, nil
+	}
+
+	interfaceAddrs = func(iface *net.Interface) ([]net.Addr, error) {
+		addrs, ok := env.addrMap[iface.Name]
+		if !ok {
+			return nil, fmt.Errorf("no addresses configured for interface %s", iface.Name)
+		}
+		res := make([]net.Addr, len(addrs))
+		copy(res, addrs)
+		return res, nil
+	}
+
+	t.Cleanup(func() {
+		listNetworkInterfaces = origList
+		interfaceAddrs = origAddrs
+	})
+}
+
+func newStubbedManager(t *testing.T, env stubNetworkEnv) *Manager {
+	installStubNetworkEnv(t, env)
+
+	manager := NewManager()
+	manager.ipv4SocketFactory = func(*net.Interface) (*net.UDPConn, error) {
+		return net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	}
+	manager.ipv6SocketFactory = func(*net.Interface) (*net.UDPConn, error) {
+		return nil, nil
+	}
+	return manager
+}
+
 func TestFullManagerLifecycle_Integration(t *testing.T) {
 	t.Log("=== INTEGRATION TEST: Full Manager Lifecycle ===")
 
-	manager := NewManager()
+	manager := newStubbedManager(t, defaultStubNetworkEnv())
 
-	// Test 1: Manager startup with real network interfaces
+	// Test 1: Manager startup with stubbed network interfaces
 	t.Log("Testing manager startup...")
 	err := manager.Start()
 	if err != nil {
@@ -45,6 +107,12 @@ func TestFullManagerLifecycle_Integration(t *testing.T) {
 		t.Errorf("Manager failed to start: %v", err)
 		return
 	}
+	managerStopped := false
+	defer func() {
+		if !managerStopped {
+			manager.Stop()
+		}
+	}()
 
 	// Give it a moment to initialize
 	time.Sleep(100 * time.Millisecond)
@@ -91,11 +159,11 @@ func TestFullManagerLifecycle_Integration(t *testing.T) {
 	manager.mutex.RUnlock()
 
 	// Test 4: Manager shutdown and cleanup
-	err = manager.Stop()
-	if err != nil {
+	if err := manager.Stop(); err != nil {
 		integrationBugs.Add(fmt.Sprintf("Manager.Stop() failed: %v", err))
 		t.Errorf("Manager failed to stop cleanly: %v", err)
 	}
+	managerStopped = true
 
 	// Test 5: Verify cleanup - connections should be closed
 	manager.mutex.RLock()
@@ -193,7 +261,7 @@ func testDNSMessageCompliance(t *testing.T) {
 func TestSecurityMechanisms_Integration(t *testing.T) {
 	t.Log("=== INTEGRATION TEST: Security Mechanisms ===")
 
-	manager := NewManager()
+	manager := newStubbedManager(t, defaultStubNetworkEnv())
 
 	// Test rate limiting with realistic scenario
 	t.Log("Testing rate limiting under realistic load...")
@@ -261,7 +329,7 @@ func testConcurrentQueryLimits(t *testing.T, manager *Manager) {
 func TestResilienceAndRecovery_Integration(t *testing.T) {
 	t.Log("=== INTEGRATION TEST: Resilience and Recovery ===")
 
-	manager := NewManager()
+	manager := newStubbedManager(t, defaultStubNetworkEnv())
 
 	// Test interface failure and recovery
 	t.Log("Testing interface failure simulation...")
@@ -311,27 +379,22 @@ func TestResilienceAndRecovery_Integration(t *testing.T) {
 func TestPlatformCompatibility_Integration(t *testing.T) {
 	t.Log("=== INTEGRATION TEST: Platform Compatibility ===")
 
-	// Test socket creation with platform-specific constants
-	t.Log("Testing socket option compatibility...")
+	// Test socket creation with platform-specific constants using real interfaces
+	t.Log("Testing socket option compatibility on real interfaces...")
 
-	// This will reveal the SO_REUSEPORT hardcoding bug
 	manager := NewManager()
-
 	interfaces, err := net.Interfaces()
-	if err != nil {
-		t.Skip("No network interfaces available for platform testing")
+	if err != nil || len(interfaces) == 0 {
+		t.Skip("no network interfaces available for platform testing")
 		return
 	}
 
+	found := false
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
 			continue
 		}
 
-		// Try to create sockets - this may fail on non-Linux platforms
-		t.Logf("Testing socket creation on interface: %s", iface.Name)
-
-		// Get IPv4 address from the interface
 		addrs, err := iface.Addrs()
 		if err != nil {
 			continue
@@ -347,28 +410,35 @@ func TestPlatformCompatibility_Integration(t *testing.T) {
 			}
 		}
 
-		if ipv4Addr != nil {
-			ipv4Conn, err := manager.createIPv4Socket(&iface)
-			if err != nil {
-				if strings.Contains(err.Error(), "protocol not available") ||
-					strings.Contains(err.Error(), "invalid argument") {
-					integrationBugs.Add(fmt.Sprintf("Socket creation failed on %s - likely platform-specific constants: %v", iface.Name, err))
-					t.Logf("POTENTIAL BUG: Platform compatibility issue: %v", err)
-				}
-			} else if ipv4Conn != nil {
-				ipv4Conn.Close()
-			}
+		if ipv4Addr == nil {
+			continue
 		}
 
-		// Test one interface to avoid spam
+		t.Logf("Testing IPv4 socket creation on interface: %s", iface.Name)
+		conn, err := manager.createIPv4Socket(&iface)
+		found = true
+		if err != nil {
+			if strings.Contains(err.Error(), "protocol not available") || strings.Contains(err.Error(), "invalid argument") {
+				integrationBugs.Add(fmt.Sprintf("Socket creation failed on %s - possible platform issue: %v", iface.Name, err))
+				break
+			}
+			t.Fatalf("Unexpected socket creation failure on %s: %v", iface.Name, err)
+		}
+		if conn != nil {
+			conn.Close()
+		}
 		break
+	}
+
+	if !found {
+		t.Skip("no suitable non-loopback interface with IPv4 address for platform test")
 	}
 }
 
 func TestMemoryLeaks_Integration(t *testing.T) {
 	t.Log("=== INTEGRATION TEST: Memory Leak Detection ===")
 
-	manager := NewManager()
+	manager := newStubbedManager(t, defaultStubNetworkEnv())
 
 	// Test client tracking cleanup
 	t.Log("Testing client state cleanup...")
@@ -404,10 +474,11 @@ func TestGoroutineLeaks_Integration(t *testing.T) {
 
 	// Start and stop manager multiple times
 	for i := 0; i < 3; i++ {
-		manager := NewManager()
+		manager := newStubbedManager(t, defaultStubNetworkEnv())
 
-		// Start with real interfaces (may fail, that's OK)
-		manager.Start()
+		if err := manager.Start(); err != nil {
+			t.Fatalf("manager start failed in goroutine leak test: %v", err)
+		}
 		time.Sleep(50 * time.Millisecond)
 		manager.Stop()
 
@@ -433,9 +504,9 @@ func numGoroutines() int {
 // TestRegressionSuite contains tests for previously fixed bugs to prevent regression
 func TestRegressionSuite_CriticalBugFixes(t *testing.T) {
 	t.Log("=== REGRESSION TEST SUITE: Critical Bug Fixes ===")
-	
+
 	manager := NewManager()
-	
+
 	// Regression test for Bug #10: DNS Self-Loop Detection Fix
 	t.Run("Bug10_mDNSProbingQueries", func(t *testing.T) {
 		// Test that mDNS probing queries with answers are accepted (RFC 6762 Section 8.1)
@@ -448,7 +519,7 @@ func TestRegressionSuite_CriticalBugFixes(t *testing.T) {
 		// mDNS probing queries legitimately contain answer sections
 		rr, _ := dns.NewRR("probe.local. 120 IN A 192.168.1.100")
 		msg.Answer = []dns.RR{rr}
-		
+
 		err := manager.validateDNSMessage(msg)
 		if err != nil && err.Error() == "queries should not have answers" {
 			t.Error("REGRESSION: mDNS probing validation broken")
@@ -456,32 +527,32 @@ func TestRegressionSuite_CriticalBugFixes(t *testing.T) {
 			t.Log("✅ mDNS probing queries work correctly")
 		}
 	})
-	
+
 	// Regression test for IPv6 link-local acceptance (Bug #2)
 	t.Run("Bug2_IPv6LinkLocalAcceptance", func(t *testing.T) {
 		// Test that IPv6 link-local addresses are accepted (RFC 6762 compliance)
 		linkLocalAddr := net.ParseIP("fe80::1234:5678:9abc:def0")
 		shouldAccept := !linkLocalAddr.IsLoopback() // Fixed logic: accept all except loopback
-		
+
 		if !shouldAccept {
 			t.Error("REGRESSION: IPv6 link-local addresses rejected")
 		} else {
 			t.Log("✅ IPv6 link-local addresses accepted (RFC 6762 compliant)")
 		}
 	})
-	
+
 	// Regression test for malformed packet handling (Bug #11)
 	t.Run("Bug11_MalformedPacketSafety", func(t *testing.T) {
 		// Test that malformed packets don't crash the system
 		malformedPackets := [][]byte{
-			{}, // Empty packet
+			{},           // Empty packet
 			{0x12, 0x34}, // Too short
 			{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, // Invalid data
 		}
-		
+
 		clientAddr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
 		mockState := createMockInterfaceState("test0", true, true)
-		
+
 		for i, data := range malformedPackets {
 			func() {
 				defer func() {
