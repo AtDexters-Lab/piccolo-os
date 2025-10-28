@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"os"
-	"piccolod/internal/api"
+	"path/filepath"
 	"testing"
+
+	"piccolod/internal/api"
 )
 
 func TestAppManager_UpdateImage_And_Revert(t *testing.T) {
@@ -40,9 +42,14 @@ func TestAppManager_UpdateImage_And_Revert(t *testing.T) {
 	}
 
 	// Verify new image written
-	cur, err := mgr.stateManager.GetAppDefinition("demoapp")
+	defPath := filepath.Join(tmp, AppsDir, "demoapp", "app.yaml")
+	curData, err := os.ReadFile(defPath)
 	if err != nil {
-		t.Fatalf("get def: %v", err)
+		t.Fatalf("read app.yaml: %v", err)
+	}
+	cur, err := ParseAppDefinition(curData)
+	if err != nil {
+		t.Fatalf("parse app.yaml: %v", err)
 	}
 	if cur.Image != "alpine:3.19" {
 		t.Fatalf("expected image alpine:3.19, got %s", cur.Image)
@@ -60,9 +67,13 @@ func TestAppManager_UpdateImage_And_Revert(t *testing.T) {
 	if err := mgr.Revert(ctx, "demoapp"); err != nil {
 		t.Fatalf("revert: %v", err)
 	}
-	cur2, err := mgr.stateManager.GetAppDefinition("demoapp")
+	curData2, err := os.ReadFile(defPath)
 	if err != nil {
-		t.Fatalf("get def2: %v", err)
+		t.Fatalf("read app.yaml after revert: %v", err)
+	}
+	cur2, err := ParseAppDefinition(curData2)
+	if err != nil {
+		t.Fatalf("parse app.yaml after revert: %v", err)
 	}
 	// Expect image to be 3.18 again
 	if cur2.Image != "alpine:3.18" {

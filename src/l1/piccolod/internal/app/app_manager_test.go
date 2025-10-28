@@ -13,6 +13,8 @@ import (
 	"piccolod/internal/cluster"
 	"piccolod/internal/events"
 	"piccolod/internal/router"
+	"piccolod/internal/services"
+	"piccolod/internal/state/paths"
 )
 
 type stubLockReader struct {
@@ -32,6 +34,136 @@ func (s *stubLockReader) set(locked bool) {
 	s.mu.Unlock()
 }
 
+func TestAppManager_LazyStateInitialization(t *testing.T) {
+	tempDir := t.TempDir()
+	mock := NewMockContainerManager()
+	manager, err := NewAppManager(mock, tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create AppManager: %v", err)
+	}
+	manager.ForceLockState(true)
+
+	// While locked we should refuse to touch the filesystem.
+	if _, err := manager.List(context.Background()); !errors.Is(err, ErrLocked) {
+		t.Fatalf("expected ErrLocked when listing while locked, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, AppsDir)); err == nil {
+		t.Fatalf("apps directory should not be created while locked")
+	}
+
+	// Unlock and ensure state initializes on-demand.
+	manager.ForceLockState(false)
+	apps, err := manager.List(context.Background())
+	if err != nil {
+		t.Fatalf("list after unlock: %v", err)
+	}
+	if len(apps) != 0 {
+		t.Fatalf("expected no apps, got %d", len(apps))
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, AppsDir)); err != nil {
+		t.Fatalf("expected apps directory after unlock, stat err=%v", err)
+	}
+}
+
+func TestAppManager_DefaultStateDirWhenEmpty(t *testing.T) {
+	tempDir := t.TempDir()
+	prev, had := os.LookupEnv("PICCOLO_STATE_DIR")
+	if err := os.Setenv("PICCOLO_STATE_DIR", tempDir); err != nil {
+		t.Fatalf("set env: %v", err)
+	}
+	paths.SetRootForTest(tempDir)
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv("PICCOLO_STATE_DIR", prev)
+		} else {
+			_ = os.Unsetenv("PICCOLO_STATE_DIR")
+		}
+		paths.SetRootForTest("")
+	})
+
+	mock := NewMockContainerManager()
+	manager, err := NewAppManager(mock, "")
+	if err != nil {
+		t.Fatalf("NewAppManager with empty dir: %v", err)
+	}
+	manager.ForceLockState(false)
+
+	if _, err := manager.List(context.Background()); err != nil {
+		t.Fatalf("list with default dir: %v", err)
+	}
+
+	appDir := filepath.Join(tempDir, AppsDir)
+	if _, err := os.Stat(appDir); os.IsNotExist(err) {
+		t.Fatalf("expected apps dir under default root, stat err=%v", err)
+	}
+}
+
+func TestAppManager_ListRespectsLockAfterInitialization(t *testing.T) {
+	tempDir := t.TempDir()
+	mock := NewMockContainerManager()
+	manager, err := NewAppManager(mock, tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create AppManager: %v", err)
+	}
+	manager.ForceLockState(false)
+
+	if _, err := manager.List(context.Background()); err != nil {
+		t.Fatalf("expected list while unlocked to succeed, got %v", err)
+	}
+
+	manager.ForceLockState(true)
+	if _, err := manager.List(context.Background()); !errors.Is(err, ErrLocked) {
+		t.Fatalf("expected ErrLocked when listing after re-lock, got %v", err)
+	}
+}
+
+func TestAppManager_RestoreServicesDefersUntilUnlock(t *testing.T) {
+	tempDir := t.TempDir()
+	mock := NewMockContainerManager()
+	svcMgr := services.NewServiceManager()
+	manager, err := NewAppManagerWithServices(mock, tempDir, svcMgr, nil)
+	if err != nil {
+		t.Fatalf("Failed to create AppManager: %v", err)
+	}
+	bus := events.NewBus()
+	manager.ObserveRuntimeEvents(bus)
+	t.Cleanup(manager.StopRuntimeEvents)
+
+	manager.ForceLockState(true)
+	manager.RestoreServices(context.Background())
+
+	manager.restoreMu.Lock()
+	pending := manager.pendingRestore
+	manager.restoreMu.Unlock()
+	if !pending {
+		t.Fatalf("expected restore to be pending while locked")
+	}
+
+	manager.ForceLockState(false)
+	bus.Publish(events.Event{Topic: events.TopicLockStateChanged, Payload: events.LockStateChanged{Locked: false}})
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		manager.restoreMu.Lock()
+		pending = manager.pendingRestore
+		manager.restoreMu.Unlock()
+		manager.stateInitMu.Lock()
+		initialized := manager.stateManager != nil
+		manager.stateInitMu.Unlock()
+		if !pending && initialized {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	manager.restoreMu.Lock()
+	finalPending := manager.pendingRestore
+	manager.restoreMu.Unlock()
+	manager.stateInitMu.Lock()
+	initialized := manager.stateManager != nil
+	manager.stateInitMu.Unlock()
+	t.Fatalf("expected restore to run after unlock; pending=%v initialized=%v", finalPending, initialized)
+}
+
 // TestAppManager_Install tests app installation with filesystem persistence
 func TestAppManager_Install(t *testing.T) {
 	// Create temporary directory for test
@@ -47,10 +179,6 @@ func TestAppManager_Install(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
-	manager.ForceLockState(false)
-	manager.ForceLockState(false)
-	manager.ForceLockState(false)
-	manager.ForceLockState(false)
 	manager.ForceLockState(false)
 
 	ctx := context.Background()
@@ -119,8 +247,11 @@ func TestAppManager_Install_NotLeader(t *testing.T) {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
 	manager.ForceLockState(false)
-	if err := manager.stateManager.StoreApp(&AppInstance{Name: "demo"}, &api.AppDefinition{Name: "demo"}); err != nil {
-		t.Fatalf("store app: %v", err)
+	if _, err := manager.Install(context.Background(), &api.AppDefinition{
+		Name: "demo", Image: "alpine:latest", Type: "user",
+		Listeners: []api.AppListener{{Name: "web", GuestPort: 80, Flow: api.FlowTCP, Protocol: api.ListenerProtocolHTTP}},
+	}); err != nil {
+		t.Fatalf("seed install: %v", err)
 	}
 
 	bus := events.NewBus()

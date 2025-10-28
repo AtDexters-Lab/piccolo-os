@@ -287,6 +287,17 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 		return nil, fmt.Errorf("failed to init persistence module: %w", err)
 	}
 
+	controlDir := persist.ControlVolume().MountDir
+	if controlDir == "" {
+		controlDir = filepath.Join(stateDir, "control")
+		if err := os.MkdirAll(controlDir, 0o755); err != nil {
+			return nil, fmt.Errorf("ensure control state dir: %w", err)
+		}
+	}
+	// NOTE: Today we do not migrate existing app state into the control volume because we have
+	// no pre-existing deployments. If that assumption changes we must add a migration path,
+	// otherwise legacy installations would appear empty after upgrade.
+	appMgr.SetStateBaseDir(controlDir)
 	appMgr.SetLockReader(persist)
 	svcMgr.SetLockReader(persist)
 

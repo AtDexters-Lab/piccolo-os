@@ -49,6 +49,14 @@ func NewFilesystemStateManager(stateDir string) (*FilesystemStateManager, error)
 		stateDir = paths.Root()
 	}
 
+	info, err := os.Stat(stateDir)
+	if err != nil {
+		return nil, fmt.Errorf("state directory unavailable: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("state directory %s is not a directory", stateDir)
+	}
+
 	fsm := &FilesystemStateManager{
 		stateDir:   stateDir,
 		appsDir:    filepath.Join(stateDir, AppsDir),

@@ -17,12 +17,15 @@ import (
 	"piccolod/internal/events"
 	"piccolod/internal/router"
 	"piccolod/internal/services"
+	"piccolod/internal/state/paths"
 )
 
 // AppManager manages application lifecycle with filesystem-based state storage
 type AppManager struct {
 	containerManager ContainerManager
 	stateManager     *FilesystemStateManager
+	stateBaseDir     string
+	stateInitMu      sync.Mutex
 	serviceManager   *services.ServiceManager
 	routeRegistrar   router.Registrar
 	eventsMu         sync.Mutex
@@ -32,6 +35,8 @@ type AppManager struct {
 	leadershipMu     sync.RWMutex
 	leadershipState  map[string]cluster.Role
 	lockReader       LockStateReader
+	restoreMu        sync.Mutex
+	pendingRestore   bool
 	lockOverrideMu   sync.RWMutex
 	lockOverride     *bool
 }
@@ -50,14 +55,14 @@ const maxInstallPortRetries = 5
 
 // NewAppManagerWithServices creates a new filesystem-based app manager with an injected ServiceManager
 func NewAppManagerWithServices(containerManager ContainerManager, stateDir string, serviceManager *services.ServiceManager, lockReader LockStateReader) (*AppManager, error) {
-	stateManager, err := NewFilesystemStateManager(stateDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create state manager: %w", err)
+	base := stateDir
+	if strings.TrimSpace(base) == "" {
+		base = paths.Root()
 	}
-
+	base = filepath.Clean(base)
 	return &AppManager{
 		containerManager: containerManager,
-		stateManager:     stateManager,
+		stateBaseDir:     base,
 		serviceManager:   serviceManager,
 		leadershipState:  make(map[string]cluster.Role),
 		lockReader:       lockReader,
@@ -69,6 +74,21 @@ func (m *AppManager) SetRouter(reg router.Registrar) {
 	m.stateMu.Lock()
 	m.routeRegistrar = reg
 	m.stateMu.Unlock()
+}
+
+// SetStateBaseDir overrides the base directory used for filesystem-backed state.
+func (m *AppManager) SetStateBaseDir(dir string) {
+	base := dir
+	if strings.TrimSpace(base) == "" {
+		base = paths.Root()
+	}
+	clean := filepath.Clean(base)
+	m.stateInitMu.Lock()
+	if clean != m.stateBaseDir {
+		m.stateBaseDir = clean
+		m.stateManager = nil
+	}
+	m.stateInitMu.Unlock()
 }
 
 func (m *AppManager) currentRouter() router.Registrar {
@@ -135,6 +155,11 @@ func (m *AppManager) ObserveRuntimeEvents(bus *events.Bus) {
 					state = "locked"
 				}
 				log.Printf("INFO: app-manager observed control lock state=%s", state)
+				if payload.Locked {
+					m.markPendingRestore()
+				} else {
+					go m.RestoreServices(loopCtx)
+				}
 			case <-ctx.Done():
 				return
 			}
@@ -173,6 +198,37 @@ func (m *AppManager) ensureUnlocked() error {
 	return nil
 }
 
+func (m *AppManager) ensureStateManager() (*FilesystemStateManager, error) {
+	m.stateInitMu.Lock()
+	defer m.stateInitMu.Unlock()
+	if m.stateManager != nil {
+		if m.currentLockState() {
+			return nil, ErrLocked
+		}
+		return m.stateManager, nil
+	}
+	if m.currentLockState() {
+		return nil, ErrLocked
+	}
+	base := m.stateBaseDir
+	if base == "" {
+		return nil, fmt.Errorf("app manager: state directory not configured")
+	}
+	info, err := os.Stat(base)
+	if err != nil {
+		return nil, fmt.Errorf("app manager: state directory unavailable: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("app manager: state base %s is not a directory", base)
+	}
+	stateMgr, err := NewFilesystemStateManager(base)
+	if err != nil {
+		return nil, err
+	}
+	m.stateManager = stateMgr
+	return stateMgr, nil
+}
+
 func (m *AppManager) ensureKernelLeader() error {
 	role := m.LastObservedRole(cluster.ResourceKernel)
 	if role == cluster.RoleFollower {
@@ -205,8 +261,49 @@ func (m *AppManager) handleLeadershipChange(ctx context.Context, change events.L
 	}
 }
 
+func (m *AppManager) markPendingRestore() {
+	m.restoreMu.Lock()
+	m.pendingRestore = true
+	m.restoreMu.Unlock()
+}
+
+func (m *AppManager) clearPendingRestore() {
+	m.restoreMu.Lock()
+	m.pendingRestore = false
+	m.restoreMu.Unlock()
+}
+
+func (m *AppManager) snapshotApps(allowLocked bool) []*AppInstance {
+	state, err := m.ensureStateManager()
+	if err != nil {
+		if allowLocked && errors.Is(err, ErrLocked) {
+			m.stateInitMu.Lock()
+			state = m.stateManager
+			m.stateInitMu.Unlock()
+			if state == nil {
+				return nil
+			}
+		} else {
+			if !errors.Is(err, ErrLocked) {
+				log.Printf("WARN: snapshot apps failed: %v", err)
+			}
+			return nil
+		}
+	}
+	apps := state.ListApps()
+	out := make([]*AppInstance, 0, len(apps))
+	for _, app := range apps {
+		if app == nil {
+			continue
+		}
+		clone := *app
+		out = append(out, &clone)
+	}
+	return out
+}
+
 func (m *AppManager) enterFollower(ctx context.Context) {
-	apps := m.stateManager.ListApps()
+	apps := m.snapshotApps(true)
 	for _, app := range apps {
 		if err := m.stopInternal(ctx, app.Name); err != nil {
 			log.Printf("WARN: follower transition stop app %s failed: %v", app.Name, err)
@@ -264,12 +361,22 @@ func NewAppManager(containerManager ContainerManager, stateDir string) (*AppMana
 
 // RestoreServices rebuilds service proxies for running apps based on current container port bindings.
 func (m *AppManager) RestoreServices(ctx context.Context) {
-	apps := m.stateManager.ListApps()
+	state, err := m.ensureStateManager()
+	if err != nil {
+		if errors.Is(err, ErrLocked) {
+			m.markPendingRestore()
+		} else {
+			log.Printf("WARN: restore services: state unavailable: %v", err)
+		}
+		return
+	}
+	m.clearPendingRestore()
+	apps := state.ListApps()
 	for _, app := range apps {
 		if app.ContainerID == "" {
 			continue
 		}
-		def, err := m.stateManager.GetAppDefinition(app.Name)
+		def, err := state.GetAppDefinition(app.Name)
 		if err != nil {
 			log.Printf("WARN: restore services: failed to read app definition for %s: %v", app.Name, err)
 			continue
@@ -305,15 +412,20 @@ func (m *AppManager) Install(ctx context.Context, appDef *api.AppDefinition) (*A
 		return nil, fmt.Errorf("invalid app definition: %w", err)
 	}
 
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return nil, err
+	}
+
 	// Check if app already exists
-	if _, exists := m.stateManager.GetApp(appDef.Name); exists {
+	if _, exists := state.GetApp(appDef.Name); exists {
 		return nil, fmt.Errorf("app already exists: %s", appDef.Name)
 	}
 
-	return m.installWithRetries(ctx, appDef, 0)
+	return m.installWithRetries(ctx, state, appDef, 0)
 }
 
-func (m *AppManager) installWithRetries(ctx context.Context, appDef *api.AppDefinition, attempt int) (*AppInstance, error) {
+func (m *AppManager) installWithRetries(ctx context.Context, state *FilesystemStateManager, appDef *api.AppDefinition, attempt int) (*AppInstance, error) {
 	if attempt >= maxInstallPortRetries {
 		return nil, fmt.Errorf("failed to install %s: exhausted host-port retries", appDef.Name)
 	}
@@ -350,7 +462,7 @@ func (m *AppManager) installWithRetries(ctx context.Context, appDef *api.AppDefi
 					_ = m.serviceManager.ReserveHostPort(ep.HostBind)
 				}
 			}
-			return m.installWithRetries(ctx, appDef, attempt+1)
+			return m.installWithRetries(ctx, state, appDef, attempt+1)
 		}
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
@@ -373,7 +485,7 @@ func (m *AppManager) installWithRetries(ctx context.Context, appDef *api.AppDefi
 	}
 
 	// Store app to filesystem
-	if err := m.stateManager.StoreApp(app, appDef); err != nil {
+	if err := state.StoreApp(app, appDef); err != nil {
 		// Cleanup container if storage fails
 		_ = m.containerManager.RemoveContainer(ctx, containerID)
 		m.serviceManager.RemoveApp(appDef.Name)
@@ -394,7 +506,11 @@ func (m *AppManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*Ap
 	if err := m.ensureKernelLeader(); err != nil {
 		return nil, err
 	}
-	if existing, exists := m.stateManager.GetApp(appDef.Name); exists {
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return nil, err
+	}
+	if existing, exists := state.GetApp(appDef.Name); exists {
 		// Reconcile listeners first
 		rec, containerChange, err := m.serviceManager.Reconcile(appDef.Name, appDef.Listeners)
 		if err != nil {
@@ -421,7 +537,7 @@ func (m *AppManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*Ap
 		}
 
 		// Persist new app.yaml and metadata
-		if err := m.stateManager.StoreApp(existing, appDef); err != nil {
+		if err := state.StoreApp(existing, appDef); err != nil {
 			return nil, fmt.Errorf("failed to store app: %w", err)
 		}
 		return existing, nil
@@ -431,12 +547,20 @@ func (m *AppManager) Upsert(ctx context.Context, appDef *api.AppDefinition) (*Ap
 
 // List returns all installed applications
 func (m *AppManager) List(ctx context.Context) ([]*AppInstance, error) {
-	return m.stateManager.ListApps(), nil
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return nil, err
+	}
+	return state.ListApps(), nil
 }
 
 // Get returns a specific application by name
 func (m *AppManager) Get(ctx context.Context, name string) (*AppInstance, error) {
-	app, exists := m.stateManager.GetApp(name)
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return nil, err
+	}
+	app, exists := state.GetApp(name)
 	if !exists {
 		return nil, fmt.Errorf("app not found: %s", name)
 	}
@@ -452,7 +576,11 @@ func (m *AppManager) Start(ctx context.Context, name string) error {
 	if err := m.ensureKernelLeader(); err != nil {
 		return err
 	}
-	app, exists := m.stateManager.GetApp(name)
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return err
+	}
+	app, exists := state.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
@@ -460,18 +588,18 @@ func (m *AppManager) Start(ctx context.Context, name string) error {
 	// Start the container
 	if err := m.containerManager.StartContainer(ctx, app.ContainerID); err != nil {
 		// Update status to error
-		_ = m.stateManager.UpdateAppStatus(name, "error")
+		_ = state.UpdateAppStatus(name, "error")
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
 	// Update status to running
-	if err := m.stateManager.UpdateAppStatus(name, "running"); err != nil {
+	if err := state.UpdateAppStatus(name, "running"); err != nil {
 		return fmt.Errorf("failed to update app status: %w", err)
 	}
 
 	// Rehydrate service proxies if they were removed while the app was stopped
 	if _, err := m.serviceManager.GetByApp(name); err != nil {
-		def, defErr := m.stateManager.GetAppDefinition(name)
+		def, defErr := state.GetAppDefinition(name)
 		if defErr != nil {
 			log.Printf("WARN: start app %s: failed to load app definition: %v", name, defErr)
 		} else {
@@ -505,17 +633,21 @@ func (m *AppManager) Stop(ctx context.Context, name string) error {
 }
 
 func (m *AppManager) stopInternal(ctx context.Context, name string) error {
-	app, exists := m.stateManager.GetApp(name)
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return err
+	}
+	app, exists := state.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
 
 	if err := m.containerManager.StopContainer(ctx, app.ContainerID); err != nil {
-		_ = m.stateManager.UpdateAppStatus(name, "error")
+		_ = state.UpdateAppStatus(name, "error")
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
-	if err := m.stateManager.UpdateAppStatus(name, "stopped"); err != nil {
+	if err := state.UpdateAppStatus(name, "stopped"); err != nil {
 		return fmt.Errorf("failed to update app status: %w", err)
 	}
 
@@ -545,7 +677,11 @@ func (m *AppManager) UninstallWithOptions(ctx context.Context, name string, purg
 	if err := m.ensureKernelLeader(); err != nil {
 		return err
 	}
-	app, exists := m.stateManager.GetApp(name)
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return err
+	}
+	app, exists := state.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
@@ -569,7 +705,7 @@ func (m *AppManager) UninstallWithOptions(ctx context.Context, name string, purg
 	}
 
 	// Remove from filesystem and cache (state only)
-	if err := m.stateManager.RemoveApp(name); err != nil {
+	if err := state.RemoveApp(name); err != nil {
 		return fmt.Errorf("failed to remove app from storage: %w", err)
 	}
 
@@ -584,11 +720,15 @@ func (m *AppManager) Enable(ctx context.Context, name string) error {
 	if err := m.ensureKernelLeader(); err != nil {
 		return err
 	}
-	if _, exists := m.stateManager.GetApp(name); !exists {
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return err
+	}
+	if _, exists := state.GetApp(name); !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
 
-	return m.stateManager.EnableApp(name)
+	return state.EnableApp(name)
 }
 
 // Disable disables an application (systemctl-style)
@@ -599,25 +739,37 @@ func (m *AppManager) Disable(ctx context.Context, name string) error {
 	if err := m.ensureKernelLeader(); err != nil {
 		return err
 	}
-	if _, exists := m.stateManager.GetApp(name); !exists {
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return err
+	}
+	if _, exists := state.GetApp(name); !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
 
-	return m.stateManager.DisableApp(name)
+	return state.DisableApp(name)
 }
 
 // IsEnabled checks if an application is enabled
 func (m *AppManager) IsEnabled(ctx context.Context, name string) (bool, error) {
-	if _, exists := m.stateManager.GetApp(name); !exists {
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return false, err
+	}
+	if _, exists := state.GetApp(name); !exists {
 		return false, fmt.Errorf("app not found: %s", name)
 	}
 
-	return m.stateManager.IsAppEnabled(name), nil
+	return state.IsAppEnabled(name), nil
 }
 
 // ListEnabled returns names of all enabled apps
 func (m *AppManager) ListEnabled(ctx context.Context) ([]string, error) {
-	return m.stateManager.ListEnabledApps()
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return nil, err
+	}
+	return state.ListEnabledApps()
 }
 
 // UpdateImage updates an app's container image tag and recreates the container preserving services
@@ -628,12 +780,16 @@ func (m *AppManager) UpdateImage(ctx context.Context, name string, tag *string) 
 	if err := m.ensureKernelLeader(); err != nil {
 		return err
 	}
-	appInst, exists := m.stateManager.GetApp(name)
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return err
+	}
+	appInst, exists := state.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
 	// Load current app definition
-	curDef, err := m.stateManager.GetAppDefinition(name)
+	curDef, err := state.GetAppDefinition(name)
 	if err != nil {
 		return fmt.Errorf("failed to read current app.yaml: %w", err)
 	}
@@ -667,7 +823,7 @@ func (m *AppManager) UpdateImage(ctx context.Context, name string, tag *string) 
 	if err := ValidateAppDefinition(&newDef); err != nil {
 		return fmt.Errorf("invalid new app definition: %w", err)
 	}
-	if err := m.stateManager.BackupCurrentAppDefinition(name); err != nil {
+	if err := state.BackupCurrentAppDefinition(name); err != nil {
 		return fmt.Errorf("backup app.yaml: %w", err)
 	}
 	// Pull image (best effort)
@@ -694,7 +850,7 @@ func (m *AppManager) UpdateImage(ctx context.Context, name string, tag *string) 
 	appInst.ContainerID = newCID
 	appInst.Status = "created"
 	appInst.UpdatedAt = time.Now()
-	if err := m.stateManager.StoreApp(appInst, &newDef); err != nil {
+	if err := state.StoreApp(appInst, &newDef); err != nil {
 		return fmt.Errorf("store app: %w", err)
 	}
 	return nil
@@ -705,17 +861,21 @@ func (m *AppManager) Revert(ctx context.Context, name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-	appInst, exists := m.stateManager.GetApp(name)
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return err
+	}
+	appInst, exists := state.GetApp(name)
 	if !exists {
 		return fmt.Errorf("app not found: %s", name)
 	}
 	// Read previous def
-	prevDef, err := m.stateManager.GetPreviousAppDefinition(name)
+	prevDef, err := state.GetPreviousAppDefinition(name)
 	if err != nil {
 		return fmt.Errorf("no previous version to revert to: %w", err)
 	}
 	// Backup current before writing previous
-	if err := m.stateManager.BackupCurrentAppDefinition(name); err != nil {
+	if err := state.BackupCurrentAppDefinition(name); err != nil {
 		return fmt.Errorf("backup current: %w", err)
 	}
 	// Preserve endpoints
@@ -744,7 +904,7 @@ func (m *AppManager) Revert(ctx context.Context, name string) error {
 	appInst.ContainerID = newCID
 	appInst.Status = "created"
 	appInst.UpdatedAt = time.Now()
-	if err := m.stateManager.StoreApp(appInst, prevDef); err != nil {
+	if err := state.StoreApp(appInst, prevDef); err != nil {
 		return fmt.Errorf("store app: %w", err)
 	}
 	return nil
@@ -752,7 +912,11 @@ func (m *AppManager) Revert(ctx context.Context, name string) error {
 
 // Logs fetches recent container logs for an app
 func (m *AppManager) Logs(ctx context.Context, name string, lines int) ([]string, error) {
-	appInst, exists := m.stateManager.GetApp(name)
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return nil, err
+	}
+	appInst, exists := state.GetApp(name)
 	if !exists {
 		return nil, fmt.Errorf("app not found: %s", name)
 	}
@@ -811,7 +975,11 @@ func (m *AppManager) purgeAppData(name string) error {
 	if err := m.ensureUnlocked(); err != nil {
 		return err
 	}
-	appDef, err := m.stateManager.GetAppDefinition(name)
+	state, err := m.ensureStateManager()
+	if err != nil {
+		return err
+	}
+	appDef, err := state.GetAppDefinition(name)
 	if err != nil {
 		// If we cannot read app.yaml, fall back to default base deletion
 		return m.purgeDefaultPaths(name)

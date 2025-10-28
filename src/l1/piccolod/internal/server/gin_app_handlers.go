@@ -238,6 +238,9 @@ func (s *GinServer) handleGinAppInstall(c *gin.Context) {
 func (s *GinServer) handleGinAppList(c *gin.Context) {
 	apps, err := s.appManager.List(c.Request.Context())
 	if err != nil {
+		if handleAppManagerError(c, err, "list apps") {
+			return
+		}
 		writeGinError(c, http.StatusInternalServerError, "Failed to list apps: "+err.Error())
 		return
 	}
@@ -251,6 +254,9 @@ func (s *GinServer) handleGinAppGet(c *gin.Context) {
 
 	appInstance, err := s.appManager.Get(c.Request.Context(), appName)
 	if err != nil {
+		if handleAppManagerError(c, err, "fetch app") {
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			writeGinError(c, http.StatusNotFound, err.Error())
 		} else {
