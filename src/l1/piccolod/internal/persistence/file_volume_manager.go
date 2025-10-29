@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -424,6 +425,12 @@ func (f *fileVolumeManager) ensureMetadata(ctx context.Context, entry *volumeEnt
 	}
 
 	entry.metadataReady = false
+	if quarantinePath, err := f.quarantineCipherDir(entry.handle.ID, entry.cipherDir); err != nil {
+		return err
+	} else if quarantinePath != "" {
+		log.Printf("WARN: ciphertext directory %s contained unexpected files; moved to %s", entry.cipherDir, quarantinePath)
+		_ = f.recordVolumeState(entry.handle.ID, volumeStateUnmounted, volumeStateError, VolumeRoleUnknown, fmt.Errorf("ciphertext quarantine: %s", quarantinePath))
+	}
 
 	passphrase, err := generatePassphrase()
 	if err != nil {
@@ -654,6 +661,32 @@ func (f *fileVolumeManager) sealVolumeKey(ctx context.Context, passphrase []byte
 		return volumeMetadata{}, err
 	}
 	return meta, nil
+}
+
+func (f *fileVolumeManager) quarantineCipherDir(volumeID, dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	if len(entries) == 0 {
+		return "", nil
+	}
+	quarantineName := filepath.Base(dir) + ".quarantine-" + time.Now().UTC().Format("20060102T150405Z")
+	quarantinePath := filepath.Join(filepath.Dir(dir), quarantineName)
+	if err := os.MkdirAll(quarantinePath, 0o700); err != nil {
+		return "", err
+	}
+	for _, entry := range entries {
+		oldPath := filepath.Join(dir, entry.Name())
+		newPath := filepath.Join(quarantinePath, entry.Name())
+		if err := os.Rename(oldPath, newPath); err != nil {
+			return "", err
+		}
+	}
+	return quarantinePath, nil
 }
 
 func (f *fileVolumeManager) unwrapVolumeKey(ctx context.Context, meta volumeMetadata) ([]byte, error) {
