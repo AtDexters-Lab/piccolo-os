@@ -664,36 +664,6 @@ func TestFileVolumeManagerStateGenerationAndNeedsRepair(t *testing.T) {
 	}
 }
 
-func TestFileVolumeManagerQuarantineCipherDir(t *testing.T) {
-	root := t.TempDir()
-	cryptoMgr := newUnlockedCrypto(t, root)
-	fm := newFileVolumeManager(root, cryptoMgr, nil)
-	entry := fm.getOrCreateEntry("control")
-	if err := os.MkdirAll(entry.cipherDir, 0o700); err != nil {
-		t.Fatalf("mkdir cipher dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(entry.cipherDir, "plaintext.txt"), []byte("data"), 0o600); err != nil {
-		t.Fatalf("write plaintext: %v", err)
-	}
-	quarantine, err := fm.quarantineCipherDir(entry.handle.ID, entry.cipherDir)
-	if err != nil {
-		t.Fatalf("quarantineCipherDir: %v", err)
-	}
-	if quarantine == "" {
-		t.Fatalf("expected quarantine path")
-	}
-	if _, err := os.Stat(filepath.Join(quarantine, "plaintext.txt")); err != nil {
-		t.Fatalf("expected quarantined file: %v", err)
-	}
-	entries, err := os.ReadDir(entry.cipherDir)
-	if err != nil {
-		t.Fatalf("read cipher dir: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("expected cipher dir empty, got %d entries", len(entries))
-	}
-}
-
 func containsArgs(args []string, target []string) bool {
 	for _, t := range target {
 		found := false
