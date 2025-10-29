@@ -17,6 +17,7 @@ func TestGuardedControlStore_LeaderEnforcement(t *testing.T) {
 	if err := store.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
+	prepareControlCipherDir(t, dir)
 
 	// Follower: expect ErrNotLeader on writes
 	follower := newGuardedControlStore(store, func() bool { return false }, nil)
@@ -62,6 +63,7 @@ func TestGuardedControlStore_LockUnlockPassthrough(t *testing.T) {
 	if err := guard.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock via guard: %v", err)
 	}
+	prepareControlCipherDir(t, dir)
 	if err := guard.Auth().SetInitialized(context.Background()); err != nil {
 		t.Fatalf("set initialized: %v", err)
 	}
@@ -94,6 +96,7 @@ func TestGuardedControlStore_CommitCallback(t *testing.T) {
 	if err := store.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
+	prepareControlCipherDir(t, dir)
 	called := 0
 	guard := newGuardedControlStore(store, func() bool { return true }, func(context.Context) { called++ })
 	if err := guard.Auth().SetInitialized(context.Background()); err != nil {

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"piccolod/internal/persistence"
 	"piccolod/internal/remote"
@@ -17,6 +18,7 @@ import (
 type bootstrapRemoteStorage struct {
 	repo persistence.RemoteRepo
 	path string
+	root string
 }
 
 func newBootstrapRemoteStorage(repo persistence.RemoteRepo, baseDir string) remote.Storage {
@@ -26,12 +28,36 @@ func newBootstrapRemoteStorage(repo persistence.RemoteRepo, baseDir string) remo
 	return &bootstrapRemoteStorage{
 		repo: repo,
 		path: filepath.Join(baseDir, "remote", "config.json"),
+		root: baseDir,
 	}
 }
 
 func (s *bootstrapRemoteStorage) Load(ctx context.Context) (remote.Config, error) {
 	if s == nil {
 		return remote.Config{}, errors.New("remote storage: unavailable")
+	}
+	if !s.isMounted() {
+		if s.repo == nil {
+			return remote.Config{}, remote.ErrLocked
+		}
+		repoCfg, err := s.repo.CurrentConfig(ctx)
+		if err != nil {
+			if errors.Is(err, persistence.ErrLocked) {
+				return remote.Config{}, remote.ErrLocked
+			}
+			if errors.Is(err, persistence.ErrNotFound) {
+				return remote.Config{}, nil
+			}
+			return remote.Config{}, err
+		}
+		if len(repoCfg.Payload) == 0 {
+			return remote.Config{}, nil
+		}
+		var cfg remote.Config
+		if err := json.Unmarshal(repoCfg.Payload, &cfg); err != nil {
+			return remote.Config{}, err
+		}
+		return cfg, nil
 	}
 	data, err := os.ReadFile(s.path)
 	if err == nil {
@@ -42,8 +68,7 @@ func (s *bootstrapRemoteStorage) Load(ctx context.Context) (remote.Config, error
 			log.Printf("WARN: bootstrap remote config parse failed (%v); falling back to repo", parseErr)
 			_ = os.Remove(s.path)
 		}
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return remote.Config{}, err
 	}
 	if s.repo == nil {
@@ -76,6 +101,9 @@ func (s *bootstrapRemoteStorage) Save(ctx context.Context, cfg remote.Config) er
 	if s == nil {
 		return errors.New("remote storage: unavailable")
 	}
+	if !s.isMounted() {
+		return remote.ErrLocked
+	}
 	if cfg.DNSCredentials == nil {
 		cfg.DNSCredentials = map[string]string{}
 	}
@@ -95,6 +123,16 @@ func (s *bootstrapRemoteStorage) Save(ctx context.Context, cfg remote.Config) er
 		return err
 	}
 	return nil
+}
+
+func (s *bootstrapRemoteStorage) isMounted() bool {
+	if s == nil || strings.TrimSpace(s.root) == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(s.root, ".cipher")); err != nil {
+		return false
+	}
+	return true
 }
 
 func writeAtomicJSON(path string, data []byte, perm os.FileMode) error {

@@ -598,6 +598,44 @@ func TestFileVolumeManagerReconcileClearsNeedsRepairOnUnmounted(t *testing.T) {
 	}
 }
 
+func TestFileVolumeManagerReconcileHandlesLockedCrypto(t *testing.T) {
+	root := t.TempDir()
+	cryptoMgr := newUnlockedCrypto(t, root)
+	runner := &fakeRunner{}
+	waiter := func(string, time.Duration) error { return nil }
+	mgr := newFileVolumeManagerWithDeps(root, cryptoMgr, runner, "gocryptfs", "fusermount3", nil, waiter)
+
+	handle, err := mgr.EnsureVolume(context.Background(), VolumeRequest{ID: "bootstrap", Class: VolumeClassBootstrap})
+	if err != nil {
+		t.Fatalf("EnsureVolume: %v", err)
+	}
+	if err := mgr.Attach(context.Background(), handle, AttachOptions{Role: VolumeRoleLeader}); err != nil {
+		t.Fatalf("Attach leader: %v", err)
+	}
+
+	cryptoMgr.Lock()
+	lockedMgr := newFileVolumeManagerWithDeps(root, cryptoMgr, runner, "gocryptfs", "fusermount3", nil, waiter)
+	if err := lockedMgr.reconcileAllVolumeStates(); err != nil {
+		t.Fatalf("reconcileAllVolumeStates: %v", err)
+	}
+
+	statePath := filepath.Join(root, "volumes", handle.ID, "state.json")
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	var state volumeState
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatalf("unmarshal state: %v", err)
+	}
+	if state.Observed != volumeStatePending {
+		t.Fatalf("expected observed state pending, got %s", state.Observed)
+	}
+	if !strings.Contains(state.LastError, "locked") {
+		t.Fatalf("expected last error to mention locked, got %q", state.LastError)
+	}
+}
+
 func TestFileVolumeManagerStateGenerationAndNeedsRepair(t *testing.T) {
 	root := t.TempDir()
 	cryptoMgr := newUnlockedCrypto(t, root)

@@ -540,6 +540,12 @@ func (f *fileVolumeManager) reconcileVolumeState(ctx context.Context, entry *vol
 			return f.recordVolumeState(entry.handle.ID, state.Desired, volumeStateError, role, fmt.Errorf("volume %s missing mount and role unknown", entry.handle.ID))
 		}
 		if err := f.Attach(ctx, entry.handle, AttachOptions{Role: role}); err != nil {
+			if errors.Is(err, crypt.ErrLocked) || errors.Is(err, crypt.ErrNotInitialized) {
+				if recErr := f.recordVolumeState(entry.handle.ID, state.Desired, volumeStatePending, role, err); recErr != nil {
+					return recErr
+				}
+				return nil
+			}
 			return err
 		}
 		return nil

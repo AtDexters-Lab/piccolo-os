@@ -58,6 +58,11 @@ type encryptedPayload struct {
 
 const controlPayloadVersion = 1
 
+const (
+	controlVolumeMetadataName = "piccolo.volume.json"
+	gocryptfsConfigName       = "gocryptfs.conf"
+)
+
 func newEncryptedControlStore(stateDir string, kp keyProvider) (*encryptedControlStore, error) {
 	if kp == nil {
 		return nil, ErrCryptoUnavailable
@@ -166,6 +171,9 @@ func (s *encryptedControlStore) saveLocked() error {
 	if !s.loaded {
 		return ErrLocked
 	}
+	if err := s.ensureWritableLocked(); err != nil {
+		return err
+	}
 	s.state.revision++
 	payload := controlPayload{
 		Version:         controlPayloadVersion,
@@ -240,8 +248,8 @@ func (r *authRepo) IsInitialized(ctx context.Context) (bool, error) {
 func (r *authRepo) SetInitialized(ctx context.Context) error {
 	r.store.mu.Lock()
 	defer r.store.mu.Unlock()
-	if !r.store.loaded {
-		return ErrLocked
+	if err := r.store.ensureWritableLocked(); err != nil {
+		return err
 	}
 	if r.store.state.authInitialized {
 		return nil
@@ -262,8 +270,8 @@ func (r *authRepo) PasswordHash(ctx context.Context) (string, error) {
 func (r *authRepo) SavePasswordHash(ctx context.Context, hash string) error {
 	r.store.mu.Lock()
 	defer r.store.mu.Unlock()
-	if !r.store.loaded {
-		return ErrLocked
+	if err := r.store.ensureWritableLocked(); err != nil {
+		return err
 	}
 	r.store.state.passwordHash = hash
 	return r.store.saveLocked()
@@ -284,8 +292,8 @@ func (r *remoteRepo) CurrentConfig(ctx context.Context) (RemoteConfig, error) {
 func (r *remoteRepo) SaveConfig(ctx context.Context, cfg RemoteConfig) error {
 	r.store.mu.Lock()
 	defer r.store.mu.Unlock()
-	if !r.store.loaded {
-		return ErrLocked
+	if err := r.store.ensureWritableLocked(); err != nil {
+		return err
 	}
 	copyCfg := cloneRemoteConfig(cfg)
 	r.store.state.remoteConfig = &copyCfg
@@ -312,8 +320,8 @@ func (r *appStateRepo) UpsertApp(ctx context.Context, record AppRecord) error {
 	}
 	r.store.mu.Lock()
 	defer r.store.mu.Unlock()
-	if !r.store.loaded {
-		return ErrLocked
+	if err := r.store.ensureWritableLocked(); err != nil {
+		return err
 	}
 	r.store.state.apps[record.Name] = record
 	return r.store.saveLocked()
@@ -363,6 +371,33 @@ func decryptControlPayload(key []byte, payload encryptedPayload) ([]byte, error)
 		return nil, err
 	}
 	return aead.Open(nil, nonce, cipherText, nil)
+}
+
+func (s *encryptedControlStore) ensureWritableLocked() error {
+	if !s.loaded {
+		return ErrLocked
+	}
+	return s.ensureCipherDirPreparedLocked()
+}
+
+// ensureCipherDirPreparedLocked verifies that the control volume has been
+// initialised (metadata + gocryptfs config present) before we persist any
+// payload. Callers must already hold s.mu.
+func (s *encryptedControlStore) ensureCipherDirPreparedLocked() error {
+	cipherDir := filepath.Dir(s.filePath)
+	required := []string{
+		filepath.Join(cipherDir, gocryptfsConfigName),
+		filepath.Join(cipherDir, controlVolumeMetadataName),
+	}
+	for _, path := range required {
+		if _, err := os.Stat(path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return ErrLocked
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 var _ ControlStore = (*encryptedControlStore)(nil)

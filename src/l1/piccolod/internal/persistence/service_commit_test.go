@@ -20,6 +20,7 @@ func TestModulePublishesControlCommit(t *testing.T) {
 	if err := store.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
+	prepareControlCipherDir(t, dir)
 
 	bus := events.NewBus()
 	mod := &Module{events: bus, leadership: cluster.NewRegistry()}

@@ -33,8 +33,22 @@ func (s *stubRemoteRepo) SaveConfig(_ context.Context, cfg persistence.RemoteCon
 	return nil
 }
 
+func prepareBootstrapMount(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir mount: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".cipher"), []byte("/ciphertext/bootstrap"), 0o600); err != nil {
+		t.Fatalf("write cipher sentinel: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".mode"), []byte("rw"), 0o600); err != nil {
+		t.Fatalf("write mode sentinel: %v", err)
+	}
+}
+
 func TestBootstrapRemoteStorage_LoadFromFile(t *testing.T) {
 	dir := t.TempDir()
+	prepareBootstrapMount(t, dir)
 	storage := newBootstrapRemoteStorage(nil, dir)
 
 	want := remote.Config{Endpoint: "wss://nexus.example.com/connect"}
@@ -58,6 +72,7 @@ func TestBootstrapRemoteStorage_LoadFromFile(t *testing.T) {
 
 func TestBootstrapRemoteStorage_LoadFallbackRepo(t *testing.T) {
 	dir := t.TempDir()
+	prepareBootstrapMount(t, dir)
 	want := remote.Config{Endpoint: "wss://nexus.example.com/connect"}
 	payload, _ := json.Marshal(want)
 	repo := &stubRemoteRepo{cfg: persistence.RemoteConfig{Payload: payload}}
@@ -78,6 +93,7 @@ func TestBootstrapRemoteStorage_LoadFallbackRepo(t *testing.T) {
 
 func TestBootstrapRemoteStorage_LoadCorruptedFileFallsBack(t *testing.T) {
 	dir := t.TempDir()
+	prepareBootstrapMount(t, dir)
 	path := filepath.Join(dir, "remote", "config.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -104,6 +120,7 @@ func TestBootstrapRemoteStorage_LoadCorruptedFileFallsBack(t *testing.T) {
 
 func TestBootstrapRemoteStorage_SaveWritesFileAndRepo(t *testing.T) {
 	dir := t.TempDir()
+	prepareBootstrapMount(t, dir)
 	storage := newBootstrapRemoteStorage(nil, dir)
 	want := remote.Config{Endpoint: "wss://nexus.example.com/connect"}
 
@@ -126,6 +143,7 @@ func TestBootstrapRemoteStorage_SaveWritesFileAndRepo(t *testing.T) {
 
 func TestBootstrapRemoteStorage_SavePersistsRepo(t *testing.T) {
 	dir := t.TempDir()
+	prepareBootstrapMount(t, dir)
 	repo := &stubRemoteRepo{}
 	storage := newBootstrapRemoteStorage(repo, dir)
 	want := remote.Config{
@@ -161,6 +179,7 @@ func TestBootstrapRemoteStorage_SavePersistsRepo(t *testing.T) {
 
 func TestBootstrapRemoteStorage_SaveRepoLocked(t *testing.T) {
 	dir := t.TempDir()
+	prepareBootstrapMount(t, dir)
 	repo := &stubRemoteRepo{err: persistence.ErrLocked}
 	storage := newBootstrapRemoteStorage(repo, dir)
 	cfg := remote.Config{Endpoint: "wss://nexus.example.com/connect"}
@@ -175,5 +194,28 @@ func TestBootstrapRemoteStorage_SaveRepoLocked(t *testing.T) {
 	path := filepath.Join(dir, "remote", "config.json")
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected bootstrap file absent on locked repo, stat err=%v", err)
+	}
+}
+
+func TestBootstrapRemoteStorage_SaveMountNotReady(t *testing.T) {
+	dir := t.TempDir()
+	repo := &stubRemoteRepo{}
+	storage := newBootstrapRemoteStorage(repo, dir)
+	cfg := remote.Config{Endpoint: "wss://nexus.example.com/connect"}
+
+	if err := storage.Save(context.Background(), cfg); !errors.Is(err, remote.ErrLocked) {
+		t.Fatalf("expected remote.ErrLocked when mount missing, got %v", err)
+	}
+	if repo.saveCalls != 0 {
+		t.Fatalf("expected repo save not attempted, got %d", repo.saveCalls)
+	}
+}
+
+func TestBootstrapRemoteStorage_LoadMountNotReady(t *testing.T) {
+	dir := t.TempDir()
+	storage := newBootstrapRemoteStorage(nil, dir)
+
+	if _, err := storage.Load(context.Background()); !errors.Is(err, remote.ErrLocked) {
+		t.Fatalf("expected remote.ErrLocked when mount missing, got %v", err)
 	}
 }

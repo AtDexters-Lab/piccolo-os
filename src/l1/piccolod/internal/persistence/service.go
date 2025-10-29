@@ -175,14 +175,8 @@ func (m *Module) ensureCoreVolumes(ctx context.Context) error {
 		return err
 	} else {
 		m.bootstrapHandle = handle
-		if err := m.volumes.Attach(ctx, handle, AttachOptions{Role: VolumeRoleLeader}); err != nil {
-			if errors.Is(err, ErrNotImplemented) {
-				log.Printf("INFO: bootstrap volume attachment not supported: %v", err)
-			} else if errors.Is(err, crypt.ErrLocked) {
-				log.Printf("INFO: bootstrap volume locked; will retry after unlock")
-			} else {
-				return fmt.Errorf("attach bootstrap volume: %w", err)
-			}
+		if err := m.attachBootstrapVolume(ctx, true); err != nil {
+			return fmt.Errorf("attach bootstrap volume: %w", err)
 		}
 	}
 	controlReq := VolumeRequest{ID: "control", Class: VolumeClassControl, ClusterMode: ClusterModeStateful}
@@ -207,8 +201,28 @@ func (m *Module) attachControlVolume(ctx context.Context) error {
 			role = VolumeRoleFollower
 		}
 	}
-	if err := m.volumes.Attach(ctx, m.controlHandle, AttachOptions{Role: role}); err != nil {
+	attachCtx := context.WithoutCancel(ctx)
+	if err := m.volumes.Attach(attachCtx, m.controlHandle, AttachOptions{Role: role}); err != nil {
 		if errors.Is(err, ErrNotImplemented) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func (m *Module) attachBootstrapVolume(ctx context.Context, allowPending bool) error {
+	if m.volumes == nil || m.bootstrapHandle.ID == "" {
+		return nil
+	}
+	attachCtx := context.WithoutCancel(ctx)
+	if err := m.volumes.Attach(attachCtx, m.bootstrapHandle, AttachOptions{Role: VolumeRoleLeader}); err != nil {
+		if errors.Is(err, ErrNotImplemented) {
+			log.Printf("INFO: bootstrap volume attachment not supported: %v", err)
+			return nil
+		}
+		if allowPending && (errors.Is(err, crypt.ErrLocked) || errors.Is(err, crypt.ErrNotInitialized)) {
+			log.Printf("INFO: bootstrap volume unavailable (%v); will retry after unlock", err)
 			return nil
 		}
 		return err
@@ -312,6 +326,10 @@ func (m *Module) setLockState(ctx context.Context, locked bool) error {
 	if err := m.attachControlVolume(ctx); err != nil {
 		store.Lock()
 		return fmt.Errorf("attach control volume: %w", err)
+	}
+	if err := m.attachBootstrapVolume(ctx, false); err != nil {
+		store.Lock()
+		return fmt.Errorf("attach bootstrap volume: %w", err)
 	}
 	m.lockStateMu.Lock()
 	m.lockState = false

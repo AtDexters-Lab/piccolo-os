@@ -2,7 +2,9 @@ package persistence
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +41,8 @@ func TestEncryptedControlStoreLifecycle(t *testing.T) {
 	if err := store.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
+
+	prepareControlCipherDir(t, dir)
 
 	if err := store.Auth().SetInitialized(context.Background()); err != nil {
 		t.Fatalf("set initialized: %v", err)
@@ -126,6 +130,8 @@ func TestEncryptedControlStoreLifecycle(t *testing.T) {
 		t.Fatalf("unlock second: %v", err)
 	}
 
+	prepareControlCipherDir(t, dir)
+
 	init, err := store2.Auth().IsInitialized(context.Background())
 	if err != nil {
 		t.Fatalf("is initialized: %v", err)
@@ -175,5 +181,53 @@ func TestEncryptedControlStoreLifecycle(t *testing.T) {
 	}
 	if strings.Contains(string(data), "app-alpha") || strings.Contains(string(data), "https://example") || strings.Contains(string(data), hashValue) {
 		t.Fatalf("encrypted file leaked plaintext: %s", data)
+	}
+}
+
+func TestEncryptedControlStoreBlocksWhenVolumeUnprepared(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := hex.DecodeString("7f1c8a6c3b5d7e91aabbccddeeff00112233445566778899aabbccddeeff0011")
+
+	store, err := newEncryptedControlStore(dir, staticKeyProvider{key: key})
+	if err != nil {
+		t.Fatalf("newEncryptedControlStore: %v", err)
+	}
+	if err := store.Unlock(context.Background()); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+
+	if err := store.Auth().SetInitialized(context.Background()); err != ErrLocked {
+		t.Fatalf("expected ErrLocked when volume metadata missing, got %v", err)
+	}
+
+	prepareControlCipherDir(t, dir)
+
+	if err := store.Auth().SetInitialized(context.Background()); err != nil {
+		t.Fatalf("set initialized after metadata: %v", err)
+	}
+
+	payload := []byte(`{"endpoint":"https://example"}`)
+	if err := store.Remote().SaveConfig(context.Background(), RemoteConfig{Payload: payload}); err != nil {
+		t.Fatalf("save config after metadata: %v", err)
+	}
+}
+
+func prepareControlCipherDir(t *testing.T, root string) {
+	t.Helper()
+	cipherDir := filepath.Join(root, "ciphertext", "control")
+	if err := os.WriteFile(filepath.Join(cipherDir, gocryptfsConfigName), []byte("stub"), 0o600); err != nil {
+		t.Fatalf("write gocryptfs.conf: %v", err)
+	}
+	meta := volumeMetadata{
+		Version:    metadataVersion,
+		WrappedKey: "stub",
+		Nonce:      base64.RawStdEncoding.EncodeToString([]byte("nonce")),
+	}
+	data, err := json.Marshal(&meta)
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cipherDir, controlVolumeMetadataName), data, 0o600); err != nil {
+		t.Fatalf("write metadata: %v", err)
 	}
 }
