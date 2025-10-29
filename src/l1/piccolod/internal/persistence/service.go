@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -175,8 +176,10 @@ func (m *Module) ensureCoreVolumes(ctx context.Context) error {
 	} else {
 		m.bootstrapHandle = handle
 		if err := m.volumes.Attach(ctx, handle, AttachOptions{Role: VolumeRoleLeader}); err != nil {
-			if !errors.Is(err, ErrNotImplemented) {
-				log.Printf("WARN: failed to attach bootstrap volume: %v", err)
+			if errors.Is(err, ErrNotImplemented) {
+				log.Printf("INFO: bootstrap volume attachment not supported: %v", err)
+			} else {
+				return fmt.Errorf("attach bootstrap volume: %w", err)
 			}
 		}
 	}
@@ -185,6 +188,28 @@ func (m *Module) ensureCoreVolumes(ctx context.Context) error {
 		return err
 	} else {
 		m.controlHandle = handle
+	}
+	return nil
+}
+
+func (m *Module) attachControlVolume(ctx context.Context) error {
+	if m.volumes == nil {
+		return nil
+	}
+	if m.controlHandle.ID == "" {
+		return fmt.Errorf("control volume handle unavailable")
+	}
+	role := VolumeRoleLeader
+	if m.leadership != nil {
+		if current := m.leadership.Current(cluster.ResourceKernel); current == cluster.RoleFollower {
+			role = VolumeRoleFollower
+		}
+	}
+	if err := m.volumes.Attach(ctx, m.controlHandle, AttachOptions{Role: role}); err != nil {
+		if errors.Is(err, ErrNotImplemented) {
+			return nil
+		}
+		return err
 	}
 	return nil
 }
@@ -281,6 +306,10 @@ func (m *Module) setLockState(ctx context.Context, locked bool) error {
 	}
 	if err := store.Unlock(ctx); err != nil {
 		return err
+	}
+	if err := m.attachControlVolume(ctx); err != nil {
+		store.Lock()
+		return fmt.Errorf("attach control volume: %w", err)
 	}
 	m.lockStateMu.Lock()
 	m.lockState = false

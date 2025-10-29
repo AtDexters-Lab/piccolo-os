@@ -27,6 +27,13 @@ import (
 	"piccolod/internal/services"
 )
 
+func requireMountBypassAllowed(t *testing.T) {
+	t.Helper()
+	if os.Getenv("PICCOLO_ALLOW_UNMOUNTED_TESTS") != "1" {
+		t.Skip("set PICCOLO_ALLOW_UNMOUNTED_TESTS=1 to run without mounted volumes")
+	}
+}
+
 // TestGinAppAPI_Install tests POST /api/v1/apps endpoint with Gin
 func TestGinAppAPI_Install(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -708,6 +715,7 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 	if err != nil {
 		t.Fatalf("Failed to create app manager: %v", err)
 	}
+	requireMountBypassAllowed(t)
 	appMgr.SetMountVerifier(func(string) error { return nil })
 	eventsBus := events.NewBus()
 	appMgr.ObserveRuntimeEvents(eventsBus)
