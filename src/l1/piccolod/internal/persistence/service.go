@@ -178,6 +178,8 @@ func (m *Module) ensureCoreVolumes(ctx context.Context) error {
 		if err := m.volumes.Attach(ctx, handle, AttachOptions{Role: VolumeRoleLeader}); err != nil {
 			if errors.Is(err, ErrNotImplemented) {
 				log.Printf("INFO: bootstrap volume attachment not supported: %v", err)
+			} else if errors.Is(err, crypt.ErrLocked) {
+				log.Printf("INFO: bootstrap volume locked; will retry after unlock")
 			} else {
 				return fmt.Errorf("attach bootstrap volume: %w", err)
 			}
