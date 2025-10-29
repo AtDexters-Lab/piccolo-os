@@ -704,10 +704,11 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 
 	// Create filesystem app manager with service manager
 	svcMgr := services.NewServiceManager()
-    appMgr, err := app.NewAppManagerWithServices(mockContainer, tempDir, svcMgr, nil)
+	appMgr, err := app.NewAppManagerWithServices(mockContainer, tempDir, svcMgr, nil)
 	if err != nil {
 		t.Fatalf("Failed to create app manager: %v", err)
 	}
+	appMgr.SetMountVerifier(func(string) error { return nil })
 	eventsBus := events.NewBus()
 	appMgr.ObserveRuntimeEvents(eventsBus)
 	eventsBus.Publish(events.Event{Topic: events.TopicLockStateChanged, Payload: events.LockStateChanged{Locked: false}})

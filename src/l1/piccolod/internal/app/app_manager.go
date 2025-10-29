@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"piccolod/internal/api"
 	"piccolod/internal/cluster"
 	"piccolod/internal/container"
@@ -39,11 +41,13 @@ type AppManager struct {
 	pendingRestore   bool
 	lockOverrideMu   sync.RWMutex
 	lockOverride     *bool
+	mountVerifier    func(string) error
 }
 
 var (
-	ErrLocked    = errors.New("app manager: persistence locked")
-	ErrNotLeader = errors.New("app manager: not leader")
+	ErrLocked            = errors.New("app manager: persistence locked")
+	ErrNotLeader         = errors.New("app manager: not leader")
+	ErrVolumeUnavailable = errors.New("app manager: persistence volume not mounted")
 )
 
 // LockStateReader exposes the control lock state.
@@ -66,6 +70,7 @@ func NewAppManagerWithServices(containerManager ContainerManager, stateDir strin
 		serviceManager:   serviceManager,
 		leadershipState:  make(map[string]cluster.Role),
 		lockReader:       lockReader,
+		mountVerifier:    defaultMountVerifier,
 	}, nil
 }
 
@@ -74,6 +79,13 @@ func (m *AppManager) SetRouter(reg router.Registrar) {
 	m.stateMu.Lock()
 	m.routeRegistrar = reg
 	m.stateMu.Unlock()
+}
+
+// SetMountVerifier overrides the mount verification callback. Intended for tests.
+func (m *AppManager) SetMountVerifier(fn func(string) error) {
+	m.stateInitMu.Lock()
+	m.mountVerifier = fn
+	m.stateInitMu.Unlock()
 }
 
 // SetStateBaseDir overrides the base directory used for filesystem-backed state.
@@ -201,18 +213,21 @@ func (m *AppManager) ensureUnlocked() error {
 func (m *AppManager) ensureStateManager() (*FilesystemStateManager, error) {
 	m.stateInitMu.Lock()
 	defer m.stateInitMu.Unlock()
+	base := m.stateBaseDir
+	if strings.TrimSpace(base) == "" {
+		return nil, fmt.Errorf("app manager: state directory not configured")
+	}
 	if m.stateManager != nil {
 		if m.currentLockState() {
 			return nil, ErrLocked
+		}
+		if err := m.ensureMountAvailable(base); err != nil {
+			return nil, err
 		}
 		return m.stateManager, nil
 	}
 	if m.currentLockState() {
 		return nil, ErrLocked
-	}
-	base := m.stateBaseDir
-	if base == "" {
-		return nil, fmt.Errorf("app manager: state directory not configured")
 	}
 	info, err := os.Stat(base)
 	if err != nil {
@@ -220,6 +235,9 @@ func (m *AppManager) ensureStateManager() (*FilesystemStateManager, error) {
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("app manager: state base %s is not a directory", base)
+	}
+	if err := m.ensureMountAvailable(base); err != nil {
+		return nil, err
 	}
 	stateMgr, err := NewFilesystemStateManager(base)
 	if err != nil {
@@ -273,10 +291,54 @@ func (m *AppManager) clearPendingRestore() {
 	m.restoreMu.Unlock()
 }
 
+func (m *AppManager) ensureMountAvailable(base string) error {
+	if m.mountVerifier == nil {
+		m.mountVerifier = defaultMountVerifier
+	}
+	if m.mountVerifier == nil {
+		return nil
+	}
+	if err := m.mountVerifier(base); err != nil {
+		if errors.Is(err, ErrVolumeUnavailable) {
+			return ErrVolumeUnavailable
+		}
+		return err
+	}
+	return nil
+}
+
+func defaultMountVerifier(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return ErrVolumeUnavailable
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("app manager: state base %s is not a directory", path)
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		return nil
+	}
+	var st, pst unix.Stat_t
+	if err := unix.Stat(path, &st); err != nil {
+		return err
+	}
+	if err := unix.Stat(parent, &pst); err != nil {
+		return err
+	}
+	if st.Dev == pst.Dev {
+		return ErrVolumeUnavailable
+	}
+	return nil
+}
+
 func (m *AppManager) snapshotApps(allowLocked bool) []*AppInstance {
 	state, err := m.ensureStateManager()
 	if err != nil {
-		if allowLocked && errors.Is(err, ErrLocked) {
+		if allowLocked && (errors.Is(err, ErrLocked) || errors.Is(err, ErrVolumeUnavailable)) {
 			m.stateInitMu.Lock()
 			state = m.stateManager
 			m.stateInitMu.Unlock()
@@ -284,7 +346,7 @@ func (m *AppManager) snapshotApps(allowLocked bool) []*AppInstance {
 				return nil
 			}
 		} else {
-			if !errors.Is(err, ErrLocked) {
+			if !errors.Is(err, ErrLocked) && !errors.Is(err, ErrVolumeUnavailable) {
 				log.Printf("WARN: snapshot apps failed: %v", err)
 			}
 			return nil
@@ -296,8 +358,8 @@ func (m *AppManager) snapshotApps(allowLocked bool) []*AppInstance {
 		if app == nil {
 			continue
 		}
-		clone := *app
-		out = append(out, &clone)
+		copy := *app
+		out = append(out, &copy)
 	}
 	return out
 }

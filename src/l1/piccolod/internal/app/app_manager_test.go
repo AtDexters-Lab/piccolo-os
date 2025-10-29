@@ -34,6 +34,10 @@ func (s *stubLockReader) set(locked bool) {
 	s.mu.Unlock()
 }
 
+func allowHostStorage(m *AppManager) {
+	m.SetMountVerifier(func(string) error { return nil })
+}
+
 func TestAppManager_LazyStateInitialization(t *testing.T) {
 	tempDir := t.TempDir()
 	mock := NewMockContainerManager()
@@ -41,6 +45,7 @@ func TestAppManager_LazyStateInitialization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
 	manager.ForceLockState(true)
 
 	// While locked we should refuse to touch the filesystem.
@@ -86,6 +91,7 @@ func TestAppManager_DefaultStateDirWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAppManager with empty dir: %v", err)
 	}
+	allowHostStorage(manager)
 	manager.ForceLockState(false)
 
 	if _, err := manager.List(context.Background()); err != nil {
@@ -105,6 +111,7 @@ func TestAppManager_ListRespectsLockAfterInitialization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
 	manager.ForceLockState(false)
 
 	if _, err := manager.List(context.Background()); err != nil {
@@ -125,6 +132,7 @@ func TestAppManager_RestoreServicesDefersUntilUnlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
 	bus := events.NewBus()
 	manager.ObserveRuntimeEvents(bus)
 	t.Cleanup(manager.StopRuntimeEvents)
@@ -179,6 +187,7 @@ func TestAppManager_Install(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
 	manager.ForceLockState(false)
 
 	ctx := context.Background()
@@ -246,6 +255,7 @@ func TestAppManager_Install_NotLeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
 	manager.ForceLockState(false)
 	if _, err := manager.Install(context.Background(), &api.AppDefinition{
 		Name: "demo", Image: "alpine:latest", Type: "user",
@@ -281,6 +291,7 @@ func TestAppManager_RouterUpdatesOnLeadership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
 	manager.ForceLockState(false)
 	routeMgr := router.NewManager()
 	manager.SetRouter(routeMgr)
@@ -328,6 +339,7 @@ func TestAppManager_List(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
 	manager.ForceLockState(false)
 	manager.ForceLockState(false)
 	manager.ForceLockState(false)
@@ -381,6 +393,19 @@ func TestAppManager_List(t *testing.T) {
 	}
 }
 
+func TestAppManager_RequiresMountedVolume(t *testing.T) {
+	tempDir := t.TempDir()
+	mock := NewMockContainerManager()
+	manager, err := NewAppManager(mock, tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create AppManager: %v", err)
+	}
+	manager.ForceLockState(false)
+	if _, err := manager.List(context.Background()); !errors.Is(err, ErrVolumeUnavailable) {
+		t.Fatalf("expected ErrVolumeUnavailable, got %v", err)
+	}
+}
+
 // TestAppManager_Get tests getting specific app
 func TestAppManager_Get(t *testing.T) {
 	// Create temporary directory for test
@@ -396,6 +421,7 @@ func TestAppManager_Get(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
 	manager.ForceLockState(false)
 	manager.ForceLockState(false)
 	manager.ForceLockState(false)
@@ -440,6 +466,7 @@ func TestAppManagerLeadershipTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
 	reader := &stubLockReader{}
 	manager.SetLockReader(reader)
 	reader.set(true)
@@ -482,10 +509,11 @@ func TestAppManager_StartStop(t *testing.T) {
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
 	manager, err := NewAppManager(mockContainer, tempDir)
-	manager.ForceLockState(false)
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
+	manager.ForceLockState(false)
 
 	ctx := context.Background()
 
@@ -574,10 +602,11 @@ func TestAppManager_Uninstall(t *testing.T) {
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
 	manager, err := NewAppManager(mockContainer, tempDir)
-	manager.ForceLockState(false)
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
+	manager.ForceLockState(false)
 
 	ctx := context.Background()
 
@@ -639,10 +668,11 @@ func TestAppManager_EnableDisable(t *testing.T) {
 	// Create filesystem manager with mock container manager
 	mockContainer := NewMockContainerManager()
 	manager, err := NewAppManager(mockContainer, tempDir)
-	manager.ForceLockState(false)
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager)
+	manager.ForceLockState(false)
 
 	ctx := context.Background()
 
@@ -743,6 +773,7 @@ func TestAppManager_PersistenceAcrossRestarts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	allowHostStorage(manager1)
 	manager1.ForceLockState(false)
 
 	ctx := context.Background()
@@ -787,6 +818,7 @@ func TestAppManager_PersistenceAcrossRestarts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create second AppManager: %v", err)
 	}
+	allowHostStorage(manager2)
 	manager2.ForceLockState(false)
 
 	// Verify app still exists and has correct state
@@ -843,6 +875,7 @@ func TestAppManager_BlockedWhenLocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAppManager: %v", err)
 	}
+	allowHostStorage(mgr)
 	mgr.ForceLockState(true)
 	ctx := context.Background()
 	_, err = mgr.Install(ctx, &api.AppDefinition{

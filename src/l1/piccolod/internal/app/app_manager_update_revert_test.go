@@ -21,6 +21,7 @@ func TestAppManager_UpdateImage_And_Revert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fs manager: %v", err)
 	}
+	mgr.SetMountVerifier(func(string) error { return nil })
 	mgr.ForceLockState(false)
 	ctx := context.Background()
 
@@ -92,6 +93,7 @@ func TestAppManager_Logs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fs manager: %v", err)
 	}
+	mgr.SetMountVerifier(func(string) error { return nil })
 	mgr.ForceLockState(false)
 	ctx := context.Background()
 

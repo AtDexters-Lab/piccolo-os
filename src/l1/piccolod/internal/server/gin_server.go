@@ -288,11 +288,8 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	}
 
 	controlDir := persist.ControlVolume().MountDir
-	if controlDir == "" {
-		controlDir = filepath.Join(stateDir, "control")
-		if err := os.MkdirAll(controlDir, 0o755); err != nil {
-			return nil, fmt.Errorf("ensure control state dir: %w", err)
-		}
+	if strings.TrimSpace(controlDir) == "" {
+		return nil, fmt.Errorf("control volume mount unavailable")
 	}
 	// NOTE: Today we do not migrate existing app state into the control volume because we have
 	// no pre-existing deployments. If that assumption changes we must add a migration path,
@@ -382,8 +379,8 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 
 	// Remote manager
 	bootstrapDir := persist.BootstrapVolume().MountDir
-	if bootstrapDir == "" {
-		bootstrapDir = filepath.Join(stateDir, "bootstrap")
+	if strings.TrimSpace(bootstrapDir) == "" {
+		return nil, fmt.Errorf("bootstrap volume mount unavailable")
 	}
 	remoteStorage := newBootstrapRemoteStorage(persist.Control().Remote(), bootstrapDir)
 	var rm *remote.Manager
