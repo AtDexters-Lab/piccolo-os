@@ -2,6 +2,9 @@ package nexusclient
 
 import (
 	"context"
+	"errors"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,26 +21,18 @@ func (f *fakeClient) Start(ctx context.Context) {
 		f.start(ctx)
 	}
 }
+
 func (f *fakeClient) Stop() {
 	if f.stop != nil {
 		f.stop()
 	}
 }
 
-func TestTokenProviderGeneratesFreshJWTs(t *testing.T) {
+func TestStartConfiguresAttestation(t *testing.T) {
 	adapter := NewBackendAdapter(nil, nil)
-	base := time.Unix(1700000000, 0)
-	calls := 0
-	origNow := timeNow
-	timeNow = func() time.Time {
-		defer func() { calls++ }()
-		return base.Add(time.Duration(calls) * time.Second)
-	}
-	defer func() { timeNow = origNow }()
-
 	cfg := Config{
 		Endpoint:       "wss://nexus.example.com/connect",
-		DeviceSecret:   "super-secret",
+		DeviceSecret:   "  secret-value  ",
 		PortalHostname: "portal.example.com",
 		TLD:            "example.com",
 	}
@@ -45,65 +40,74 @@ func TestTokenProviderGeneratesFreshJWTs(t *testing.T) {
 		t.Fatalf("configure: %v", err)
 	}
 
-	provider := adapter.tokenProvider()
-	token1, err := provider(context.Background())
-	if err != nil {
-		t.Fatalf("token1: %v", err)
+	var captured backend.ClientBackendConfig
+	started := make(chan struct{}, 1)
+
+	adapter.factory = func(cfg backend.ClientBackendConfig, handler backend.ConnectHandler) (backendClient, error) {
+		captured = cfg
+		return &fakeClient{
+			start: func(context.Context) {
+				started <- struct{}{}
+			},
+		}, nil
 	}
-	token2, err := provider(context.Background())
-	if err != nil {
-		t.Fatalf("token2: %v", err)
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
 	}
-	if token1.Value == "" || token2.Value == "" {
-		t.Fatalf("expected non-empty tokens")
+	t.Cleanup(func() {
+		if err := adapter.Stop(context.Background()); err != nil {
+			t.Fatalf("stop: %v", err)
+		}
+	})
+
+	select {
+	case <-started:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("expected client Start to be invoked")
 	}
-	if token1.Value == token2.Value {
-		t.Fatalf("expected distinct tokens, got identical values")
+
+	expectedHosts := []string{"portal.example.com", "*.example.com"}
+	if !reflect.DeepEqual(captured.Hostnames, expectedHosts) {
+		t.Fatalf("unexpected hostnames: got %v want %v", captured.Hostnames, expectedHosts)
 	}
-	if token1.Expiry.IsZero() || token2.Expiry.IsZero() {
-		t.Fatalf("expected expiry metadata")
+	if captured.Attestation.HMACSecret != "secret-value" {
+		t.Fatalf("expected HMAC secret to be trimmed, got %q", captured.Attestation.HMACSecret)
+	}
+	if captured.Weight != 1 {
+		t.Fatalf("expected default weight 1, got %d", captured.Weight)
+	}
+	if strings.TrimSpace(captured.Attestation.Command) != "" {
+		t.Fatalf("expected no command configured, got %q", captured.Attestation.Command)
+	}
+	if captured.Attestation.TokenTTL != attestationTokenTTL {
+		t.Fatalf("unexpected token TTL: got %v want %v", captured.Attestation.TokenTTL, attestationTokenTTL)
+	}
+	if captured.Attestation.ReauthIntervalSeconds != attestationReauthIntervalSec {
+		t.Fatalf("unexpected reauth interval: got %d want %d", captured.Attestation.ReauthIntervalSeconds, attestationReauthIntervalSec)
 	}
 }
 
-func TestStartPassesTokenProvider(t *testing.T) {
+func TestStartPropagatesFactoryError(t *testing.T) {
 	adapter := NewBackendAdapter(nil, nil)
 	cfg := Config{
 		Endpoint:       "wss://nexus.example.com/connect",
-		DeviceSecret:   "another-secret",
+		DeviceSecret:   "secret",
 		PortalHostname: "portal.example.com",
 	}
 	if err := adapter.Configure(cfg); err != nil {
 		t.Fatalf("configure: %v", err)
 	}
 
-	tokens := make(chan string, 1)
-
-	adapter.factory = func(cfg backend.ClientBackendConfig, handler backend.ConnectHandler, provider backend.TokenProvider) backendClient {
-		return &fakeClient{
-			start: func(ctx context.Context) {
-				tok, err := provider(ctx)
-				if err != nil {
-					t.Fatalf("provider error: %v", err)
-				}
-				tokens <- tok.Value
-			},
-		}
+	adapter.factory = func(cfg backend.ClientBackendConfig, handler backend.ConnectHandler) (backendClient, error) {
+		return nil, errors.New("construction failed")
 	}
 
-	if err := adapter.Start(context.Background()); err != nil {
-		t.Fatalf("start: %v", err)
+	err := adapter.Start(context.Background())
+	if err == nil {
+		t.Fatalf("expected error from start when factory fails")
 	}
-
-	select {
-	case tok := <-tokens:
-		if tok == "" {
-			t.Fatalf("expected non-empty token")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("token provider not invoked")
-	}
-
-	if err := adapter.Stop(context.Background()); err != nil {
-		t.Fatalf("stop: %v", err)
+	if !strings.Contains(err.Error(), "construction failed") {
+		t.Fatalf("expected factory error to propagate, got %v", err)
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	backend "github.com/AtDexters-Lab/nexus-proxy-backend-client/client"
-	"github.com/golang-jwt/jwt/v5"
 
 	"piccolod/internal/router"
 )
@@ -20,7 +19,7 @@ type backendClient interface {
 	Stop()
 }
 
-type clientFactory func(backend.ClientBackendConfig, backend.ConnectHandler, backend.TokenProvider) backendClient
+type clientFactory func(backend.ClientBackendConfig, backend.ConnectHandler) (backendClient, error)
 
 type realBackendClient struct {
 	*backend.Client
@@ -29,9 +28,13 @@ type realBackendClient struct {
 func (c *realBackendClient) Start(ctx context.Context) { c.Client.Start(ctx) }
 func (c *realBackendClient) Stop()                     { c.Client.Stop() }
 
-var (
-	backendTokenTTL = 15 * time.Minute
-	timeNow         = time.Now
+const (
+	attestationTokenTTL           = 60 * time.Second
+	attestationHandshakeMaxAgeSec = 5
+	attestationReauthIntervalSec  = 300
+	attestationReauthGraceSec     = 30
+	attestationMaintenanceCapSec  = 600
+	attestationCacheHandshake     = 5 * time.Second
 )
 
 // BackendAdapter bridges piccolod with the nexus proxy backend client. It now uses
@@ -52,10 +55,14 @@ func NewBackendAdapter(r *router.Manager, resolver RemoteResolver) *BackendAdapt
 	return &BackendAdapter{
 		router:   r,
 		resolver: resolver,
-		factory: func(cfg backend.ClientBackendConfig, handler backend.ConnectHandler, tokenProvider backend.TokenProvider) backendClient {
-			return &realBackendClient{
-				Client: backend.New(cfg, backend.WithConnectHandler(handler), backend.WithTokenProvider(tokenProvider)),
+		factory: func(cfg backend.ClientBackendConfig, handler backend.ConnectHandler) (backendClient, error) {
+			client, err := backend.New(cfg, backend.WithConnectHandler(handler))
+			if err != nil {
+				return nil, err
 			}
+			return &realBackendClient{
+				Client: client,
+			}, nil
 		},
 	}
 }
@@ -88,15 +95,28 @@ func (a *BackendAdapter) Start(ctx context.Context) error {
 		Name:         "piccolo-portal",
 		Hostnames:    hosts,
 		NexusAddress: cfg.Endpoint,
+		Weight:       1,
 		PortMappings: map[int]backend.PortMapping{
 			443: {Default: "127.0.0.1:443"},
 			80:  {Default: "127.0.0.1:80"},
 		},
+		Attestation: backend.AttestationOptions{
+			HMACSecret:                 strings.TrimSpace(cfg.DeviceSecret),
+			TokenTTL:                   attestationTokenTTL,
+			CacheHandshake:             attestationCacheHandshake,
+			HandshakeMaxAgeSeconds:     attestationHandshakeMaxAgeSec,
+			ReauthIntervalSeconds:      attestationReauthIntervalSec,
+			ReauthGraceSeconds:         attestationReauthGraceSec,
+			MaintenanceGraceCapSeconds: attestationMaintenanceCapSec,
+		},
 	}
 	handler := a.connectHandler()
-	provider := a.tokenProvider()
 
-	client := a.factory(backendCfg, handler, provider)
+	client, err := a.factory(backendCfg, handler)
+	if err != nil {
+		a.mu.Unlock()
+		return fmt.Errorf("construct backend client: %w", err)
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	a.client = client
 	a.cancel = cancel
@@ -160,21 +180,6 @@ func (a *BackendAdapter) connectHandler() backend.ConnectHandler {
 	}
 }
 
-func (a *BackendAdapter) tokenProvider() backend.TokenProvider {
-	return func(ctx context.Context) (backend.Token, error) {
-		cfg := a.currentConfig()
-		if !configReady(cfg) {
-			return backend.Token{}, fmt.Errorf("nexus adapter not configured")
-		}
-		hosts := buildHostnameList(cfg)
-		tokenValue, expires, err := buildBackendToken(cfg.DeviceSecret, hosts)
-		if err != nil {
-			return backend.Token{}, err
-		}
-		return backend.Token{Value: tokenValue, Expiry: expires}, nil
-	}
-}
-
 func (a *BackendAdapter) currentConfig() Config {
 	a.mu.Lock()
 	cfg := a.cfg
@@ -197,30 +202,4 @@ func configReady(cfg Config) bool {
 	return strings.TrimSpace(cfg.Endpoint) != "" &&
 		strings.TrimSpace(cfg.DeviceSecret) != "" &&
 		strings.TrimSpace(cfg.PortalHostname) != ""
-}
-
-func buildBackendToken(secret string, hostnames []string) (string, time.Time, error) {
-	secret = strings.TrimSpace(secret)
-	if secret == "" {
-		return "", time.Time{}, fmt.Errorf("nexus jwt secret required")
-	}
-	if len(hostnames) == 0 {
-		return "", time.Time{}, fmt.Errorf("at least one hostname required")
-	}
-	now := timeNow()
-	expires := now.Add(backendTokenTTL)
-	claims := jwt.MapClaims{
-		"hostnames": hostnames,
-		"iat":       now.Unix(),
-		"exp":       expires.Unix(),
-	}
-	if len(hostnames) == 1 {
-		claims["hostname"] = hostnames[0]
-	}
-	tkn := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	token, err := tkn.SignedString([]byte(secret))
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	return token, expires, nil
 }

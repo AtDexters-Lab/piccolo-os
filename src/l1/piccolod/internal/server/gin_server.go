@@ -1089,6 +1089,10 @@ func (s *GinServer) httpsRedirectMiddleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		if strings.HasPrefix(c.Request.URL.Path, "/.well-known/acme-challenge/") {
+			c.Next()
+			return
+		}
 		host := canonicalHost(c.Request.Host)
 		if host == "" || !s.remoteResolver.IsRemoteHostname(host) {
 			c.Next()
