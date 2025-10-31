@@ -326,6 +326,91 @@ func TestFileVolumeManagerAttachFailsWhenMetadataCorruptedWhileRunning(t *testin
 	}
 }
 
+func TestFileVolumeManagerAttachFailsWithInvalidMetadataValues(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*volumeMetadata)
+	}{
+		{
+			name: "invalid nonce encoding",
+			mutate: func(m *volumeMetadata) {
+				m.Nonce = "%%%not-base64%%%"
+			},
+		},
+		{
+			name: "invalid nonce length",
+			mutate: func(m *volumeMetadata) {
+				m.Nonce = base64.StdEncoding.EncodeToString([]byte{1, 2, 3})
+			},
+		},
+		{
+			name: "invalid wrapped key encoding",
+			mutate: func(m *volumeMetadata) {
+				m.WrappedKey = "!!!"
+			},
+		},
+		{
+			name: "tampered wrapped key",
+			mutate: func(m *volumeMetadata) {
+				sealed, err := base64.StdEncoding.DecodeString(m.WrappedKey)
+				if err != nil || len(sealed) == 0 {
+					m.WrappedKey = "invalid"
+					return
+				}
+				sealed[0] ^= 0xFF
+				m.WrappedKey = base64.StdEncoding.EncodeToString(sealed)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			cryptoMgr := newUnlockedCrypto(t, root)
+			runner := &fakeRunner{}
+			launcher := &fakeMountLauncher{}
+			waiter := func(string, time.Duration) error { return nil }
+			mgr := newFileVolumeManagerWithDeps(root, cryptoMgr, runner, "gocryptfs", "fusermount3", launcher, waiter)
+
+			handle, err := mgr.EnsureVolume(context.Background(), VolumeRequest{ID: "victim", Class: VolumeClassApplication})
+			if err != nil {
+				t.Fatalf("EnsureVolume: %v", err)
+			}
+
+			metaPath := filepath.Join(root, "ciphertext", "victim", volumeMetadataName)
+			metaBytes, err := os.ReadFile(metaPath)
+			if err != nil {
+				t.Fatalf("read metadata: %v", err)
+			}
+
+			var meta volumeMetadata
+			if err := json.Unmarshal(metaBytes, &meta); err != nil {
+				t.Fatalf("unmarshal metadata: %v", err)
+			}
+			tc.mutate(&meta)
+			updated, err := json.MarshalIndent(&meta, "", "  ")
+			if err != nil {
+				t.Fatalf("marshal metadata: %v", err)
+			}
+			if err := os.WriteFile(metaPath, updated, 0o600); err != nil {
+				t.Fatalf("write metadata: %v", err)
+			}
+
+			launcher.calls = nil
+			err = mgr.Attach(context.Background(), handle, AttachOptions{Role: VolumeRoleLeader})
+			if err == nil {
+				t.Fatalf("expected attach to fail due to metadata issue")
+			}
+			if !errors.Is(err, ErrVolumeMetadataCorrupted) {
+				t.Fatalf("expected ErrVolumeMetadataCorrupted, got %v", err)
+			}
+			if len(launcher.calls) != 0 {
+				t.Fatalf("expected metadata failure before launching gocryptfs, got %d calls", len(launcher.calls))
+			}
+		})
+	}
+}
+
 func TestFileVolumeManagerAttachHandlesMountTimeout(t *testing.T) {
 	root := t.TempDir()
 	cryptoMgr := newUnlockedCrypto(t, root)

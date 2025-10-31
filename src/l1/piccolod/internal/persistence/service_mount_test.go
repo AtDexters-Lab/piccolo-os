@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 
 func TestNewServiceFailsWhenBootstrapAttachFails(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
 
 	cryptoMgr, err := crypt.NewManager(tempDir)
 	if err != nil {
@@ -58,6 +60,7 @@ func TestNewServiceFailsWhenBootstrapAttachFails(t *testing.T) {
 
 func TestNewServiceAllowsBootstrapPendingSetup(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
 
 	cryptoMgr, err := crypt.NewManager(tempDir)
 	if err != nil {
@@ -97,6 +100,7 @@ func TestNewServiceAllowsBootstrapPendingSetup(t *testing.T) {
 
 func TestModuleAttachesBootstrapOnUnlock(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
 
 	cryptoMgr, err := crypt.NewManager(tempDir)
 	if err != nil {
@@ -112,6 +116,9 @@ func TestModuleAttachesBootstrapOnUnlock(t *testing.T) {
 		}
 		handle := VolumeHandle{ID: req.ID, MountDir: filepath.Join(tempDir, "mounts", req.ID)}
 		handles[req.ID] = handle
+		if err := os.MkdirAll(handle.MountDir, 0o700); err != nil {
+			t.Fatalf("mkdir mount dir: %v", err)
+		}
 		return handle, nil
 	}
 	volumes.onAttach = func(_ context.Context, handle VolumeHandle, _ AttachOptions) error {
@@ -142,6 +149,7 @@ func TestModuleAttachesBootstrapOnUnlock(t *testing.T) {
 	if err := cryptoMgr.Unlock("test-pass"); err != nil {
 		t.Fatalf("crypto unlock: %v", err)
 	}
+	prepareControlCipherDir(t, tempDir)
 
 	if err := mod.setLockState(context.Background(), false); err != nil {
 		t.Fatalf("unlock setLockState: %v", err)
@@ -153,6 +161,7 @@ func TestModuleAttachesBootstrapOnUnlock(t *testing.T) {
 
 func TestModuleAttachVolumesIgnoresRequestCancellation(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
 
 	cryptoMgr, err := crypt.NewManager(tempDir)
 	if err != nil {
@@ -173,6 +182,9 @@ func TestModuleAttachVolumesIgnoresRequestCancellation(t *testing.T) {
 		}
 		handle := VolumeHandle{ID: req.ID, MountDir: filepath.Join(tempDir, "mounts", req.ID)}
 		handles[req.ID] = handle
+		if err := os.MkdirAll(handle.MountDir, 0o700); err != nil {
+			t.Fatalf("mkdir mount dir: %v", err)
+		}
 		return handle, nil
 	}
 	volumes.onAttach = func(ctx context.Context, handle VolumeHandle, _ AttachOptions) error {
@@ -193,6 +205,7 @@ func TestModuleAttachVolumesIgnoresRequestCancellation(t *testing.T) {
 
 	reqCtx, cancel := context.WithCancel(context.Background())
 	cancel()
+	prepareControlCipherDir(t, tempDir)
 	if err := mod.setLockState(reqCtx, false); err != nil {
 		t.Fatalf("unlock setLockState: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,8 +23,10 @@ import (
 	"piccolod/internal/events"
 	"piccolod/internal/health"
 	"piccolod/internal/mdns"
+	"piccolod/internal/persistence"
 	"piccolod/internal/remote"
 	"piccolod/internal/remote/nexusclient"
+	"piccolod/internal/runtime/commands"
 	"piccolod/internal/services"
 )
 
@@ -31,6 +34,24 @@ func requireMountBypassAllowed(t *testing.T) {
 	t.Helper()
 	if os.Getenv("PICCOLO_ALLOW_UNMOUNTED_TESTS") != "1" {
 		t.Skip("set PICCOLO_ALLOW_UNMOUNTED_TESTS=1 to run without mounted volumes")
+	}
+}
+
+func ensureTestControlMetadata(t *testing.T, root string) {
+	t.Helper()
+	cipherDir := filepath.Join(root, "ciphertext", "control")
+	if err := os.MkdirAll(cipherDir, 0o700); err != nil {
+		t.Fatalf("mkdir cipher dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cipherDir, "gocryptfs.conf"), []byte("stub"), 0o600); err != nil {
+		t.Fatalf("write gocryptfs.conf: %v", err)
+	}
+	meta := `{"version":1,"wrapped_key":"stub","nonce":"stub"}`
+	if err := os.WriteFile(filepath.Join(cipherDir, "piccolo.volume.json"), []byte(meta), 0o600); err != nil {
+		t.Fatalf("write volume metadata: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "mounts", "control"), 0o700); err != nil {
+		t.Fatalf("mkdir mount dir: %v", err)
 	}
 }
 
@@ -701,8 +722,107 @@ func TestInvalidRoutes(t *testing.T) {
 	}
 }
 
+func TestHandlePersistenceControlExport(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tempDir := t.TempDir()
+
+	server := createGinTestServer(t, tempDir)
+	sessionCookie, csrfToken := setupTestAdminSession(t, server)
+
+	artifactPath := filepath.Join(tempDir, "exports", "control", "control-plane.pcv")
+	server.dispatcher = commands.NewDispatcher()
+	server.dispatcher.Register(persistence.CommandRunControlExport, commands.HandlerFunc(func(ctx context.Context, cmd commands.Command) (commands.Response, error) {
+		if _, ok := cmd.(persistence.RunControlExportCommand); !ok {
+			t.Fatalf("unexpected command type: %T", cmd)
+		}
+		return persistence.ExportArtifact{Path: artifactPath, Kind: persistence.ExportKindControlOnly}, nil
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/exports/control", nil)
+	attachAuth(req, sessionCookie, csrfToken)
+	server.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data struct {
+			Artifact struct {
+				Path string `json:"path"`
+				Kind string `json:"kind"`
+			} `json:"artifact"`
+		} `json:"data"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.Artifact.Path != artifactPath {
+		t.Fatalf("expected artifact path %q, got %q", artifactPath, resp.Data.Artifact.Path)
+	}
+	if resp.Data.Artifact.Kind != string(persistence.ExportKindControlOnly) {
+		t.Fatalf("unexpected artifact kind %q", resp.Data.Artifact.Kind)
+	}
+	if resp.Message == "" {
+		t.Fatalf("expected success message")
+	}
+}
+
+func TestHandlePersistenceFullExport(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tempDir := t.TempDir()
+
+	server := createGinTestServer(t, tempDir)
+	sessionCookie, csrfToken := setupTestAdminSession(t, server)
+
+	controlArtifact := filepath.Join(tempDir, "exports", "full", "full-data.pcv")
+	server.dispatcher = commands.NewDispatcher()
+	server.dispatcher.Register(persistence.CommandRunFullExport, commands.HandlerFunc(func(ctx context.Context, cmd commands.Command) (commands.Response, error) {
+		if _, ok := cmd.(persistence.RunFullExportCommand); !ok {
+			t.Fatalf("unexpected command type: %T", cmd)
+		}
+		return persistence.ExportArtifact{Path: controlArtifact, Kind: persistence.ExportKindFullData}, nil
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/exports/full", nil)
+	attachAuth(req, sessionCookie, csrfToken)
+	server.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data struct {
+			Artifact struct {
+				Path string `json:"path"`
+				Kind string `json:"kind"`
+			} `json:"artifact"`
+		} `json:"data"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.Artifact.Path != controlArtifact {
+		t.Fatalf("expected artifact path %q, got %q", controlArtifact, resp.Data.Artifact.Path)
+	}
+	if resp.Data.Artifact.Kind != string(persistence.ExportKindFullData) {
+		t.Fatalf("unexpected artifact kind %q", resp.Data.Artifact.Kind)
+	}
+	if resp.Message == "" {
+		t.Fatalf("expected success message")
+	}
+}
+
 // createGinTestServer creates a Gin test server instance with filesystem state management
 func createGinTestServer(t *testing.T, tempDir string) *GinServer {
+	t.Helper()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
+	ensureTestControlMetadata(t, tempDir)
 	// Create mock container manager for app manager
 	mockContainer := &GinMockContainerManager{
 		containers: make(map[string]*MockContainer),
@@ -732,6 +852,28 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 		t.Fatalf("crypto manager init: %v", err)
 	}
 
+	dispatch := commands.NewDispatcher()
+	dispatch.Register(persistence.CommandEnsureVolume, commands.HandlerFunc(func(ctx context.Context, cmd commands.Command) (commands.Response, error) {
+		req, ok := cmd.(persistence.EnsureVolumeCommand)
+		if !ok {
+			return nil, fmt.Errorf("unexpected command type %T", cmd)
+		}
+		handle := persistence.VolumeHandle{
+			ID:       req.Req.ID,
+			MountDir: filepath.Join(tempDir, "mounts", req.Req.ID),
+		}
+		if err := os.MkdirAll(handle.MountDir, 0o700); err != nil {
+			return nil, err
+		}
+		return persistence.EnsureVolumeResponse{Handle: handle}, nil
+	}))
+	dispatch.Register(persistence.CommandAttachVolume, commands.HandlerFunc(func(context.Context, commands.Command) (commands.Response, error) {
+		return nil, nil
+	}))
+	dispatch.Register(persistence.CommandRecordLockState, commands.HandlerFunc(func(context.Context, commands.Command) (commands.Response, error) {
+		return nil, nil
+	}))
+
 	// Create minimal server instance for testing
 	rm, err := remote.NewManager(tempDir)
 	if err != nil {
@@ -744,6 +886,7 @@ func createGinTestServer(t *testing.T, tempDir string) *GinServer {
 		appManager:     appMgr,
 		serviceManager: svcMgr,
 		mdnsManager:    mdns.NewManager(),
+		dispatcher:     dispatch,
 		remoteManager:  rm,
 		authManager:    authMgr,
 		sessions:       authpkg.NewSessionStore(),

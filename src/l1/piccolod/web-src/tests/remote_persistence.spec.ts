@@ -1,5 +1,5 @@
 import { test, expect, request as playwrightRequest } from '@playwright/test';
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -79,6 +79,18 @@ async function stopServer(proc: ChildProcess | null) {
   });
 }
 
+function unmountControlVolume(stateDir: string) {
+  if (!stateDir) return;
+  const mountDir = path.join(stateDir, 'mounts', 'control');
+  try {
+    if (fs.existsSync(mountDir)) {
+      spawnSync('fusermount3', ['-u', mountDir], { stdio: 'ignore' });
+    }
+  } catch (err) {
+    // best effort; swallow errors so cleanup can proceed
+  }
+}
+
 test.describe('remote persistence across restart', () => {
   let server: ChildProcess | null = null;
   let stateDir = '';
@@ -87,6 +99,7 @@ test.describe('remote persistence across restart', () => {
     await stopServer(server);
     server = null;
     if (stateDir) {
+      unmountControlVolume(stateDir);
       fs.rmSync(stateDir, { recursive: true, force: true });
       stateDir = '';
     }
@@ -104,6 +117,7 @@ test.describe('remote persistence across restart', () => {
         PICCOLO_DISABLE_MDNS: '1',
         PICCOLO_REMOTE_FAKE_ACME: '1',
         PICCOLO_NEXUS_USE_STUB: '1',
+        PICCOLO_ALLOW_UNMOUNTED_TESTS: '1',
       },
       stdio: 'ignore',
     });
@@ -139,8 +153,8 @@ test.describe('remote persistence across restart', () => {
       expect(diskConfigBefore.enabled).toBeTruthy();
       expect(diskConfigBefore.portal_hostname).toBe(REMOTE_HOST);
     } else {
-      const controlStorePath = path.join(stateDir, 'ciphertext', 'control', 'control.enc');
-      expect(fs.existsSync(controlStorePath)).toBeTruthy();
+      const controlDbPath = path.join(stateDir, 'mounts', 'control', 'control.db');
+      expect(fs.existsSync(controlDbPath)).toBeTruthy();
     }
 
     await api1.dispose();
@@ -157,6 +171,7 @@ test.describe('remote persistence across restart', () => {
         PICCOLO_DISABLE_MDNS: '1',
         PICCOLO_REMOTE_FAKE_ACME: '1',
         PICCOLO_NEXUS_USE_STUB: '1',
+        PICCOLO_ALLOW_UNMOUNTED_TESTS: '1',
       },
       stdio: 'ignore',
     });
@@ -172,8 +187,8 @@ test.describe('remote persistence across restart', () => {
       expect(diskConfigAfter.enabled).toBeTruthy();
       expect(diskConfigAfter.portal_hostname).toBe(REMOTE_HOST);
     } else {
-      const controlStorePath = path.join(stateDir, 'ciphertext', 'control', 'control.enc');
-      expect(fs.existsSync(controlStorePath)).toBeTruthy();
+      const controlDbPath = path.join(stateDir, 'mounts', 'control', 'control.db');
+      expect(fs.existsSync(controlDbPath)).toBeTruthy();
     }
     await api2.dispose();
   });

@@ -136,6 +136,7 @@ type fileVolumeManager struct {
 	stateRoot      string
 	bus            *events.Bus
 	roleChecker    func(string, VolumeRole) bool
+	bypassMount    bool
 	mu             sync.RWMutex
 }
 
@@ -146,6 +147,7 @@ type volumeEntry struct {
 	metadataReady bool
 	role          VolumeRole
 	process       mountProcess
+	metaMu        sync.Mutex
 }
 
 type volumeMetadata struct {
@@ -185,6 +187,11 @@ func newFileVolumeManager(root string, crypto *crypt.Manager, bus *events.Bus) *
 	if root == "" {
 		root = paths.Root()
 	}
+	bypass := os.Getenv("PICCOLO_ALLOW_UNMOUNTED_TESTS") == "1"
+	waiter := waitForMountReady
+	if bypass {
+		waiter = func(string, time.Duration) error { return nil }
+	}
 	return &fileVolumeManager{
 		root:           root,
 		crypto:         crypto,
@@ -193,10 +200,11 @@ func newFileVolumeManager(root string, crypto *crypt.Manager, bus *events.Bus) *
 		fusermountPath: defaultFusermountBinary(),
 		volumes:        make(map[string]*volumeEntry),
 		launcher:       execMountLauncher{},
-		waitMount:      waitForMountReady,
+		waitMount:      waiter,
 		stateRoot:      filepath.Join(root, "volumes"),
 		bus:            bus,
 		roleChecker:    func(string, VolumeRole) bool { return true },
+		bypassMount:    bypass,
 	}
 }
 
@@ -320,6 +328,27 @@ func (f *fileVolumeManager) Attach(ctx context.Context, handle VolumeHandle, opt
 		return fmt.Errorf("attach: leadership not granted for volume %s", handle.ID)
 	}
 
+	if f.bypassMount {
+		if err := f.ensureMetadata(ctx, entry); err != nil {
+			return err
+		}
+		modeBytes := []byte("rw")
+		if opts.Role == VolumeRoleFollower {
+			modeBytes = []byte("ro")
+		}
+		if err := os.WriteFile(filepath.Join(entry.handle.MountDir, ".mode"), modeBytes, 0o600); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(entry.handle.MountDir, ".cipher"), []byte(entry.cipherDir), 0o600); err != nil {
+			return err
+		}
+		f.mu.Lock()
+		entry.role = opts.Role
+		entry.metadataReady = true
+		f.mu.Unlock()
+		return f.recordVolumeState(handle.ID, volumeStateMounted, volumeStateMounted, opts.Role, nil)
+	}
+
 	if err := f.ensureMetadata(ctx, entry); err != nil {
 		return err
 	}
@@ -379,6 +408,16 @@ func (f *fileVolumeManager) Attach(ctx context.Context, handle VolumeHandle, opt
 }
 
 func (f *fileVolumeManager) Detach(ctx context.Context, handle VolumeHandle) error {
+	if f.bypassMount {
+		role := VolumeRoleUnknown
+		f.mu.RLock()
+		if entry, ok := f.volumes[handle.ID]; ok {
+			role = entry.role
+			entry.role = VolumeRoleUnknown
+		}
+		f.mu.RUnlock()
+		return f.recordVolumeState(handle.ID, volumeStateUnmounted, volumeStateUnmounted, role, nil)
+	}
 	role := VolumeRoleUnknown
 	f.mu.RLock()
 	if entry, ok := f.volumes[handle.ID]; ok {
@@ -407,6 +446,9 @@ func (f *fileVolumeManager) RoleStream(volumeID string) (<-chan VolumeRole, erro
 }
 
 func (f *fileVolumeManager) ensureMetadata(ctx context.Context, entry *volumeEntry) error {
+	entry.metaMu.Lock()
+	defer entry.metaMu.Unlock()
+
 	metaPath := filepath.Join(entry.cipherDir, volumeMetadataName)
 	if data, err := os.ReadFile(metaPath); err == nil {
 		var meta volumeMetadata
@@ -424,6 +466,31 @@ func (f *fileVolumeManager) ensureMetadata(ctx context.Context, entry *volumeEnt
 	}
 
 	entry.metadataReady = false
+	if f.bypassMount {
+		meta := volumeMetadata{
+			Version:    metadataVersion,
+			WrappedKey: base64.StdEncoding.EncodeToString([]byte("piccolo-bypass-key")),
+			Nonce:      base64.StdEncoding.EncodeToString([]byte("bypass-nonce!!")),
+		}
+		metaBytes, err := json.MarshalIndent(&meta, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(metaPath, metaBytes, 0o600); err != nil {
+			return err
+		}
+		confPath := filepath.Join(entry.cipherDir, gocryptfsConfigName)
+		if _, err := os.Stat(confPath); errors.Is(err, os.ErrNotExist) {
+			if err := os.WriteFile(confPath, []byte("bypass"), 0o600); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		entry.metadata = meta
+		entry.metadataReady = true
+		return nil
+	}
 
 	passphrase, err := generatePassphrase()
 	if err != nil {
@@ -519,6 +586,9 @@ func (f *fileVolumeManager) publishVolumeEvent(volumeID string, state volumeStat
 }
 
 func (f *fileVolumeManager) reconcileVolumeState(ctx context.Context, entry *volumeEntry) error {
+	if f.bypassMount {
+		return nil
+	}
 	state, err := f.readVolumeState(entry.handle.ID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -678,15 +748,21 @@ func (f *fileVolumeManager) unwrapVolumeKey(ctx context.Context, meta volumeMeta
 		}
 		nonce, err := base64.StdEncoding.DecodeString(meta.Nonce)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: decode nonce: %v", ErrVolumeMetadataCorrupted, err)
+		}
+		if len(nonce) != aead.NonceSize() {
+			return fmt.Errorf("%w: invalid nonce length %d (expected %d)", ErrVolumeMetadataCorrupted, len(nonce), aead.NonceSize())
 		}
 		sealed, err := base64.StdEncoding.DecodeString(meta.WrappedKey)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: decode wrapped key: %v", ErrVolumeMetadataCorrupted, err)
+		}
+		if len(sealed) == 0 {
+			return fmt.Errorf("%w: empty wrapped key", ErrVolumeMetadataCorrupted)
 		}
 		key, err := aead.Open(nil, nonce, sealed, nil)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: unwrap failed: %v", ErrVolumeMetadataCorrupted, err)
 		}
 		passphrase = key
 		return nil

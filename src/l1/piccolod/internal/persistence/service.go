@@ -48,6 +48,7 @@ type Module struct {
 	stateDir           string
 	bootstrapHandle    VolumeHandle
 	controlHandle      VolumeHandle
+	exportMu           sync.Mutex
 	commitMu           sync.Mutex
 	lastCommitRevision uint64
 	pollCancel         context.CancelFunc
@@ -96,7 +97,7 @@ func NewService(opts Options) (*Module, error) {
 		if mod.crypto == nil {
 			return nil, ErrCryptoUnavailable
 		}
-		store, err := newEncryptedControlStore(mod.stateDir, mod.crypto)
+		store, err := newControlStore(mod.stateDir, mod.crypto)
 		if err != nil {
 			return nil, err
 		}
@@ -134,17 +135,13 @@ func NewService(opts Options) (*Module, error) {
 		mod.devices = newNoopDeviceManager()
 	}
 	if mod.exports == nil {
-		mod.exports = newFileExportManager(mod.stateDir)
+		// export manager initialized after core volumes ensured
 	}
 	if mod.storage == nil {
 		mod.storage = newNoopStorageAdapter()
 	}
 	if mod.consensus == nil {
 		mod.consensus = newNoopConsensusManager()
-	}
-
-	if opts.Dispatcher != nil {
-		mod.registerHandlers(opts.Dispatcher)
 	}
 
 	mod.observeLeadership()
@@ -156,7 +153,14 @@ func NewService(opts Options) (*Module, error) {
 	if err := mod.ensureCoreVolumes(context.Background()); err != nil {
 		return nil, err
 	}
+	if mod.exports == nil {
+		mod.exports = newFileExportManager(mod.stateDir)
+	}
 	mod.startRevisionPoller()
+
+	if opts.Dispatcher != nil {
+		mod.registerHandlers(opts.Dispatcher)
+	}
 
 	return mod, nil
 }
@@ -320,21 +324,95 @@ func (m *Module) setLockState(ctx context.Context, locked bool) error {
 		m.lockStateMu.Unlock()
 		return nil
 	}
-	if err := store.Unlock(ctx); err != nil {
+	if err := m.attachControlVolume(ctx); err != nil {
 		return err
 	}
-	if err := m.attachControlVolume(ctx); err != nil {
-		store.Lock()
-		return fmt.Errorf("attach control volume: %w", err)
-	}
 	if err := m.attachBootstrapVolume(ctx, false); err != nil {
-		store.Lock()
+		_ = m.detachVolumeIfMounted(ctx, m.controlHandle)
 		return fmt.Errorf("attach bootstrap volume: %w", err)
+	}
+	if err := store.Unlock(ctx); err != nil {
+		store.Lock()
+		_ = m.detachVolumeIfMounted(ctx, m.controlHandle)
+		_ = m.detachVolumeIfMounted(ctx, m.bootstrapHandle)
+		return err
 	}
 	m.lockStateMu.Lock()
 	m.lockState = false
 	m.lockStateMu.Unlock()
 	return nil
+}
+
+func (m *Module) runExportWithLock(ctx context.Context, includeBootstrap bool, fn func(context.Context) (ExportArtifact, error)) (ExportArtifact, error) {
+	if fn == nil {
+		return ExportArtifact{}, fmt.Errorf("persistence: export callback required")
+	}
+	m.exportMu.Lock()
+	defer m.exportMu.Unlock()
+
+	wasLocked := m.ControlLocked()
+	lockedByExport := false
+	if !wasLocked {
+		if err := m.setLockState(ctx, true); err != nil {
+			return ExportArtifact{}, err
+		}
+		m.publishLockState(true)
+		lockedByExport = true
+	}
+
+	bootstrapDetached := false
+	if includeBootstrap && m.volumes != nil && m.bootstrapHandle.ID != "" && m.bootstrapHandle.MountDir != "" {
+		if mounted, err := isMountPoint(m.bootstrapHandle.MountDir); err != nil {
+			if lockedByExport {
+				if unlockErr := m.setLockState(ctx, false); unlockErr != nil {
+					log.Printf("WARN: failed to restore control lock during export abort: %v", unlockErr)
+				} else {
+					m.publishLockState(false)
+				}
+			}
+			return ExportArtifact{}, err
+		} else if mounted {
+			if err := m.volumes.Detach(ctx, m.bootstrapHandle); err != nil && !errors.Is(err, ErrNotImplemented) {
+				if lockedByExport {
+					if unlockErr := m.setLockState(ctx, false); unlockErr != nil {
+						log.Printf("WARN: failed to restore control lock during export abort: %v", unlockErr)
+					} else {
+						m.publishLockState(false)
+					}
+				}
+				return ExportArtifact{}, err
+			}
+			bootstrapDetached = true
+		}
+	}
+
+	artifact, runErr := fn(ctx)
+	resultErr := runErr
+
+	if lockedByExport {
+		if err := m.setLockState(ctx, false); err != nil {
+			if resultErr == nil {
+				resultErr = err
+			} else {
+				log.Printf("WARN: failed to restore control unlock after export: %v", err)
+			}
+		} else {
+			m.publishLockState(false)
+		}
+	} else if bootstrapDetached {
+		if err := m.attachBootstrapVolume(ctx, false); err != nil {
+			if resultErr == nil {
+				resultErr = err
+			} else {
+				log.Printf("WARN: failed to reattach bootstrap volume after export: %v", err)
+			}
+		}
+	}
+
+	if resultErr != nil {
+		return ExportArtifact{}, resultErr
+	}
+	return artifact, nil
 }
 
 // SwapBootstrap allows wiring a real bootstrap store after construction.

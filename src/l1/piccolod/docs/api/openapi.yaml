@@ -257,6 +257,28 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RecoveryKey' }
+  /exports/control:
+    post:
+      summary: Generate a control-plane export (PCV)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportResponse' }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden (control plane locked) }
+  /exports/full:
+    post:
+      summary: Generate a full-data export (control + bootstrap volumes)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportResponse' }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden (control plane locked) }
   /storage/unlock:
     post:
       summary: Unlock encrypted volumes
@@ -919,6 +941,23 @@ components:
       properties:
         data: { $ref: '#/components/schemas/App' }
         message: { type: string }
+    ExportResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            artifact: { $ref: '#/components/schemas/ExportArtifact' }
+        message: { type: string }
+    ExportArtifact:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Absolute path to the generated artifact inside PICCOLO_STATE_DIR.
+        kind:
+          type: string
+          enum: [control_only, full_data]
     ResponseAppWithServices:
       type: object
       properties:

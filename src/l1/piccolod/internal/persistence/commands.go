@@ -94,7 +94,7 @@ func (m *Module) handleRunControlExport(ctx context.Context, cmd commands.Comman
 	if _, ok := cmd.(RunControlExportCommand); !ok {
 		return nil, ErrInvalidCommand
 	}
-	artifact, err := m.exports.RunControlPlane(ctx)
+	artifact, err := m.runExportWithLock(ctx, false, m.exports.RunControlPlane)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (m *Module) handleRunFullExport(ctx context.Context, cmd commands.Command) 
 	if _, ok := cmd.(RunFullExportCommand); !ok {
 		return nil, ErrInvalidCommand
 	}
-	artifact, err := m.exports.RunFullData(ctx)
+	artifact, err := m.runExportWithLock(ctx, true, m.exports.RunFullData)
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"piccolod/internal/remote"
+	"piccolod/internal/remote/nexusclient"
 )
 
 func TestRemotePortalOverTLSEmitsHSTS(t *testing.T) {
@@ -31,11 +32,8 @@ func TestRemotePortalOverTLSEmitsHSTS(t *testing.T) {
 	cert := mustSelfSignedCert(t, host)
 	srv.tlsMux.SetCertProvider(&staticCertProvider{cert: cert})
 
-	srv.applyRemoteRuntimeFromStatus(remote.Status{
-		Enabled:        true,
-		PortalHostname: host,
-		TLD:            "example.com",
-	})
+	runtimeStatus := remote.Status{Enabled: true, PortalHostname: host, TLD: "example.com"}
+	srv.applyRemoteRuntimeFromStatus(runtimeStatus)
 
 	port := srv.tlsMux.Port()
 	if port == 0 {
@@ -76,11 +74,9 @@ func TestRemotePortalHTTPRedirectsToHTTPS(t *testing.T) {
 
 	const host = "portal.example.com"
 
-	srv.applyRemoteRuntimeFromStatus(remote.Status{
-		Enabled:        true,
-		PortalHostname: host,
-		TLD:            "example.com",
-	})
+	runtimeStatus := remote.Status{Enabled: true, PortalHostname: host, TLD: "example.com"}
+	srv.applyRemoteRuntimeFromStatus(runtimeStatus)
+	srv.remoteResolver.UpdateConfig(nexusclient.Config{PortalHostname: host, TLD: "example.com"})
 
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for !srv.remoteResolver.IsRemoteHostname(host) && time.Now().Before(deadline) {
@@ -95,6 +91,12 @@ func TestRemotePortalHTTPRedirectsToHTTPS(t *testing.T) {
 	if srv.tlsMux.Port() == 0 {
 		t.Fatalf("tls mux did not start")
 	}
+	// Reapply to ensure resolver has latest view even if background events reset it.
+	srv.applyRemoteRuntimeFromStatus(remote.Status{
+		Enabled:        true,
+		PortalHostname: host,
+		TLD:            "example.com",
+	})
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil)

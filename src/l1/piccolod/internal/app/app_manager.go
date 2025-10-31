@@ -308,6 +308,19 @@ func (m *AppManager) ensureMountAvailable(base string) error {
 }
 
 func defaultMountVerifier(path string) error {
+	if os.Getenv("PICCOLO_ALLOW_UNMOUNTED_TESTS") == "1" {
+		if strings.TrimSpace(path) == "" {
+			return ErrVolumeUnavailable
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("app manager: state base %s is not a directory", path)
+		}
+		return nil
+	}
 	if strings.TrimSpace(path) == "" {
 		return ErrVolumeUnavailable
 	}

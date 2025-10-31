@@ -41,6 +41,36 @@ func TestModuleSetLockStateIgnoresStaleCipherMarker(t *testing.T) {
 	}
 }
 
+func TestModuleRunExportWithLockRestoresState(t *testing.T) {
+	mod := &Module{
+		control:       &stubLockableControl{},
+		volumes:       &stubVolumeManager{},
+		controlHandle: VolumeHandle{ID: "control"},
+	}
+	mod.lockState = false
+
+	artifact, err := mod.runExportWithLock(context.Background(), false, func(ctx context.Context) (ExportArtifact, error) {
+		ctrl := mod.control.(*stubLockableControl)
+		if !ctrl.locked {
+			t.Fatalf("expected control store locked during export")
+		}
+		return ExportArtifact{Path: "/tmp/control.pcv", Kind: ExportKindControlOnly}, nil
+	})
+	if err != nil {
+		t.Fatalf("runExportWithLock returned error: %v", err)
+	}
+	ctrl := mod.control.(*stubLockableControl)
+	if ctrl.locked {
+		t.Fatalf("expected control store unlocked after export")
+	}
+	if mod.ControlLocked() {
+		t.Fatalf("module lock state not restored")
+	}
+	if artifact.Kind != ExportKindControlOnly {
+		t.Fatalf("unexpected artifact kind %s", artifact.Kind)
+	}
+}
+
 type stubLockableControl struct {
 	locked bool
 }

@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 // (E2E_REMOTE_STACK=1), keeping everything else identical.
 const stubEnv = 'PICCOLO_DISABLE_MDNS=1 PICCOLO_NEXUS_USE_STUB=1 PICCOLO_REMOTE_FAKE_ACME=1';
 const baseEnv = 'PICCOLO_DISABLE_MDNS=1';
+const volumeEnv = 'PICCOLO_ALLOW_UNMOUNTED_TESTS=1';
 const stateEnv = 'PORT=8080 PICCOLO_STATE_DIR=.e2e-state';
 const stackRoot = path.resolve(__dirname, '../tools/remote-stack');
 const pebbleCA = path.resolve(stackRoot, 'pebble.minica.pem');
@@ -17,9 +18,11 @@ const combinedCa = path.resolve(stackRoot, 'combined-ca.pem');
 const acmeEnv = 'PICCOLO_ACME_DIR_URL=https://localhost:14000/dir';
 const caEnv = `LEGO_CA_CERTIFICATES=${pebbleCA}`;
 const sslEnv = `SSL_CERT_FILE=${combinedCa}`;
+const prepareVolumes = 'true';
+
 const serverCmd = process.env.E2E_REMOTE_STACK === '1'
-  ? `bash -c "rm -rf .e2e-state && ${baseEnv} ${stateEnv} ${acmeEnv} ${caEnv} ${sslEnv} ./piccolod"`
-  : `bash -c "rm -rf .e2e-state && ${stubEnv} ${stateEnv} ./piccolod"`;
+  ? `bash -c "rm -rf .e2e-state && ${prepareVolumes} && ${baseEnv} ${volumeEnv} ${stateEnv} ${acmeEnv} ${caEnv} ${sslEnv} ./piccolod"`
+  : `bash -c "rm -rf .e2e-state && ${prepareVolumes} && ${stubEnv} ${volumeEnv} ${stateEnv} ./piccolod"`;
 
 const lockSensitiveSpecs = [
   'tests/catalog_real.spec.ts',

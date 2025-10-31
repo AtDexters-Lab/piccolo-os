@@ -51,17 +51,17 @@ VolumeManager consults the app’s cluster mode when allocating volumes and rela
 - API middleware can eventually rely on the event stream instead of polled crypto checks to gate mutating requests.
 
 ## ControlStore
-- Physical store: target design remains SQLite in WAL mode with `synchronous=FULL`, mounted on the control volume. The current checkpoint uses an AES-GCM sealed JSON payload persisted under `ciphertext/control/control.enc` so we can exercise encrypted repos before the SQLite schema lands.
+- Physical store: SQLite in WAL mode with `synchronous=FULL`, mounted on the control volume (`mounts/control/control.db`). The ciphertext tree only contains gocryptfs metadata while the database files live inside the mounted volume.
 - Exposes domain repositories (`AuthRepo`, `RemoteRepo`, `AppStateRepo`, `AuditRepo`, etc.) instead of raw SQL handles. `AuthRepo` now persists the Argon2id admin password hash and initialization flag; reads/writes return `ErrLocked` until the control store is unlocked with the SDEK.
 - `RemoteRepo` stores the full remote-manager configuration as an encrypted blob so remote API calls are gated by the same lock semantics (HTTP 423 until unlock) and replicate cleanly with the control shard.
 - Only the leader performs writes. Transactions commit through the repositories; the interim JSON payload still flushes via fsync, and the upcoming SQLite layer will assume that role.
 - Health tooling: periodic `PRAGMA quick_check`, timer-based WAL checkpoints, automatic `VACUUM INTO`/`.recover` repair attempts. Failures emit events and block PCV exports until resolved.
 
 ## PCV & Recovery
-- PCV exports package the control-plane volume plus device registry metadata (durable IDs, routing prefs). Bootstrap shards are not included; each device recreates its shard post-unlock.
-- ExportManager offers two APIs:
-  - Control-only exports for reinstating a node into an existing cluster/federation.
-  - Full-data exports (control + all volumes) for standalone recovery when federation replicas are unavailable.
+- PCV exports now quiesce persistence by temporarily re-locking the control store, detaching the gocryptfs mounts, and streaming the sealed ciphertext trees for the requested volumes. The copy is taken from `ciphertext/control/**` (and `ciphertext/bootstrap/**` for full exports), keeping the payload encrypted at rest while guaranteeing consistency.
+- ExportManager offers two operator APIs (exposed at `POST /api/v1/exports/control` and `POST /api/v1/exports/full`):
+  - Control-only exports bundle the control volume ciphertext for reinstating a node into an existing cluster/federation.
+  - Full-data exports include both control and bootstrap ciphertext to recover standalone devices when federation replicas are unavailable.
 - Imports mount the control plane read-only until an admin unlocks. At unlock, BootstrapStore rewraps portal/Nexus/DiEK secrets onto the local bootstrap volume.
 - Recovery tiers:
   - Single-node: PCV + external full-volume snapshots.
