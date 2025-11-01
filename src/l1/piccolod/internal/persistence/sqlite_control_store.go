@@ -7,30 +7,81 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite"
 
 	"piccolod/internal/state/paths"
 )
 
 const (
-	sqliteSchemaVersion = 1
+	sqliteSchemaVersion       = 1
+	controlPayloadVersion     = 1
+	controlVolumeMetadataName = "piccolo.volume.json"
+	gocryptfsConfigName       = "gocryptfs.conf"
 )
 
+const defaultCheckpointInterval = time.Minute
+
+var defaultCheckpointFn = func(db *sql.DB) error {
+	_, err := db.Exec(`PRAGMA wal_checkpoint(PASSIVE);`)
+	return err
+}
+
+type controlPayload struct {
+	Version         int           `json:"version"`
+	AuthInitialized bool          `json:"auth_initialized"`
+	Remote          *RemoteConfig `json:"remote,omitempty"`
+	Apps            []AppRecord   `json:"apps,omitempty"`
+	PasswordHash    string        `json:"password_hash,omitempty"`
+	Revision        uint64        `json:"revision"`
+	Checksum        string        `json:"checksum"`
+}
+
 type sqliteControlStore struct {
-	mu        sync.RWMutex
-	db        *sql.DB
-	path      string
-	mountDir  string
-	cipherDir string
-	keySource keyProvider
-	loaded    bool
-	state     controlState
+	mu                 sync.RWMutex
+	db                 *sql.DB
+	path               string
+	mountDir           string
+	cipherDir          string
+	keySource          keyProvider
+	loaded             bool
+	readOnly           bool
+	checkpointFn       func(*sql.DB) error
+	checkpointInterval time.Duration
+	lastCheckpoint     time.Time
+	state              controlState
+}
+
+type keyProvider interface {
+	WithSDEK(func([]byte) error) error
+}
+
+type controlState struct {
+	authInitialized bool
+	remoteConfig    *RemoteConfig
+	apps            map[string]AppRecord
+	passwordHash    string
+	revision        uint64
+	checksum        string
+}
+
+var detectReadOnlyMount = defaultReadOnlyDetector
+
+func defaultReadOnlyDetector(path string) (bool, error) {
+	var st unix.Statfs_t
+	if err := unix.Statfs(path, &st); err != nil {
+		return false, err
+	}
+	return st.Flags&unix.ST_RDONLY != 0, nil
 }
 
 func newControlStore(stateDir string, kp keyProvider) (ControlStore, error) {
@@ -54,10 +105,12 @@ func newSQLiteControlStore(stateDir string, kp keyProvider) (*sqliteControlStore
 		return nil, err
 	}
 	store := &sqliteControlStore{
-		path:      filepath.Join(mountDir, "control.db"),
-		mountDir:  mountDir,
-		cipherDir: cipherDir,
-		keySource: kp,
+		path:               filepath.Join(mountDir, "control.db"),
+		mountDir:           mountDir,
+		cipherDir:          cipherDir,
+		keySource:          kp,
+		checkpointFn:       defaultCheckpointFn,
+		checkpointInterval: defaultCheckpointInterval,
 		state: controlState{
 			apps: make(map[string]AppRecord),
 		},
@@ -65,7 +118,16 @@ func newSQLiteControlStore(stateDir string, kp keyProvider) (*sqliteControlStore
 	return store, nil
 }
 
-func configureSQLite(db *sql.DB) error {
+func configureSQLite(db *sql.DB, readOnly bool) error {
+	if _, err := db.Exec(`PRAGMA busy_timeout=5000;`); err != nil {
+		return fmt.Errorf("set busy timeout: %w", err)
+	}
+	if readOnly {
+		if _, err := db.Exec(`PRAGMA query_only=1;`); err != nil {
+			return fmt.Errorf("set query_only: %w", err)
+		}
+		return nil
+	}
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL;`); err != nil {
 		return fmt.Errorf("set journal mode: %w", err)
 	}
@@ -158,6 +220,7 @@ func (s *sqliteControlStore) Lock() {
 	defer s.mu.Unlock()
 	s.loaded = false
 	s.state = controlState{apps: make(map[string]AppRecord)}
+	s.readOnly = false
 	if s.db != nil {
 		_ = s.db.Close()
 		s.db = nil
@@ -179,6 +242,11 @@ func (s *sqliteControlStore) Unlock(ctx context.Context) error {
 	}
 	if err := s.volumeReady(); err != nil {
 		return err
+	}
+	if ro, err := detectReadOnlyMount(s.mountDir); err == nil {
+		s.readOnly = ro
+	} else {
+		s.readOnly = false
 	}
 	if err := s.openDB(); err != nil {
 		return err
@@ -274,6 +342,43 @@ func (s *sqliteControlStore) Revision(ctx context.Context) (uint64, string, erro
 	return s.state.revision, s.state.checksum, nil
 }
 
+func (s *sqliteControlStore) QuickCheck(ctx context.Context) (ControlHealthReport, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	if !s.loaded {
+		return ControlHealthReport{Status: ControlHealthStatusUnknown, Message: "control store locked", CheckedAt: now}, nil
+	}
+	if err := s.openDB(); err != nil {
+		return ControlHealthReport{Status: ControlHealthStatusError, Message: err.Error(), CheckedAt: now}, err
+	}
+	rows, err := s.db.QueryContext(ctx, "PRAGMA quick_check")
+	if err != nil {
+		return ControlHealthReport{Status: ControlHealthStatusError, Message: err.Error(), CheckedAt: now}, err
+	}
+	defer rows.Close()
+	var issues []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return ControlHealthReport{Status: ControlHealthStatusError, Message: err.Error(), CheckedAt: now}, err
+		}
+		if strings.EqualFold(strings.TrimSpace(line), "ok") {
+			continue
+		}
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			issues = append(issues, trimmed)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return ControlHealthReport{Status: ControlHealthStatusError, Message: err.Error(), CheckedAt: now}, err
+	}
+	if len(issues) == 0 {
+		return ControlHealthReport{Status: ControlHealthStatusOK, Message: "ok", CheckedAt: now}, nil
+	}
+	return ControlHealthReport{Status: ControlHealthStatusDegraded, Message: strings.Join(issues, "; "), CheckedAt: now}, nil
+}
+
 func (s *sqliteControlStore) Auth() AuthRepo         { return &sqliteAuthRepo{store: s} }
 func (s *sqliteControlStore) Remote() RemoteRepo     { return &sqliteRemoteRepo{store: s} }
 func (s *sqliteControlStore) AppState() AppStateRepo { return &sqliteAppStateRepo{store: s} }
@@ -283,6 +388,9 @@ func (s *sqliteControlStore) ensureWritableLocked() error {
 		return err
 	}
 	if !s.loaded {
+		return ErrLocked
+	}
+	if s.readOnly {
 		return ErrLocked
 	}
 	return s.openDB()
@@ -353,6 +461,7 @@ func (s *sqliteControlStore) withWrite(mutator func(tx *sql.Tx) error) error {
 	}
 	s.state.revision = payload.Revision
 	s.state.checksum = checksum
+	s.maybeCheckpointLocked()
 	return nil
 }
 
@@ -406,24 +515,60 @@ func (s *sqliteControlStore) upsertApp(record AppRecord) error {
 	})
 }
 
+func (s *sqliteControlStore) maybeCheckpointLocked() {
+	if s.db == nil || s.readOnly || s.checkpointFn == nil {
+		return
+	}
+	if s.checkpointInterval > 0 && !s.lastCheckpoint.IsZero() {
+		if time.Since(s.lastCheckpoint) < s.checkpointInterval {
+			return
+		}
+	}
+	if err := s.checkpointFn(s.db); err != nil {
+		log.Printf("WARN: control-store checkpoint failed: %v", err)
+		return
+	}
+	s.lastCheckpoint = time.Now().UTC()
+}
+
 func (s *sqliteControlStore) openDB() error {
 	if s.db != nil {
 		return nil
 	}
-	db, err := sql.Open("sqlite", s.path)
+	if s.readOnly {
+		if _, err := os.Stat(s.path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return ErrLocked
+			}
+			return err
+		}
+	}
+	dsn := s.path
+	if s.readOnly {
+		dsn = buildSQLiteDSN(s.path, true)
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return err
 	}
-	if err := configureSQLite(db); err != nil {
+	if err := configureSQLite(db, s.readOnly); err != nil {
 		db.Close()
 		return err
 	}
-	if err := applyMigrations(db); err != nil {
-		db.Close()
-		return err
+	if !s.readOnly {
+		if err := applyMigrations(db); err != nil {
+			db.Close()
+			return err
+		}
 	}
 	s.db = db
 	return nil
+}
+
+func cloneRemoteConfig(cfg RemoteConfig) RemoteConfig {
+	dup := make([]byte, len(cfg.Payload))
+	copy(dup, cfg.Payload)
+	return RemoteConfig{Payload: dup}
 }
 
 func boolToInt(v bool) int {
@@ -431,6 +576,22 @@ func boolToInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func buildSQLiteDSN(path string, readOnly bool) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	abs = filepath.ToSlash(abs)
+	if !strings.HasPrefix(abs, "/") {
+		abs = "/" + abs
+	}
+	u := &url.URL{Scheme: "file", Path: abs}
+	if readOnly {
+		u.RawQuery = "mode=ro"
+	}
+	return u.String()
 }
 
 var (

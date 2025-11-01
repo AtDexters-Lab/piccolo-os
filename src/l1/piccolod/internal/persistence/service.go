@@ -54,6 +54,9 @@ type Module struct {
 	pollCancel         context.CancelFunc
 	lockStateMu        sync.RWMutex
 	lockState          bool
+	healthMu           sync.Mutex
+	healthCancel       context.CancelFunc
+	healthInterval     time.Duration
 }
 
 // Ensure Module satisfies the Service interface.
@@ -70,18 +73,19 @@ func NewService(opts Options) (*Module, error) {
 		return nil, err
 	}
 	mod := &Module{
-		bootstrap:  opts.Bootstrap,
-		control:    opts.Control,
-		volumes:    opts.Volumes,
-		devices:    opts.Devices,
-		exports:    opts.Exports,
-		storage:    opts.StorageAdapter,
-		consensus:  opts.Consensus,
-		events:     opts.Events,
-		leadership: opts.Leadership,
-		crypto:     opts.Crypto,
-		stateDir:   stateDir,
-		lockState:  true,
+		bootstrap:      opts.Bootstrap,
+		control:        opts.Control,
+		volumes:        opts.Volumes,
+		devices:        opts.Devices,
+		exports:        opts.Exports,
+		storage:        opts.StorageAdapter,
+		consensus:      opts.Consensus,
+		events:         opts.Events,
+		leadership:     opts.Leadership,
+		crypto:         opts.Crypto,
+		stateDir:       stateDir,
+		lockState:      true,
+		healthInterval: 5 * time.Minute,
 	}
 
 	if mod.events == nil {
@@ -157,6 +161,7 @@ func NewService(opts Options) (*Module, error) {
 		mod.exports = newFileExportManager(mod.stateDir)
 	}
 	mod.startRevisionPoller()
+	mod.startControlHealthMonitor()
 
 	if opts.Dispatcher != nil {
 		mod.registerHandlers(opts.Dispatcher)
@@ -472,6 +477,12 @@ func (m *Module) Shutdown(ctx context.Context) error {
 		m.pollCancel = nil
 	}
 	m.commitMu.Unlock()
+	m.healthMu.Lock()
+	if m.healthCancel != nil {
+		m.healthCancel()
+		m.healthCancel = nil
+	}
+	m.healthMu.Unlock()
 	if m.control != nil {
 		_ = m.control.Close(ctx)
 	}
@@ -537,6 +548,12 @@ func (m *Module) ControlLocked() bool {
 type revisionReporter interface {
 	Revision(context.Context) (uint64, string, error)
 }
+
+type healthReporter interface {
+	QuickCheck(context.Context) (ControlHealthReport, error)
+}
+
+const controlHealthTimeout = 5 * time.Second
 
 func (m *Module) revisionSource() revisionReporter {
 	if rep, ok := m.control.(revisionReporter); ok {
@@ -613,4 +630,72 @@ func (m *Module) pollRevision(ctx context.Context, rep revisionReporter) {
 		return
 	}
 	m.publishControlCommit(cluster.RoleFollower, rev, checksum)
+}
+
+func (m *Module) controlHealthSource() healthReporter {
+	if rep, ok := m.control.(healthReporter); ok {
+		return rep
+	}
+	return nil
+}
+
+func (m *Module) startControlHealthMonitor() {
+	if m.events == nil {
+		return
+	}
+	rep := m.controlHealthSource()
+	if rep == nil {
+		return
+	}
+	m.healthMu.Lock()
+	if m.healthCancel != nil {
+		m.healthMu.Unlock()
+		return
+	}
+	interval := m.healthInterval
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.healthCancel = cancel
+	m.healthMu.Unlock()
+	go m.controlHealthLoop(ctx, rep, interval)
+}
+
+func (m *Module) controlHealthLoop(ctx context.Context, rep healthReporter, interval time.Duration) {
+	m.runControlHealth(rep)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.runControlHealth(rep)
+		}
+	}
+}
+
+func (m *Module) runControlHealth(rep healthReporter) {
+	if rep == nil || m.events == nil {
+		return
+	}
+	checkCtx, cancel := context.WithTimeout(context.Background(), controlHealthTimeout)
+	defer cancel()
+	report, err := rep.QuickCheck(checkCtx)
+	if err != nil {
+		if report.Status != ControlHealthStatusError {
+			report.Status = ControlHealthStatusError
+		}
+		if report.Message == "" {
+			report.Message = err.Error()
+		}
+	}
+	if report.CheckedAt.IsZero() {
+		report.CheckedAt = time.Now().UTC()
+	}
+	m.events.Publish(events.Event{
+		Topic:   events.TopicControlHealth,
+		Payload: report,
+	})
 }

@@ -12,15 +12,17 @@ import (
 
 func TestModulePublishesControlCommit(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
 	key, _ := hex.DecodeString("7f1c8a6c3b5d7e91aabbccddeeff00112233445566778899aabbccddeeff0011")
-	store, err := newEncryptedControlStore(dir, staticKeyProvider{key: key})
+	prepareControlCipherDir(t, dir)
+	store, err := newSQLiteControlStore(dir, staticKeyProvider{key: key})
 	if err != nil {
-		t.Fatalf("newEncryptedControlStore: %v", err)
+		t.Fatalf("newSQLiteControlStore: %v", err)
 	}
+	defer store.Close(context.Background())
 	if err := store.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
-	prepareControlCipherDir(t, dir)
 
 	bus := events.NewBus()
 	mod := &Module{events: bus, leadership: cluster.NewRegistry()}
@@ -56,5 +58,48 @@ func TestModulePublishesControlCommit(t *testing.T) {
 	case <-ch:
 		t.Fatalf("did not expect second event for same revision")
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestModulePublishesControlHealth(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
+	key, _ := hex.DecodeString("7f1c8a6c3b5d7e91aabbccddeeff00112233445566778899aabbccddeeff0011")
+	prepareControlCipherDir(t, dir)
+	store, err := newSQLiteControlStore(dir, staticKeyProvider{key: key})
+	if err != nil {
+		t.Fatalf("newSQLiteControlStore: %v", err)
+	}
+	defer store.Close(context.Background())
+	if err := store.Unlock(context.Background()); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	if err := store.Auth().SetInitialized(context.Background()); err != nil {
+		t.Fatalf("SetInitialized: %v", err)
+	}
+
+	bus := events.NewBus()
+	mod := &Module{
+		events:         bus,
+		leadership:     cluster.NewRegistry(),
+		healthInterval: 10 * time.Millisecond,
+	}
+	mod.control = newGuardedControlStore(store, func() bool { return true }, nil)
+	ch := bus.Subscribe(events.TopicControlHealth, 1)
+
+	mod.startControlHealthMonitor()
+	defer mod.Shutdown(context.Background())
+
+	select {
+	case evt := <-ch:
+		report, ok := evt.Payload.(ControlHealthReport)
+		if !ok {
+			t.Fatalf("unexpected payload type: %#v", evt.Payload)
+		}
+		if report.Status != ControlHealthStatusOK {
+			t.Fatalf("expected OK status, got %s (%s)", report.Status, report.Message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for control health event")
 	}
 }

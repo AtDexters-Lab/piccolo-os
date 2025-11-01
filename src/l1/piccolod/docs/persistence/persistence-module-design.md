@@ -18,6 +18,9 @@ RootService
 └── ExportManager       (control-only + full-data export/import)
 ```
 
+For a path-by-path catalog of persisted artifacts, consult
+[`persistence-inventory.md`](./persistence-inventory.md).
+
 All components share a core event bus. The consensus/leader-election layer feeds a Leadership Registry that surfaces `Leader`/`Follower` state for each resource. Persistence subscribes to remount volumes appropriately, while app and service managers apply policy (e.g., warm vs cold followers) based on the app specification.
 
 ### Bootstrap mount (`PICCOLO_STATE_DIR`)
@@ -54,8 +57,10 @@ VolumeManager consults the app’s cluster mode when allocating volumes and rela
 - Physical store: SQLite in WAL mode with `synchronous=FULL`, mounted on the control volume (`mounts/control/control.db`). The ciphertext tree only contains gocryptfs metadata while the database files live inside the mounted volume.
 - Exposes domain repositories (`AuthRepo`, `RemoteRepo`, `AppStateRepo`, `AuditRepo`, etc.) instead of raw SQL handles. `AuthRepo` now persists the Argon2id admin password hash and initialization flag; reads/writes return `ErrLocked` until the control store is unlocked with the SDEK.
 - `RemoteRepo` stores the full remote-manager configuration as an encrypted blob so remote API calls are gated by the same lock semantics (HTTP 423 until unlock) and replicate cleanly with the control shard.
-- Only the leader performs writes. Transactions commit through the repositories; the interim JSON payload still flushes via fsync, and the upcoming SQLite layer will assume that role.
+- Only the leader performs writes. When the kernel role registry reports `Follower`, the persistence module mounts the control volume read-only; the SQLite store detects the RO mount, opens the database in `mode=ro`, and rejects mutating calls with `ErrLocked`. Followers therefore continue to hydrate state while preventing accidental writes.
+- Transactions commit through the repositories; the interim JSON payload still flushes via fsync, and the SQLite layer preserves single-transaction semantics to keep the meta revision/checksum consistent.
 - Health tooling: periodic `PRAGMA quick_check`, timer-based WAL checkpoints, automatic `VACUUM INTO`/`.recover` repair attempts. Failures emit events and block PCV exports until resolved.
+- A background health monitor runs `PRAGMA quick_check` every five minutes and publishes summaries on `events.TopicControlHealth`. Leader commits invoke `PRAGMA wal_checkpoint(PASSIVE)` (bounded by a one-minute cadence) to keep the WAL bounded without impacting followers.
 
 ## PCV & Recovery
 - PCV exports now quiesce persistence by temporarily re-locking the control store, detaching the gocryptfs mounts, and streaming the sealed ciphertext trees for the requested volumes. The copy is taken from `ciphertext/control/**` (and `ciphertext/bootstrap/**` for full exports), keeping the payload encrypted at rest while guaranteeing consistency.

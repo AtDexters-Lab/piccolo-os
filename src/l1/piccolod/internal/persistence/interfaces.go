@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"time"
 
 	"piccolod/internal/cluster"
 )
@@ -33,6 +34,7 @@ type ControlStore interface {
 	AppState() AppStateRepo
 	Close(ctx context.Context) error
 	Revision(ctx context.Context) (uint64, string, error)
+	QuickCheck(ctx context.Context) (ControlHealthReport, error)
 }
 
 // VolumeManager orchestrates encrypted volumes via the storage backend.
@@ -170,4 +172,19 @@ type RemoteConfig struct {
 
 type AppRecord struct {
 	Name string
+}
+
+type ControlHealthStatus string
+
+const (
+	ControlHealthStatusOK       ControlHealthStatus = "ok"
+	ControlHealthStatusDegraded ControlHealthStatus = "degraded"
+	ControlHealthStatusError    ControlHealthStatus = "error"
+	ControlHealthStatusUnknown  ControlHealthStatus = "unknown"
+)
+
+type ControlHealthReport struct {
+	Status    ControlHealthStatus
+	Message   string
+	CheckedAt time.Time
 }

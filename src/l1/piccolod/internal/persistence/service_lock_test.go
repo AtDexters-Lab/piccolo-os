@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 var errVolumeNotMounted = errors.New("test: volume not mounted")
@@ -102,6 +103,10 @@ func (s *stubLockableControl) Close(context.Context) error {
 
 func (s *stubLockableControl) Revision(context.Context) (uint64, string, error) {
 	return 0, "", nil
+}
+
+func (s *stubLockableControl) QuickCheck(context.Context) (ControlHealthReport, error) {
+	return ControlHealthReport{Status: ControlHealthStatusOK, Message: "ok", CheckedAt: time.Now().UTC()}, nil
 }
 
 type stubVolumeManager struct {

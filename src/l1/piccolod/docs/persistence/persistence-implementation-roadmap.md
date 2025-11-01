@@ -24,7 +24,7 @@ The goal is to transition the persistence module from scaffolding into the produ
 ## Phase 2 – Control-store repos & API surface
 - Flesh out repositories (`AuthRepo`, `RemoteRepo`, `AppStateRepo`, etc.) with schema-level validation and transactional guarantees.
 - Gate API endpoints on lock-state events instead of checking the crypto manager directly.
-- Introduce repair/health tooling (`PRAGMA quick_check`, WAL checkpoints, `VACUUM INTO`) and surface results on the event bus.
+- Introduce repair/health tooling (`PRAGMA quick_check`, WAL checkpoints, `VACUUM INTO`) and surface results on the event bus. _(Shipped October 2025: periodic quick_check monitor with WAL checkpoint cadence publishing `TopicControlHealth` events.)_
 
 ## Phase 3 – Exports and recovery
 - Replace placeholder export artifacts with deterministic PCV bundles on disk.

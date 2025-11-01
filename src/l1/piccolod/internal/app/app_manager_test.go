@@ -404,6 +404,9 @@ func TestAppManager_RequiresMountedVolume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create AppManager: %v", err)
 	}
+	manager.SetMountVerifier(func(string) error {
+		return ErrVolumeUnavailable
+	})
 	manager.ForceLockState(false)
 	if _, err := manager.List(context.Background()); !errors.Is(err, ErrVolumeUnavailable) {
 		t.Fatalf("expected ErrVolumeUnavailable, got %v", err)

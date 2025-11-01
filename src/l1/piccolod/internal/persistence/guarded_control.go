@@ -1,6 +1,9 @@
 package persistence
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // guardedControlStore wraps a ControlStore and enforces kernel-leader-only
 // semantics for mutating operations. Reads are always allowed when unlocked.
@@ -9,6 +12,9 @@ type guardedControlStore struct {
 	lockable lockableControlStore
 	revision interface {
 		Revision(context.Context) (uint64, string, error)
+	}
+	health interface {
+		QuickCheck(context.Context) (ControlHealthReport, error)
 	}
 	leader   func() bool
 	onCommit func(context.Context)
@@ -30,7 +36,15 @@ func newGuardedControlStore(inner ControlStore, leader func() bool, onCommit fun
 	}); ok {
 		rev = r
 	}
-	return &guardedControlStore{inner: inner, lockable: lockable, revision: rev, leader: leader, onCommit: onCommit}
+	var health interface {
+		QuickCheck(context.Context) (ControlHealthReport, error)
+	}
+	if h, ok := inner.(interface {
+		QuickCheck(context.Context) (ControlHealthReport, error)
+	}); ok {
+		health = h
+	}
+	return &guardedControlStore{inner: inner, lockable: lockable, revision: rev, health: health, leader: leader, onCommit: onCommit}
 }
 
 func (g *guardedControlStore) Auth() AuthRepo {
@@ -62,6 +76,13 @@ func (g *guardedControlStore) Revision(ctx context.Context) (uint64, string, err
 		return 0, "", ErrNotImplemented
 	}
 	return g.revision.Revision(ctx)
+}
+
+func (g *guardedControlStore) QuickCheck(ctx context.Context) (ControlHealthReport, error) {
+	if g.health == nil {
+		return ControlHealthReport{Status: ControlHealthStatusUnknown, Message: "quick check unavailable", CheckedAt: time.Now().UTC()}, nil
+	}
+	return g.health.QuickCheck(ctx)
 }
 
 func (g *guardedControlStore) notifyCommit(ctx context.Context, err error) error {

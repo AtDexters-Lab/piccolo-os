@@ -8,17 +8,18 @@ import (
 
 func TestGuardedControlStore_LeaderEnforcement(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
 	key, _ := hex.DecodeString("7f1c8a6c3b5d7e91aabbccddeeff00112233445566778899aabbccddeeff0011")
 
-	store, err := newEncryptedControlStore(dir, staticKeyProvider{key: key})
+	store, err := newSQLiteControlStore(dir, staticKeyProvider{key: key})
 	if err != nil {
-		t.Fatalf("newEncryptedControlStore: %v", err)
+		t.Fatalf("newSQLiteControlStore: %v", err)
 	}
+	defer store.Close(context.Background())
+	prepareControlCipherDir(t, dir)
 	if err := store.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
-	prepareControlCipherDir(t, dir)
-
 	// Follower: expect ErrNotLeader on writes
 	follower := newGuardedControlStore(store, func() bool { return false }, nil)
 	if err := follower.Auth().SetInitialized(context.Background()); err != ErrNotLeader {
@@ -52,18 +53,20 @@ func TestGuardedControlStore_LeaderEnforcement(t *testing.T) {
 
 func TestGuardedControlStore_LockUnlockPassthrough(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
 	key, _ := hex.DecodeString("7f1c8a6c3b5d7e91aabbccddeeff00112233445566778899aabbccddeeff0011")
 
-	store, err := newEncryptedControlStore(dir, staticKeyProvider{key: key})
+	store, err := newSQLiteControlStore(dir, staticKeyProvider{key: key})
 	if err != nil {
-		t.Fatalf("newEncryptedControlStore: %v", err)
+		t.Fatalf("newSQLiteControlStore: %v", err)
 	}
+	defer store.Close(context.Background())
 	guard := newGuardedControlStore(store, func() bool { return true }, nil).(*guardedControlStore)
 
-	if err := guard.Unlock(context.Background()); err != nil {
+	prepareControlCipherDir(t, dir)
+	if err := store.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock via guard: %v", err)
 	}
-	prepareControlCipherDir(t, dir)
 	if err := guard.Auth().SetInitialized(context.Background()); err != nil {
 		t.Fatalf("set initialized: %v", err)
 	}
@@ -87,16 +90,18 @@ func TestGuardedControlStore_LockUnlockPassthrough(t *testing.T) {
 
 func TestGuardedControlStore_CommitCallback(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
 	key, _ := hex.DecodeString("7f1c8a6c3b5d7e91aabbccddeeff00112233445566778899aabbccddeeff0011")
 
-	store, err := newEncryptedControlStore(dir, staticKeyProvider{key: key})
+	store, err := newSQLiteControlStore(dir, staticKeyProvider{key: key})
 	if err != nil {
-		t.Fatalf("newEncryptedControlStore: %v", err)
+		t.Fatalf("newSQLiteControlStore: %v", err)
 	}
+	defer store.Close(context.Background())
+	prepareControlCipherDir(t, dir)
 	if err := store.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
-	prepareControlCipherDir(t, dir)
 	called := 0
 	guard := newGuardedControlStore(store, func() bool { return true }, func(context.Context) { called++ })
 	if err := guard.Auth().SetInitialized(context.Background()); err != nil {
