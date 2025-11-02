@@ -1,227 +1,606 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
-  import { sessionStore, bootstrapSession } from './stores/session';
-  import { apiProd } from '@api/client';
+  import { onMount, onDestroy, tick } from 'svelte';
   import Router from 'svelte-spa-router';
   import { wrap } from 'svelte-spa-router/wrap';
   import { get } from 'svelte/store';
-  import Dashboard from '@routes/index.svelte';
-  import AppDetails from '@routes/apps/[name].svelte';
+
+  import { sessionStore, bootstrapSession } from './stores/session';
+  import { deviceStore, setRemoteSummary, markRemoteHydrated, recordRemoteError, markRemoteUnsupported } from './stores/device';
+  import { preferencesStore, applyTheme, applyBackground } from './stores/preferences';
+  import { refreshActivity } from '@stores/activity';
+  import { apiProd, type ErrorResponse } from '@api/client';
   import Toast from '@components/Toast.svelte';
   import RouteLoading from '@components/RouteLoading.svelte';
-  import Apps from '@routes/apps/index.svelte';
+  import QuickSettingsPanel from '@components/quick-settings/QuickSettingsPanel.svelte';
+  import ActivityTray from '@components/activity/ActivityTray.svelte';
+  import Home from '@routes/home/index.svelte';
+  import AppsInstalled from '@routes/apps/index.svelte';
+  import AppDetails from '@routes/apps/[name].svelte';
   import Catalog from '@routes/apps/catalog.svelte';
   import Storage from '@routes/storage/index.svelte';
   import Updates from '@routes/updates/index.svelte';
   import Remote from '@routes/remote/index.svelte';
+  import Devices from '@routes/devices/index.svelte';
   import Settings from '@routes/settings/index.svelte';
+  import Lock from '@routes/lock/index.svelte';
   import Login from '@routes/login/index.svelte';
   import Setup from '@routes/setup/index.svelte';
+
   const DEMO = __DEMO__;
-  const DEBUG = (import.meta.env.VITE_UI_DEBUG === '1');
+  const DEBUG = import.meta.env.VITE_UI_DEBUG === '1';
+
+  type Layout = 'phone' | 'tablet' | 'desktop';
+  type NavItem = { id: string; label: string; path: string; badge?: number | null };
+  type RemoteStatusPayload = {
+    enabled?: boolean;
+    state?: string | null;
+    hostname?: string | null;
+    portal_hostname?: string | null;
+    public_url?: string | null;
+    warnings?: string[];
+  };
+
+  let layout: Layout = 'desktop';
+  let currentPath = '/';
+  let deviceName = 'Piccolo Home';
+  let quickSettingsOpen = false;
+  let sessionExpired = false;
+  let installBanner = false;
+  let remoteHydratePending = false;
+  let remoteHydrateTimer: ReturnType<typeof setTimeout> | null = null;
+  let systemMediaQuery: MediaQueryList | null = null;
+  let systemMediaListener: ((event: MediaQueryListEvent) => void) | null = null;
+  let preferencesUnsubscribe: (() => void) | null = null;
+  let preferences = { theme: 'system', background: 'aurora' };
+  let activityOpen = false;
+  let activityOpenListener: (() => void) | null = null;
+  let session = { authenticated: false, volumes_locked: false } as { authenticated: boolean; volumes_locked?: boolean };
+  let sessionUnsubscribe: (() => void) | null = null;
+
+  const navItems: NavItem[] = [
+    { id: 'home', label: 'Home', path: '/' },
+    { id: 'apps', label: 'Apps', path: '/apps' },
+    { id: 'devices', label: 'Devices', path: '/devices' },
+    { id: 'settings', label: 'Settings', path: '/settings' }
+  ];
+
   const authGuard = async () => {
     if (DEMO) return true;
-    if (get(sessionStore).authenticated) return true;
-    try { await bootstrapSession(); } catch {}
-    const ok = !!get(sessionStore).authenticated;
-    if (!ok) {
-      // Check if admin is initialized; if not, redirect to setup
-      try {
-        const init: any = await apiProd('/auth/initialized');
-        if (!init?.initialized) {
-          window.location.hash = '/setup';
-          return false;
-        }
-      } catch {}
-      window.location.hash = '/login';
+    const session = get(sessionStore);
+    if (session.authenticated) return true;
+    try {
+      await bootstrapSession();
+    } catch {
+      /* swallow */
+    }
+    const refreshed = get(sessionStore);
+    if (refreshed.authenticated) return true;
+    if (refreshed.volumes_locked) {
+      window.location.hash = '/lock';
       return false;
     }
-    return ok;
+
+    try {
+      const init = await apiProd<{ initialized?: boolean }>('/auth/initialized');
+      if (!init?.initialized) {
+        window.location.hash = '/setup';
+        return false;
+      }
+    } catch {
+      /* ignore */
+    }
+    window.location.hash = '/login';
+    return false;
   };
+
   const routes: Record<string, any> = {
-    '/': wrap({ component: Dashboard, conditions: [authGuard] }),
-    '/apps': wrap({ component: Apps, conditions: [authGuard] }),
-    '/apps/catalog': wrap({ component: Catalog, conditions: [authGuard] }),
-    '/apps/:name': wrap({ component: AppDetails, conditions: [authGuard] }),
-    '/storage': wrap({ component: Storage, conditions: [authGuard] }),
-    '/updates': wrap({ component: Updates, conditions: [authGuard] }),
-    '/remote': wrap({ component: Remote, conditions: [authGuard] }),
-    '/settings': wrap({ component: Settings, conditions: [authGuard] }),
+    '/': wrap({ component: Home, conditions: [authGuard], loadingComponent: RouteLoading }),
+    '/apps': wrap({ component: AppsInstalled, conditions: [authGuard], loadingComponent: RouteLoading }),
+    '/apps/catalog': wrap({ component: Catalog, conditions: [authGuard], loadingComponent: RouteLoading }),
+    '/apps/:name': wrap({ component: AppDetails, conditions: [authGuard], loadingComponent: RouteLoading }),
+    '/devices': wrap({ component: Devices, conditions: [authGuard], loadingComponent: RouteLoading }),
+    '/storage': wrap({ component: Storage, conditions: [authGuard], loadingComponent: RouteLoading }),
+    '/updates': wrap({ component: Updates, conditions: [authGuard], loadingComponent: RouteLoading }),
+    '/remote': wrap({ component: Remote, conditions: [authGuard], loadingComponent: RouteLoading }),
+    '/settings': wrap({ component: Settings, conditions: [authGuard], loadingComponent: RouteLoading }),
+    '/lock': wrap({ component: Lock }),
     '/login': wrap({ component: Login }),
-    '/setup': wrap({ component: Setup }),
+    '/setup': wrap({ component: Setup })
   };
-  let menuOpen = false;
-  // Global post-install banner state
-  let showInstallBanner = false;
-  let sessionExpired = false;
-  let moreOpen = false;
-  function updateNavDisplay() {
-    const el = document.getElementById('main-nav') as HTMLElement | null;
-    if (!el) return;
-    el.classList.remove('hidden');
-    const mobile = window.matchMedia('(max-width: 767px)').matches;
-    if (mobile) {
-      el.style.display = menuOpen ? 'flex' : 'none';
-    } else {
-      el.style.display = '';
-    }
-  }
-  async function focusMain() {
-    await tick();
-    const main = document.getElementById('router-root') as HTMLElement | null;
-    main?.focus();
-  }
-  async function toggleMenu() {
-    menuOpen = !menuOpen;
-    updateNavDisplay();
-    if (menuOpen) {
-      await tick();
-      const first = document.querySelector('#main-nav a, #main-nav button') as HTMLElement | null;
-      first?.focus();
-    }
-  }
-  onMount(async () => {
-    await bootstrapSession();
-    // Enforce hash-based deep links for v1
+
+  function ensureHashRouting() {
     if (!window.location.hash && window.location.pathname !== '/') {
       window.location.replace('/#' + window.location.pathname);
     }
-    try { showInstallBanner = localStorage.getItem('piccolo_install_started') === '1'; } catch {}
-    window.addEventListener('storage', (e) => {
-      if (e.key === 'piccolo_install_started') {
-        showInstallBanner = e.newValue === '1';
+  }
+
+  function updateCurrentPath() {
+    const raw = window.location.hash || '#/';
+    const clean = raw.startsWith('#') ? raw.slice(1) : raw;
+    currentPath = clean || '/';
+  }
+
+  function computeLayout() {
+    if (window.matchMedia('(min-width: 1024px)').matches) {
+      layout = 'desktop';
+    } else if (window.matchMedia('(min-width: 768px)').matches) {
+      layout = 'tablet';
+    } else {
+      layout = 'phone';
+    }
+  }
+
+  function navigate(path: string) {
+    quickSettingsOpen = false;
+    activityOpen = false;
+    const target = path.startsWith('#') ? path : `#${path}`;
+    if (window.location.hash === target) {
+      // re-tap behavior: scroll to top
+      const main = document.getElementById('main-content');
+      if (main) {
+        main.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+      return;
+    }
+    window.location.hash = target;
+  }
+
+  function isActive(path: string): boolean {
+    if (!path.startsWith('/')) path = `/${path}`;
+    if (path === '/') return currentPath === '/';
+    if (currentPath === path) return true;
+    if (path === '/apps') {
+      return currentPath.startsWith('/apps');
+    }
+    return currentPath.startsWith(path);
+  }
+
+  let deviceNameHydrated = false;
+
+  async function hydrateDeviceName() {
+    try {
+      const res = await apiProd<{ device_name?: string }>('/device');
+      deviceName = res?.device_name?.trim() || 'Piccolo Home';
+      deviceStore.update((prev) => ({
+        ...prev,
+        name: deviceName
+      }));
+      deviceNameHydrated = true;
+    } catch {
+      deviceName = 'Piccolo Home';
+      deviceStore.update((prev) => ({
+        ...prev,
+        name: deviceName
+      }));
+    }
+  }
+
+  function applyRemoteStatus(payload: RemoteStatusPayload | null) {
+    const host = payload?.portal_hostname || payload?.hostname || payload?.public_url || null;
+    setRemoteSummary({
+      enabled: payload?.enabled,
+      hostname: host,
+      state: payload?.state,
+      warnings: payload?.warnings
+    });
+  }
+
+  async function hydrateRemoteStatus() {
+    try {
+      const data = await apiProd<RemoteStatusPayload>('/remote/status');
+      if (data) {
+        applyRemoteStatus(data);
+      } else {
+        setRemoteSummary(null);
+      }
+      markRemoteHydrated();
+      recordRemoteError(null);
+    } catch (err: unknown) {
+      const error = err as ErrorResponse | undefined;
+      if (error?.code === 404) {
+        markRemoteUnsupported();
+        recordRemoteError(null);
+        return;
+      }
+      if (error?.code === 401 || error?.code === 403) {
+        // wait until authenticated to hydrate
+        return;
+      }
+      recordRemoteError(error?.message || 'Failed to load remote status');
+      throw err;
+    }
+  }
+
+  function attachListeners() {
+    window.addEventListener('resize', computeLayout);
+    window.addEventListener('hashchange', async () => {
+      updateCurrentPath();
+      await tick();
+      const main = document.getElementById('main-content');
+      if (main) {
+        main.focus();
       }
     });
-    window.addEventListener('piccolo-install-started', () => { showInstallBanner = true; });
     window.addEventListener('piccolo-session-expired', () => {
       sessionExpired = true;
       sessionStore.set({ authenticated: false });
       window.location.hash = '/login';
     });
-    updateNavDisplay();
-    window.addEventListener('resize', updateNavDisplay);
-    window.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && menuOpen) {
-        menuOpen = false;
-        updateNavDisplay();
+    window.addEventListener('storage', (event: StorageEvent) => {
+      if (event.key === 'piccolo_install_started') {
+        installBanner = event.newValue === '1';
       }
     });
-    window.addEventListener('hashchange', () => {
-      focusMain();
+    activityOpenListener = () => {
+      activityOpen = true;
+      refreshActivity();
+    };
+    window.addEventListener('piccolo-open-activity', activityOpenListener);
+    window.addEventListener('keydown', (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isTypingContext = target?.isContentEditable || tag === 'input' || tag === 'textarea';
+      if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !isTypingContext) {
+        event.preventDefault();
+        if (layout === 'desktop') {
+          const panel = document.getElementById('quick-settings-desktop');
+          panel?.focus();
+          panel?.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+          quickSettingsOpen = true;
+        }
+      }
+      if (event.key === 'Escape') {
+        if (quickSettingsOpen) quickSettingsOpen = false;
+        if (activityOpen) activityOpen = false;
+      }
     });
+  }
+
+  function dismissInstallBanner() {
+    try {
+      localStorage.removeItem('piccolo_install_started');
+    } catch {
+      /* ignore */
+    }
+    installBanner = false;
+  }
+
+  async function handleLogout() {
+    try {
+      await apiProd('/auth/logout', { method: 'POST' });
+    } catch {
+      /* ignore network errors; session fallback below */
+    } finally {
+      quickSettingsOpen = false;
+      activityOpen = false;
+      sessionStore.set({ authenticated: false });
+      window.location.hash = '/login';
+    }
+  }
+
+  function handleQuickSettingsToggle() {
+    if (layout === 'desktop') {
+      const panel = document.getElementById('quick-settings-desktop');
+      panel?.focus();
+      panel?.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    quickSettingsOpen = !quickSettingsOpen;
+  }
+
+  function toggleActivityTray() {
+    activityOpen = !activityOpen;
+    if (activityOpen) {
+      refreshActivity();
+    }
+  }
+
+  function ensureTheme() {
+    const root = document.documentElement;
+    if (!root.dataset.theme) {
+      root.dataset.theme = 'light';
+    }
+  }
+
+  function bindSystemThemeListener(themeMode: string) {
+    if (typeof window === 'undefined') return;
+    if (systemMediaListener && systemMediaQuery) {
+      systemMediaQuery.removeEventListener('change', systemMediaListener);
+      systemMediaListener = null;
+    }
+    if (themeMode !== 'system') return;
+    systemMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    systemMediaListener = () => applyTheme('system');
+    systemMediaQuery.addEventListener('change', systemMediaListener);
+  }
+
+  onMount(async () => {
+    ensureHashRouting();
+    ensureTheme();
+
+    try {
+      installBanner = localStorage.getItem('piccolo_install_started') === '1';
+    } catch {
+      installBanner = false;
+    }
+
+    preferencesUnsubscribe = preferencesStore.subscribe((value) => {
+      preferences = value;
+      applyTheme(value.theme);
+      applyBackground(value.background);
+      bindSystemThemeListener(value.theme);
+    });
+    sessionUnsubscribe = sessionStore.subscribe((value) => {
+      session = value ?? { authenticated: false, volumes_locked: false };
+    });
+
+    await bootstrapSession();
+    session = get(sessionStore) ?? { authenticated: false, volumes_locked: false };
+    await Promise.allSettled([hydrateDeviceName(), hydrateRemoteStatus()]);
+    const initialSession = get(sessionStore);
+    if (!initialSession.authenticated && initialSession.volumes_locked) {
+      window.location.hash = '/lock';
+    }
+
+    computeLayout();
+    updateCurrentPath();
+    attachListeners();
   });
-  $: if ($sessionStore.authenticated) {
+
+  $: if (session.authenticated) {
     sessionExpired = false;
   }
-  function goToLogin() {
-    window.location.hash = '/login';
+
+  $: if (layout === 'desktop' && quickSettingsOpen) {
+    quickSettingsOpen = false;
   }
-  function dismissInstallBanner() {
-    try { localStorage.removeItem('piccolo_install_started'); } catch {}
-    showInstallBanner = false;
+
+  $: if (quickSettingsOpen && layout !== 'desktop') {
+    tick().then(() => {
+      const el = document.querySelector('[data-quick-settings-modal] [data-focus-initial]') as HTMLElement | null;
+      el?.focus();
+    });
   }
-  function isActive(path: string) {
-    const h = window.location.hash || '#/';
-    if (!path.startsWith('/')) path = '/' + path;
-    return h.startsWith('#' + path);
+
+  function scheduleRemoteHydrateRetry() {
+    if (remoteHydrateTimer) return;
+    remoteHydrateTimer = setTimeout(() => {
+      remoteHydrateTimer = null;
+      triggerRemoteHydrate();
+    }, 5000);
   }
+
+  function triggerRemoteHydrate() {
+    if (remoteHydratePending || !session.authenticated || $deviceStore.remoteHydrated) return;
+    remoteHydratePending = true;
+    hydrateRemoteStatus()
+      .catch(() => {
+        scheduleRemoteHydrateRetry();
+      })
+      .finally(() => {
+        remoteHydratePending = false;
+      });
+  }
+
+  $: if (session.authenticated && !$deviceStore.remoteHydrated) {
+    triggerRemoteHydrate();
+  }
+
+  $: if (session.authenticated && currentPath === '/lock') {
+    navigate('/');
+  }
+
+  $: if (session.authenticated && !deviceNameHydrated) {
+    hydrateDeviceName();
+  }
+
+  onDestroy(() => {
+    preferencesUnsubscribe?.();
+    sessionUnsubscribe?.();
+    if (systemMediaListener && systemMediaQuery) {
+      systemMediaQuery.removeEventListener('change', systemMediaListener);
+    }
+    if (remoteHydrateTimer) {
+      clearTimeout(remoteHydrateTimer);
+      remoteHydrateTimer = null;
+    }
+    if (activityOpenListener) {
+      window.removeEventListener('piccolo-open-activity', activityOpenListener);
+    }
+  });
 </script>
 
-<main class="min-h-screen bg-gray-50 text-gray-900">
-  <header class="border-b bg-white">
-    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between relative">
-      <h1 class="font-semibold">
-        <a href="/#/" class="inline-flex items-center" aria-label="Piccolo">
-          <img src="/branding/piccolo.svg" alt="Piccolo" class="h-6 w-auto" loading="lazy" />
-        </a>
-      </h1>
-      <button class="md:hidden px-3 py-2 text-sm border rounded inline-flex items-center justify-center cursor-pointer min-h-[44px]" aria-controls="main-nav" aria-expanded={menuOpen} aria-label="Toggle menu" on:click={toggleMenu}>Menu</button>
-      {#if menuOpen}
-        <nav
-          aria-label="Primary"
-          id="main-nav"
-          class="text-sm flex fixed right-4 top-12 z-40 bg-white border rounded p-3 flex-col gap-2"
-        >
-          <a href="/#/" class="hover:underline" on:click={() => (menuOpen = false)}>Dashboard</a>
-          <a href="/#/apps" class="hover:underline" on:click={() => (menuOpen = false)}>Apps</a>
-          <a href="/#/apps/catalog" class="hover:underline" on:click={() => (menuOpen = false)}>Catalog</a>
-          <a href="/#/storage" class="hover:underline" on:click={() => (menuOpen = false)}>Storage</a>
-          <a href="/#/updates" class="hover:underline" on:click={() => (menuOpen = false)}>Updates</a>
-          <a href="/#/remote" class="hover:underline" on:click={() => (menuOpen = false)}>Remote</a>
-          <a href="/#/settings" class="hover:underline" on:click={() => (menuOpen = false)}>Settings</a>
-          {#if !$sessionStore.authenticated}
-            <a href="/#/login" class="hover:underline" on:click={() => (menuOpen = false)}>Sign in</a>
-          {:else}
-          <button class="text-left hover:underline" on:click={() => { fetch('/api/v1/auth/logout').finally(()=>{ sessionStore.set({authenticated:false}); window.location.hash = '/login'; }); menuOpen=false; }}>Logout</button>
-          {/if}
-        </nav>
-      {/if}
-      <nav id="main-nav-desktop" aria-label="Header" class="text-sm hidden md:flex md:flex-wrap md:static md:bg-transparent md:border-0 md:p-0 gap-2 md:gap-4 relative">
-        {#if !$sessionStore.authenticated}
-          <a href="/#/login" class="hover:underline">Sign in</a>
+<div class="app-shell" data-layout={layout}>
+  <a href="#main-content" class="skip-link">Skip to content</a>
+  <div class="app-shell__body" data-layout={layout}>
+    <aside class="app-shell__nav-desktop hidden lg:block" aria-label="Primary">
+      <div class="flex items-center gap-3 mb-6">
+        <img src="/branding/piccolo.svg" alt="Piccolo logo" class="h-6 w-auto" loading="lazy" />
+        <div>
+          <p class="text-sm text-text-muted uppercase tracking-[0.08em]">Device</p>
+          <p class="text-lg font-semibold text-text-primary">{deviceName}</p>
+        </div>
+      </div>
+      <nav class="space-y-2">
+        {#each navItems as item}
+          <button
+            class="w-full text-left px-3 py-2 rounded-lg transition-colors duration-[var(--transition-duration)]"
+            class:bg-surface-2={isActive(item.path)}
+            class:text-accent-emphasis={isActive(item.path)}
+            class:text-text-muted={!isActive(item.path)}
+            aria-current={isActive(item.path) ? 'page' : undefined}
+            on:click={() => navigate(item.path)}
+          >
+            <span class="text-sm font-medium flex items-center justify-between">
+              <span>{item.label}</span>
+              {#if item.badge}
+                <span class="ml-2 inline-flex items-center justify-center text-xs font-semibold px-2 py-0.5 rounded-full bg-accent-subtle text-accent-emphasis">
+                  {item.badge}
+                </span>
+              {/if}
+            </span>
+          </button>
+        {/each}
+      </nav>
+      <div class="mt-8 border-t border-border-subtle pt-4">
+        {#if !session.authenticated}
+          <button class="w-full px-3 py-2 rounded-lg border border-border-subtle text-sm font-semibold" on:click={() => navigate('/login')}>
+            Sign in
+          </button>
         {:else}
-          <button class="hover:underline" on:click={() => { fetch('/api/v1/auth/logout').finally(()=>{ sessionStore.set({authenticated:false}); window.location.hash = '/login'; }); }}>Logout</button>
+          <button class="w-full px-3 py-2 rounded-lg border border-border-subtle text-sm font-semibold" on:click={handleLogout}>
+            Sign out
+          </button>
         {/if}
-      </nav>
-    </div>
-  </header>
-
-  <a href="#router-root" class="skip-link">Skip to content</a>
-  <div class="max-w-6xl mx-auto px-4 md:flex md:gap-6">
-    <aside class="hidden md:block md:w-56 py-4">
-      <nav aria-label="Sidebar" class="text-sm space-y-4">
-        <div>
-          <ul class="space-y-1">
-            <li><a href="/#/" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/') ? 'page' : undefined}>Overview</a></li>
-          </ul>
-        </div>
-        <div>
-          <div class="text-xs uppercase tracking-tight text-gray-500 mb-2">Apps</div>
-          <ul class="space-y-1">
-            <li><a href="/#/apps" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/apps') ? 'page' : undefined}>Installed</a></li>
-            <li><a href="/#/apps/catalog" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/apps/catalog') ? 'page' : undefined}>Catalog</a></li>
-          </ul>
-        </div>
-        <div>
-          <div class="text-xs uppercase tracking-tight text-gray-500 mb-2">System</div>
-          <ul class="space-y-1">
-            <li><a href="/#/storage" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/storage') ? 'page' : undefined}>Storage</a></li>
-            <li><a href="/#/updates" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/updates') ? 'page' : undefined}>Updates</a></li>
-            <li><a href="/#/remote" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/remote') ? 'page' : undefined}>Remote</a></li>
-          </ul>
-        </div>
-        <div>
-          <div class="text-xs uppercase tracking-tight text-gray-500 mb-2">Settings</div>
-          <ul class="space-y-1">
-            <li><a href="/#/settings" class="block px-2 py-1 rounded hover:bg-gray-50" aria-current={isActive('/settings') ? 'page' : undefined}>Preferences</a></li>
-          </ul>
-        </div>
-      </nav>
+      </div>
     </aside>
-    <section class="flex-1 py-4" id="router-root" tabindex="-1">
-    {#if sessionExpired}
-      <div class="mb-4 p-3 border rounded bg-red-50 text-red-900 flex items-start justify-between gap-3" role="alert">
-        <div>
-          <p class="text-sm font-medium">Session expired</p>
-          <p class="text-xs">Please sign in again to continue.</p>
+
+    <main class="app-shell__main">
+      <header class="flex items-center justify-between px-5 h-[var(--header-height)] border-b border-border-subtle bg-surface-1/70 backdrop-blur-sm sticky top-0 z-30">
+        <div class="flex items-center gap-3">
+          <button class="lg:hidden inline-flex items-center justify-center h-10 w-10 rounded-full border border-border-subtle" on:click={() => navigate('/settings')} aria-label="Open settings">
+            <span class="sr-only">Settings</span>
+            <svg class="h-5 w-5 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3.5" />
+              <path d="M19.4 12a7.38 7.38 0 0 0-.08-.99l2.11-1.65-2-3.46-2.49 1a7.42 7.42 0 0 0-1.71-.99L14.5 2h-5l-.73 2.91a7.35 7.35 0 0 0-1.71.99l-2.49-1-2 3.46 2.11 1.65a7.35 7.35 0 0 0 0 1.98L1.57 14.6l2 3.46 2.49-1a7.35 7.35 0 0 0 1.71.99L9.5 22h5l.73-2.91a7.42 7.42 0 0 0 1.71-.99l2.49 1 2-3.46-2.11-1.65c.05-.33.08-.66.08-.99z" />
+            </svg>
+          </button>
+          <div>
+            <p class="text-xs uppercase tracking-[0.18em] text-text-muted">Piccolo Home</p>
+            <h1 class="text-lg font-semibold text-text-primary leading-tight">{deviceName}</h1>
+          </div>
         </div>
-        <button class="px-2 py-1 text-xs border rounded hover:bg-red-100" on:click={goToLogin}>Sign in</button>
-      </div>
-    {/if}
-    {#if showInstallBanner}
-      <div class="mb-4 p-3 border rounded bg-blue-50 text-blue-900 flex items-start justify-between gap-3">
-        <div>
-          <p class="text-sm font-medium">Installation in progress</p>
-          <p class="text-xs">The device will reboot on completion. You can safely leave this page.</p>
+        <div class="flex items-center gap-3">
+          <button
+            class="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-surface-2 text-sm font-semibold text-text-primary border border-border-subtle hover:bg-surface-1 transition"
+            aria-pressed={activityOpen}
+            on:click={toggleActivityTray}
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 5h18" />
+              <path d="M7 5v14" />
+              <rect x="7" y="9" width="13" height="10" rx="2" />
+            </svg>
+            Activity
+          </button>
+          <button
+            class="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-surface-2 text-sm font-semibold text-text-primary border border-border-subtle hover:bg-surface-1 transition"
+            aria-pressed={layout !== 'desktop' ? String(quickSettingsOpen) : undefined}
+            aria-controls="quick-settings-drawer"
+            on:click={handleQuickSettingsToggle}
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 6v12" />
+              <path d="M18 12H6" />
+            </svg>
+            Quick settings
+          </button>
+          {#if !session.authenticated}
+            <a class="inline-flex lg:hidden items-center justify-center gap-2 px-4 py-2 rounded-full bg-surface-2 text-sm font-semibold text-text-primary border border-border-subtle hover:bg-surface-1 transition" href="/#/login">
+              Sign in
+            </a>
+          {:else}
+            <button
+              class="inline-flex lg:hidden items-center justify-center gap-2 px-4 py-2 rounded-full border border-border-subtle text-sm font-semibold text-text-muted"
+              on:click={handleLogout}
+            >
+              Logout
+            </button>
+          {/if}
         </div>
-        <button class="px-2 py-1 text-xs border rounded hover:bg-blue-100" on:click={dismissInstallBanner}>Dismiss</button>
+      </header>
+
+      <section class="app-shell__page" id="main-content" tabindex="-1">
+        {#if sessionExpired}
+          <div class="mb-4 p-4 border border-state-critical/20 rounded-xl bg-state-critical/10 text-state-critical" role="alert">
+            <p class="text-sm font-semibold">Session expired</p>
+            <p class="text-xs mt-1">Please sign in again to continue.</p>
+            <button class="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-subtle text-xs font-semibold" on:click={() => navigate('/login')}>
+              Sign in
+            </button>
+          </div>
+        {/if}
+
+        {#if installBanner}
+          <div class="mb-4 p-4 rounded-xl border border-state-notice/30 bg-state-notice/10 text-text-primary flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p class="text-sm font-semibold text-text-primary">Installation in progress</p>
+              <p class="text-xs text-text-muted">The device will reboot when complete. You can safely leave this page.</p>
+            </div>
+            <button class="self-start md:self-center px-3 py-1.5 rounded-lg border border-border-subtle text-xs font-semibold" on:click={dismissInstallBanner}>
+              Dismiss
+            </button>
+          </div>
+        {/if}
+
+        <Router {routes} useHash={true} />
+        {#if DEBUG}
+          <pre class="mt-8 text-xs bg-surface-2 border border-border-subtle rounded-lg p-3 text-text-muted">Session: {JSON.stringify(session, null, 2)}</pre>
+        {/if}
+      </section>
+    </main>
+
+    <aside class="app-shell__quick-settings hidden lg:flex flex-col" id="quick-settings-desktop" aria-label="Quick settings" tabindex="-1">
+      <div class="p-6 border-b border-border-subtle">
+        <h2 class="text-base font-semibold text-text-primary flex items-center justify-between">
+          Quick settings
+          <span class="text-xs font-medium text-text-muted">⌘/</span>
+        </h2>
+        <p class="mt-1 text-xs text-text-muted">Toggle Remote, apply updates, export logs, or lock the device.</p>
       </div>
-    {/if}
-    <Router {routes} useHash={true} />
-    {#if DEBUG}
-      <p class="text-sm text-gray-500 mt-6">Session: {JSON.stringify($sessionStore)}</p>
-    {/if}
-    </section>
+      <div class="flex-1 overflow-hidden">
+        <QuickSettingsPanel layout="desktop" on:logout={handleLogout} />
+      </div>
+    </aside>
   </div>
+
+  {#if quickSettingsOpen && layout !== 'desktop'}
+    <div class="quick-settings-overlay" role="dialog" aria-modal="true" aria-labelledby="quick-settings-mobile-title" data-quick-settings-modal>
+      <div class="quick-settings-overlay__scrim" aria-hidden="true" on:click={() => quickSettingsOpen = false}></div>
+      <div class="quick-settings-overlay__panel" role="document">
+        <div class="quick-settings-overlay__header">
+          <div>
+            <p class="text-xs uppercase tracking-[0.12em] text-text-muted">Quick settings</p>
+            <h2 id="quick-settings-mobile-title" class="text-lg font-semibold text-text-primary">Quick settings</h2>
+          </div>
+          <button class="quick-settings-overlay__close" on:click={() => quickSettingsOpen = false}>
+            <span class="sr-only">Close quick settings</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+        <QuickSettingsPanel layout="mobile" on:close={() => quickSettingsOpen = false} on:logout={handleLogout} />
+      </div>
+    </div>
+  {/if}
+
+  <nav class="app-shell__bottom-nav lg:hidden" aria-label="Primary">
+    {#each navItems as item}
+      <button
+        class:!text-accent-emphasis={isActive(item.path)}
+        class:!bg-accent-subtle={isActive(item.path)}
+        aria-current={isActive(item.path) ? 'page' : undefined}
+        on:click={() => navigate(item.path)}
+      >
+        <span aria-hidden="true" class="text-lg">
+          {#if item.id === 'home'}🏠{:else if item.id === 'apps'}📦{:else if item.id === 'devices'}🖥️{:else if item.id === 'settings'}⚙️{:else}⬜{/if}
+        </span>
+        <span>{item.label}</span>
+      </button>
+    {/each}
+    {#if session.authenticated}
+      <button
+        class="flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-text-muted"
+        on:click={handleLogout}
+      >
+        <span aria-hidden="true" class="text-lg">🚪</span>
+        <span>Logout</span>
+      </button>
+    {/if}
+  </nav>
+  <ActivityTray open={activityOpen} onClose={() => (activityOpen = false)} />
   <Toast />
-</main>
+</div>
