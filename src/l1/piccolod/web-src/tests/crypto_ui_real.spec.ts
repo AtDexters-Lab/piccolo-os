@@ -5,7 +5,7 @@ test.describe('UI unlock flow (real API)', () => {
   test('unlock volumes from Storage page', async ({ page }) => {
     const adminPass = ADMIN_PASSWORD;
     await ensureSignedIn(page, adminPass);
-    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible();
 
     // Ensure crypto initialized and locked
     const csrf = await page.request.get('/api/v1/auth/csrf').then(r => r.json()).then(j => j.token as string);

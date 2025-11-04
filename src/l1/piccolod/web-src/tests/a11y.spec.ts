@@ -23,16 +23,16 @@ test('skip link moves focus to main content', async ({ page }) => {
   const skip = page.getByRole('link', { name: 'Skip to content' });
   await expect(skip).toBeVisible();
   await skip.press('Enter');
-  // Router root should be focused
+  // Main content should be focused
   const activeId = await page.evaluate(() => document.activeElement?.id);
-  expect(activeId).toBe('router-root');
+  expect(activeId).toBe('main-content');
 });
 
 test('focus moves to main after route change', async ({ page }) => {
   await ensureSignedIn(page, ADMIN_PASSWORD);
-  await page.getByRole('link', { name: 'Installed' }).click();
-  await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
-  await expect(page.locator('#router-root')).toHaveAttribute('tabindex', '-1');
+  await page.getByRole('complementary', { name: 'Primary' }).getByRole('button', { name: 'Apps' }).click();
+  await expect(page.getByRole('heading', { level: 2, name: 'Apps' })).toBeVisible();
+  await expect(page.locator('#main-content')).toHaveAttribute('tabindex', '-1');
 });
 
 test('toasts expose aria-live and role status', async ({ page }) => {

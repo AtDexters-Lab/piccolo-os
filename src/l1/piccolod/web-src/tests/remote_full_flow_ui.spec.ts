@@ -5,10 +5,11 @@ import fs from 'fs';
 import os from 'os';
 import { login, ADMIN_PASSWORD } from './support/session';
 
-const NEXUS_ENDPOINT = process.env.PICCOLO_E2E_NEXUS_ENDPOINT || 'wss://stub/connect';
-const NEXUS_SECRET = process.env.PICCOLO_E2E_NEXUS_SECRET || 'stub-secret';
+const usingRemoteStack = process.env.E2E_REMOTE_STACK === '1';
+const NEXUS_ENDPOINT = process.env.PICCOLO_E2E_NEXUS_ENDPOINT || (usingRemoteStack ? 'wss://localhost:8443/connect' : 'wss://stub/connect');
+const NEXUS_SECRET = process.env.PICCOLO_E2E_NEXUS_SECRET || (usingRemoteStack ? 'local-secret' : 'stub-secret');
 const PICCOLO_TLD = process.env.PICCOLO_E2E_TLD || 'example.com';
-const PORTAL_SUBDOMAIN = process.env.PICCOLO_E2E_PORTAL || 'portal';
+const PORTAL_SUBDOMAIN = process.env.PICCOLO_E2E_PORTAL || (usingRemoteStack ? 'portal-e2e' : 'portal');
 const REMOTE_HOST = `${PORTAL_SUBDOMAIN}.${PICCOLO_TLD}`;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,20 +29,27 @@ test.describe('Remote full flow (UI-driven)', () => {
     const initStatus = await page.request.get('/api/v1/auth/initialized').then(r => r.json()).catch(() => ({}));
     if (!initStatus?.initialized) {
       await page.goto('http://localhost:8080/#/setup');
-      await page.getByPlaceholder('New password').fill(ADMIN_PASSWORD);
-      await page.getByPlaceholder('Confirm password').fill(ADMIN_PASSWORD);
-      await page.getByRole('button', { name: 'Create Admin' }).click();
-      try {
-        await page.waitForURL('**/#/', { timeout: 15000 });
-      } catch {
-        if (await page.locator('text=Locked').first().isVisible()) {
-          await page.goto('http://localhost:8080/#/login');
-          await page.getByPlaceholder('admin password').fill(ADMIN_PASSWORD);
-          await page.getByRole('button', { name: /unlock/i }).click();
-          await page.waitForURL('**/#/');
-        } else {
-          throw new Error('Create admin did not navigate to dashboard and no lock message found');
+      const newPassword = page.getByPlaceholder('New password');
+      if (await newPassword.count()) {
+        await newPassword.fill(ADMIN_PASSWORD);
+        await page.getByPlaceholder('Confirm password').fill(ADMIN_PASSWORD);
+        await page.getByRole('button', { name: 'Create Admin' }).click();
+        try {
+          await page.waitForURL('**/#/', { timeout: 15000 });
+        } catch {
+          const lockedHeading = page.getByRole('heading', { name: /locked/i });
+          if (await lockedHeading.isVisible().catch(() => false)) {
+            await page.goto('http://localhost:8080/#/login');
+            await page.getByPlaceholder('admin password').fill(ADMIN_PASSWORD);
+            const unlockButton = page.getByRole('button', { name: /unlock with password|unlock/i });
+            await unlockButton.click();
+            await page.waitForURL('**/#/', { timeout: 15000 });
+          } else {
+            await login(page, ADMIN_PASSWORD);
+          }
         }
+      } else {
+        await login(page, ADMIN_PASSWORD);
       }
     } else {
       await login(page, ADMIN_PASSWORD);
@@ -52,7 +60,7 @@ test.describe('Remote full flow (UI-driven)', () => {
       await page.request.post('/api/v1/remote/disable', { headers: { 'X-CSRF-Token': csrfToken } }).catch(() => {});
     }
 
-    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
+    await expect(page.locator('h2', { hasText: 'What matters now' })).toBeVisible();
 
     await page.goto('http://localhost:8080/#/remote');
     await page.waitForLoadState('networkidle');

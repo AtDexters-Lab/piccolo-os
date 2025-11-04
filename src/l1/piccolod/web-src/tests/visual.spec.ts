@@ -8,7 +8,7 @@ test.describe('Visual tour (demo)', () => {
   test('capture screenshots of key pages', async ({ page }) => {
     await ensureSignedIn(page, ADMIN_PASSWORD);
     const shots: Array<{ url: string; waitFor: string; name: string }> = [
-      { url: '/', waitFor: 'h2:text("Dashboard")', name: '00_dashboard' },
+      { url: '/', waitFor: 'h2:text("What matters now")', name: '00_home' },
       { url: '/#/apps', waitFor: 'h2:text("Apps")', name: '10_apps' },
       { url: '/#/storage', waitFor: 'h2:text("Storage")', name: '20_storage' },
       { url: '/#/updates', waitFor: 'h2:text("Updates")', name: '30_updates' },

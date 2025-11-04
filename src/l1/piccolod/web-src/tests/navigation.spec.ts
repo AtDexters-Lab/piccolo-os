@@ -20,14 +20,14 @@ test.describe('Navigation basics', () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    await ensureSignedIn(page, ADMIN_PASSWORD);
-    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
+  await ensureSignedIn(page, ADMIN_PASSWORD);
+  await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible();
   });
 
   test('home loads without redirects and assets are reachable', async ({ page, request }) => {
     const response = await page.goto('/');
     expect(response?.status()).toBe(200);
-    await expect(page.locator('header img[alt="Piccolo"]')).toBeVisible();
+    await expect(page.getByAltText('Piccolo logo')).toBeVisible();
 
     const scriptHref = await page.locator('script[type="module"][src^="/assets/"]').first().getAttribute('src');
     expect(scriptHref).toBeTruthy();
@@ -39,22 +39,23 @@ test.describe('Navigation basics', () => {
   });
 
   test('navigate via sidebar to core pages', async ({ page }) => {
-    await page.locator('aside').getByRole('link', { name: 'Installed' }).click();
+    const sidebar = page.getByRole('complementary', { name: 'Primary' });
+    await sidebar.getByRole('button', { name: 'Apps' }).click();
     await expect(page.getByRole('heading', { level: 2, name: 'Apps' })).toBeVisible();
 
-    await page.locator('aside').getByRole('link', { name: 'Storage' }).click();
-    await expect(page.getByRole('heading', { level: 2, name: 'Storage' })).toBeVisible();
+    await sidebar.getByRole('button', { name: 'Devices' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Devices' })).toBeVisible();
 
-    await page.locator('aside').getByRole('link', { name: 'Updates' }).click();
-    await expect(page.getByRole('heading', { level: 2, name: 'Updates' })).toBeVisible();
+    await sidebar.getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Settings' })).toBeVisible();
 
-    await page.locator('aside').getByRole('link', { name: 'Remote' }).click();
-    await expect(page.getByRole('heading', { level: 2, name: 'Remote' })).toBeVisible();
+    await sidebar.getByRole('button', { name: 'Home' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible();
   });
 
   test('deep-link directly to /#/apps', async ({ page }) => {
     await page.goto('/#/apps');
     await page.waitForLoadState('networkidle');
-    await expect(page.locator('h2')).toHaveText('Apps');
+    await expect(page.getByRole('heading', { level: 2, name: 'Apps' })).toBeVisible();
   });
 });

@@ -2,19 +2,51 @@
   import { onMount } from 'svelte';
   import { apiProd } from '@api/client';
   import { toast } from '@stores/ui';
-  let resp: any = null; let error = ''; let loading = true;
+
+  type AppRecord = {
+    name: string;
+    image?: string;
+    status?: string;
+    pinned?: boolean;
+    public_port?: number;
+    local_url?: string | null;
+  };
+
+  type AppsResponse = {
+    data?: AppRecord[];
+  };
+
+  let apps: AppRecord[] = [];
+  let loading = true;
+  let error = '';
+  let filter = '';
+  let showRunningOnly = false;
   let workingApp: { name: string; action: 'start' | 'stop' } | null = null;
-  onMount(async () => {
-    await load();
+
+  onMount(() => {
+    load();
   });
+
   async function load() {
-    loading = true; error = '';
-    try { resp = await apiProd('/apps'); }
-    catch (e: any) { error = e?.message || 'Failed to load apps'; }
-    finally { loading = false; }
+    loading = true;
+    error = '';
+    try {
+      const res = await apiProd<AppsResponse>('/apps');
+      apps = res?.data ?? [];
+    } catch (err: any) {
+      error = err?.message || 'Failed to load apps';
+      apps = [];
+    } finally {
+      loading = false;
+    }
   }
-  function isRunning(app: any): boolean {
-    return (app?.status || '').toLowerCase() === 'running';
+
+  function normalizedStatus(app: AppRecord): string {
+    return (app.status ?? '').toLowerCase();
+  }
+
+  function isRunning(app: AppRecord): boolean {
+    return normalizedStatus(app) === 'running';
   }
 
   function isWorking(name: string, action: 'start' | 'stop'): boolean {
@@ -24,111 +56,141 @@
   async function start(name: string) {
     workingApp = { name, action: 'start' };
     try {
-      await apiProd(`/apps/${name}/start`, { method: 'POST' });
+      await apiProd(`/apps/${encodeURIComponent(name)}/start`, { method: 'POST' });
       toast(`Started ${name}`, 'success');
       await load();
+    } catch (err: any) {
+      toast(err?.message || 'Start failed', 'error');
+    } finally {
+      workingApp = null;
     }
-    catch (e: any) { toast(e?.message || 'Start failed', 'error'); }
-    finally { workingApp = null; }
   }
+
   async function stop(name: string) {
     workingApp = { name, action: 'stop' };
     try {
-      await apiProd(`/apps/${name}/stop`, { method: 'POST' });
+      await apiProd(`/apps/${encodeURIComponent(name)}/stop`, { method: 'POST' });
       toast(`Stopped ${name}`, 'success');
       await load();
+    } catch (err: any) {
+      toast(err?.message || 'Stop failed', 'error');
+    } finally {
+      workingApp = null;
     }
-    catch (e: any) { toast(e?.message || 'Stop failed', 'error'); }
-    finally { workingApp = null; }
+  }
+
+  function badgeFor(app: AppRecord) {
+    const status = normalizedStatus(app);
+    if (status === 'running') return { label: 'Running', badge: 'bg-state-ok/10 text-state-ok' };
+    if (status === 'stopped') return { label: 'Stopped', badge: 'bg-state-notice/10 text-state-notice' };
+    if (status === 'error') return { label: 'Error', badge: 'bg-state-critical/10 text-state-critical' };
+    return { label: app.status ?? 'Unknown', badge: 'bg-surface-2 text-text-muted' };
+  }
+
+  function matchesFilter(app: AppRecord): boolean {
+    if (!filter.trim()) return true;
+    const query = filter.trim().toLowerCase();
+    return app.name?.toLowerCase().includes(query) || app.image?.toLowerCase().includes(query);
+  }
+
+  $: filteredApps = apps.filter((app) => matchesFilter(app) && (!showRunningOnly || isRunning(app)));
+  $: totalApps = apps.length;
+  $: runningApps = apps.filter(isRunning).length;
+
+  function openCatalog() {
+    window.location.hash = '/apps/catalog';
+  }
+
+  function openDetails(app: AppRecord) {
+    window.location.hash = `/apps/${encodeURIComponent(app.name)}`;
+  }
+
+  function openApp(app: AppRecord) {
+    if (app.local_url) {
+      window.open(app.local_url, '_blank', 'noopener');
+    } else {
+      openDetails(app);
+    }
   }
 </script>
 
-  <h2 class="text-xl font-semibold mb-4">Apps</h2>
-  <div class="mb-3 text-sm">
-    <a class="text-blue-600 underline" href="/#/apps/catalog">Browse Catalog</a>
-  </div>
-  {#if loading}
-  <p>Loading…</p>
-{:else if error}
-  <p class="text-red-600">{error}</p>
-{:else}
-  <!-- Mobile: card list -->
-  <div class="md:hidden space-y-3">
-    {#each (resp.data ?? []) as app}
-      <div class="bg-white rounded border p-3">
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <a class="text-blue-600 underline" href={`/#/apps/${app.name}`}>{app.name}</a>
-            <div class="text-xs text-gray-600 truncate">{app.image}</div>
-          </div>
-          <span class="px-2 py-0.5 rounded text-xs shrink-0"
-            class:bg-green-100={app.status === 'running'} class:text-green-800={app.status === 'running'}
-            class:bg-yellow-100={app.status === 'stopped'} class:text-yellow-800={app.status === 'stopped'}
-            class:bg-red-100={app.status === 'error'} class:text-red-800={app.status === 'error'}>{app.status}</span>
-        </div>
-        <div class="mt-3 flex gap-2">
-          <button
-            class="px-3 py-2 text-sm border rounded hover:bg-gray-50 disabled:opacity-50"
-            on:click={() => start(app.name)}
-            disabled={isRunning(app) || isWorking(app.name, 'start')}
-          >
-            {isWorking(app.name, 'start') ? 'Starting…' : 'Start'}
-          </button>
-          <button
-            class="px-3 py-2 text-sm border rounded hover:bg-gray-50 disabled:opacity-50"
-            on:click={() => stop(app.name)}
-            disabled={!isRunning(app) || isWorking(app.name, 'stop')}
-          >
-            {isWorking(app.name, 'stop') ? 'Stopping…' : 'Stop'}
-          </button>
-          <a class="ml-auto text-sm text-blue-600 underline" href={`/#/apps/${app.name}`}>Details</a>
-        </div>
-      </div>
-    {/each}
+<section class="space-y-6">
+  <header class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+    <div>
+      <h2 class="text-2xl font-semibold text-text-primary">Apps</h2>
+      <p class="text-sm text-text-muted">{runningApps} running • {totalApps} installed</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="px-4 py-2 rounded-xl border border-border-subtle text-xs font-semibold" on:click={load} disabled={loading}>
+        {loading ? 'Refreshing…' : 'Refresh'}
+      </button>
+      <button class="px-4 py-2 rounded-xl bg-accent text-text-inverse text-xs font-semibold" on:click={openCatalog}>
+        Browse catalog
+      </button>
+    </div>
+  </header>
+
+  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <div class="flex items-center gap-2 w-full md:max-w-sm">
+      <label class="sr-only" for="apps-search">Search apps</label>
+      <input id="apps-search" class="flex-1 rounded-xl border border-border-subtle bg-surface-1 px-4 py-2 text-sm" placeholder="Search apps" bind:value={filter} />
+    </div>
+    <label class="flex items-center gap-2 text-xs font-semibold text-text-muted">
+      <input type="checkbox" bind:checked={showRunningOnly} />
+      Show running only
+    </label>
   </div>
 
-  <!-- Desktop: table -->
-  <table class="hidden md:table w-full text-sm bg-white rounded border">
-    <thead class="bg-gray-50 text-gray-700">
-      <tr>
-        <th class="text-left p-2 md:p-3 border-b">Name</th>
-        <th class="text-left p-2 md:p-3 border-b">Image</th>
-        <th class="text-left p-2 md:p-3 border-b">Status</th>
-        <th class="text-left p-2 md:p-3 border-b">Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each (resp.data ?? []) as app}
-        <tr class="border-b last:border-b-0">
-          <td class="p-2 md:p-3 align-top" data-label="Name"><a class="text-blue-600 underline" href={`/#/apps/${app.name}`}>{app.name}</a></td>
-          <td class="p-2 md:p-3 align-top" data-label="Image">{app.image}</td>
-          <td class="p-2 md:p-3 align-top" data-label="Status">
-          {#if app.public_port}
-            <div class="text-xs text-gray-500">Port: {app.public_port}</div>
-          {/if}
-            <span class="px-2 py-0.5 rounded text-xs"
-              class:bg-green-100={app.status === 'running'} class:text-green-800={app.status === 'running'}
-              class:bg-yellow-100={app.status === 'stopped'} class:text-yellow-800={app.status === 'stopped'}
-              class:bg-red-100={app.status === 'error'} class:text-red-800={app.status === 'error'}>{app.status}</span>
-          </td>
-          <td class="p-2 md:p-3 align-top space-x-2" data-label="Actions">
-            <button
-              class="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50"
-              on:click={() => start(app.name)}
-              disabled={isRunning(app) || isWorking(app.name, 'start')}
-            >
-              {isWorking(app.name, 'start') ? 'Starting…' : 'Start'}
-            </button>
-            <button
-              class="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50"
-              on:click={() => stop(app.name)}
-              disabled={!isRunning(app) || isWorking(app.name, 'stop')}
-            >
-              {isWorking(app.name, 'stop') ? 'Stopping…' : 'Stop'}
-            </button>
-          </td>
-        </tr>
+  {#if loading}
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      {#each Array(6) as _, index}
+        <div class="h-40 rounded-2xl border border-border-subtle bg-surface-1 animate-pulse" aria-hidden="true"></div>
       {/each}
-    </tbody>
-  </table>
-{/if}
+    </div>
+  {:else if error}
+    <div class="rounded-2xl border border-state-warn/30 bg-state-warn/10 p-5 text-state-warn space-y-3">
+      <p class="text-sm font-semibold">{error}</p>
+      <button class="inline-flex items-center gap-2 text-xs font-semibold text-accent-emphasis" on:click={load}>Retry</button>
+    </div>
+  {:else if filteredApps.length === 0}
+    <div class="rounded-2xl border border-border-subtle bg-surface-1 p-6 text-sm text-text-muted">
+      <p>No apps match your filters. Install from the catalog or clear filters to see everything.</p>
+    </div>
+  {:else}
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      {#each filteredApps as app}
+        {@const badge = badgeFor(app)}
+        <article class="rounded-2xl border border-border-subtle bg-surface-1 p-4 shadow-sm flex flex-col gap-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <h3 class="text-base font-semibold text-text-primary truncate">{app.name}</h3>
+              {#if app.image}
+                <p class="text-xs text-text-muted truncate font-mono">{app.image}</p>
+              {/if}
+            </div>
+            <span class={`px-2 py-0.5 rounded-full text-xs font-semibold ${badge.badge}`}>{badge.label}</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-xs text-text-muted">
+            {#if app.public_port}
+              <span class="px-2 py-1 rounded-full bg-surface-2 font-mono">Port {app.public_port}</span>
+            {/if}
+            {#if app.pinned}
+              <span class="px-2 py-1 rounded-full bg-accent-subtle text-accent-emphasis">Pinned</span>
+            {/if}
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-3 py-2 rounded-xl border border-border-subtle text-xs font-semibold flex-1 disabled:opacity-60" on:click={() => isRunning(app) ? stop(app.name) : start(app.name)} disabled={isWorking(app.name, isRunning(app) ? 'stop' : 'start')}>
+              {isRunning(app) ? (isWorking(app.name, 'stop') ? 'Stopping…' : 'Stop') : (isWorking(app.name, 'start') ? 'Starting…' : 'Start')}
+            </button>
+            <button class="px-3 py-2 rounded-xl bg-surface-2 text-xs font-semibold" on:click={() => openApp(app)}>
+              Open
+            </button>
+            <button class="px-3 py-2 rounded-xl border border-border-subtle text-xs font-semibold" on:click={() => openDetails(app)}>
+              Details
+            </button>
+          </div>
+        </article>
+      {/each}
+    </div>
+  {/if}
+</section>

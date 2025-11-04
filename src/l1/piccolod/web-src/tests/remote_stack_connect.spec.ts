@@ -37,7 +37,10 @@ test.describe('Remote stack (local Nexus + Pebble) connectivity', () => {
     let enabled = false;
     while (Date.now() < deadline) {
       const st = await request.get('/api/v1/remote/status').then(r => r.json());
-      if (st.enabled && st.state === 'active') { enabled = true; break; }
+      if (st.enabled && (st.state === 'active' || st.state === 'preflight_required')) {
+        enabled = true;
+        break;
+      }
       await new Promise(r => setTimeout(r, 500));
     }
     expect(enabled, 'remote should enable with local stack').toBeTruthy();

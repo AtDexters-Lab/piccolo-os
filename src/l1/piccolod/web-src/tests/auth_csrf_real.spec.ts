@@ -5,7 +5,7 @@ test.describe('Auth + CSRF enforcement (real API)', () => {
   test('state-changing requests require session + CSRF', async ({ page }) => {
     const adminPass = ADMIN_PASSWORD;
     await ensureSignedIn(page, adminPass);
-    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible();
 
     // Prepare invalid YAML to avoid container work later
     const badYaml = 'name: foo\n';

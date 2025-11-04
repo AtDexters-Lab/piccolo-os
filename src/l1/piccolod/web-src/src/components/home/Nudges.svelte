@@ -62,12 +62,31 @@
     });
   }
 
+  const SETTINGS_READY_EVENT = 'piccolo-settings-ready';
+
+  function sendSettingsSection(id: string) {
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new CustomEvent('piccolo-open-settings-section', { detail: id }));
+    });
+  }
+
   function exploreFeature(feature: FeatureRecord) {
     dismissFeature(feature.id);
+    const currentHash = window.location.hash || '#/';
+    const normalized = currentHash.startsWith('#') ? currentHash.slice(1) : currentHash;
+
+    if (normalized === '/settings') {
+      sendSettingsSection(feature.id);
+      return;
+    }
+
+    const handleReady = () => {
+      window.removeEventListener(SETTINGS_READY_EVENT, handleReady);
+      sendSettingsSection(feature.id);
+    };
+
+    window.addEventListener(SETTINGS_READY_EVENT, handleReady, { once: true });
     window.location.hash = '/settings';
-    setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('piccolo-open-settings-section', { detail: feature.id }));
-    }, 10);
   }
 
   function enableFeatureFlow(feature: FeatureRecord) {

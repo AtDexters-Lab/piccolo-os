@@ -22,14 +22,19 @@ test.describe.serial('Unlock-first login UI (real API)', () => {
 
     // Go to login; expect unlock panel immediately (without attempting to sign in)
     await page.goto('/#/login');
-    await expect(page.getByText('Device is locked')).toBeVisible();
+    await expect(page.getByText(/is locked/i)).toBeVisible();
+
+    const lockAction = page.getByRole('button', { name: 'Unlock with password' });
+    if (await lockAction.isVisible().catch(() => false)) {
+      await lockAction.click();
+    }
 
     // Unlock with admin password
     await page.getByPlaceholder('admin password').fill(adminPass);
-    await page.getByRole('button', { name: 'Unlock' }).click();
+    await page.getByRole('button', { name: /^Unlock$/ }).click();
 
     // After unlock, UI should redirect to dashboard (auto-session)
     await page.waitForURL(/#\/$/, { timeout: 10000 });
-    await expect(page.locator('h2')).toContainText('Dashboard');
+    await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible();
   });
 });

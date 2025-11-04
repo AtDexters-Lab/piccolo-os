@@ -18,7 +18,7 @@ export async function login(page: Page, password: string = ADMIN_PASSWORD): Prom
   });
   if (apiLogin.ok()) {
     await page.goto('/#/');
-    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible({ timeout: 15000 });
     return;
   }
 
@@ -39,7 +39,7 @@ export async function login(page: Page, password: string = ADMIN_PASSWORD): Prom
     await page.getByRole('button', { name: 'Sign in' }).click({ timeout: 15000 });
     await expect(page).toHaveURL(/#\/?$/);
   }
-  await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible({ timeout: 15000 });
 }
 
 export async function ensureSignedIn(page: Page, password: string = ADMIN_PASSWORD): Promise<void> {

@@ -109,6 +109,8 @@ test.describe('First-run setup redirect', () => {
     await startFreshServer(request);
     await page.context().clearCookies();
     await page.goto(`${baseURL}/#/login`);
-    await expect(page.getByText('Device is locked')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByPlaceholder('admin password')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/is locked/i)).toBeVisible({ timeout: 10000 });
   });
+
 });

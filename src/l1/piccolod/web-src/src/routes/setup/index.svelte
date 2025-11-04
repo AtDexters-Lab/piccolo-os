@@ -1,11 +1,29 @@
 <script lang="ts">
-  import { api, apiProd, demo } from '@api/client';
-  import { sessionStore, bootstrapSession } from '@stores/session';
+  import { onMount } from 'svelte';
+  import { api, apiProd, demo, type ErrorResponse } from '@api/client';
+  import { bootstrapSession } from '@stores/session';
   import { toast } from '@stores/ui';
   let password = '';
   let confirm = '';
   let error = '';
   let working = false;
+  onMount(async () => {
+    if (demo) return;
+    try {
+      const init = await apiProd<{ initialized: boolean }>('/auth/initialized');
+      if (init?.initialized) {
+        toast('Admin already exists. Sign in instead.', 'info');
+        window.location.hash = '/login';
+      }
+    } catch (err: any) {
+      const e = err as ErrorResponse | undefined;
+      const message = e?.message || '';
+      if (e?.code === 423 || /locked/i.test(message)) {
+        toast('Encrypted volumes are locked. Unlock to continue.', 'info');
+        window.location.hash = '/lock';
+      }
+    }
+  });
   async function onSetup() {
     error = '';
     if (password.length < 8 || password !== confirm) {
@@ -27,7 +45,19 @@
       toast('Admin created', 'success');
       window.location.hash = '/';
     } catch (e: any) {
-      error = e?.message || 'Setup failed';
+      const err = e as ErrorResponse | undefined;
+      const message = err?.message || 'Setup failed';
+      if (err?.code === 423 || /locked/i.test(message)) {
+        toast('Encrypted volumes are locked. Unlock to continue.', 'info');
+        window.location.hash = '/lock';
+        return;
+      }
+      if (/already initialized/i.test(message)) {
+        toast('Admin already exists. Sign in instead.', 'info');
+        window.location.hash = '/login';
+        return;
+      }
+      error = message;
     } finally {
       working = false;
     }

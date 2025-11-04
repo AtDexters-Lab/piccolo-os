@@ -5,7 +5,7 @@ test.describe('Service discovery (real API)', () => {
   test('list services and app services shape', async ({ page }) => {
     // Setup admin and login
     await ensureSignedIn(page, ADMIN_PASSWORD);
-    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible();
 
     // GET /services returns array; items (if any) include host_port and optional local_url
     const all = await page.request.get('/api/v1/services').then(r => r.json());

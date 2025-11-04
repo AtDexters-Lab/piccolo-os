@@ -69,6 +69,6 @@ test.describe('Mobile layout', () => {
     await expect(logoutBtn).toBeVisible({ timeout: 15000 });
     await logoutBtn.click({ force: true });
     await page.waitForURL('**/#/login', { timeout: 15000 });
-    await expect(page.getByRole('heading', { name: /Sign in|Device is locked/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Sign in|Piccolo Home is locked/i })).toBeVisible();
   });
 });

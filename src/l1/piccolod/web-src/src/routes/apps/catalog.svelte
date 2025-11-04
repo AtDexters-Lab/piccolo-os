@@ -2,25 +2,54 @@
   import { onMount } from 'svelte';
   import { apiProd, demo } from '@api/client';
   import { toast } from '@stores/ui';
-  let catalog: any = null; let loading = true; let error = '';
+
+  type CatalogApp = {
+    name: string;
+    description?: string;
+    image?: string;
+    template?: string;
+    categories?: string[];
+  };
+
+  type CatalogResponse = {
+    apps?: CatalogApp[];
+  };
+
+  let apps: CatalogApp[] = [];
+  let loading = true;
+  let error = '';
+  let filter = '';
   let yamlText = 'name: wordpress\nimage: docker.io/library/wordpress:6\nlisteners:\n  - name: web\n    guest_port: 80\n    flow: tcp\n    protocol: http\n';
   let installingApp: string | null = null;
   let yamlInstalling = false;
+
   onMount(async () => {
-    try { catalog = await apiProd('/catalog'); }
-    catch (e: any) { error = e?.message || 'Failed to load catalog'; }
-    finally { loading = false; }
+    try {
+      const res = await apiProd<CatalogResponse>('/catalog');
+      apps = res?.apps ?? [];
+    } catch (err: any) {
+      error = err?.message || 'Failed to load catalog';
+    } finally {
+      loading = false;
+    }
   });
-  function genYaml(app: any): string {
+
+  function filteredApps() {
+    if (!filter.trim()) return apps;
+    const q = filter.trim().toLowerCase();
+    return apps.filter((app) => app.name.toLowerCase().includes(q) || app.description?.toLowerCase().includes(q));
+  }
+
+  function genYaml(app: CatalogApp): string {
     if (app?.template) return app.template;
     const name = app?.name || 'app';
     const image = app?.image || 'alpine:latest';
-    return `name: ${name}\nimage: ${image}\n`;
+    return `name: ${name}\nimage: ${image}\n`; 
   }
+
   async function installFromYaml(yaml: string, appName?: string) {
     try {
-      if (appName) installingApp = appName;
-      else yamlInstalling = true;
+      if (appName) installingApp = appName; else yamlInstalling = true;
       if (demo) {
         toast('Installed (demo)', 'success');
         window.location.hash = '/apps';
@@ -29,8 +58,8 @@
       const res: any = await apiProd('/apps', { method: 'POST', headers: { 'Content-Type': 'application/x-yaml' }, body: yaml });
       toast(res?.message || 'Installed', 'success');
       window.location.hash = '/apps';
-    } catch (e: any) {
-      toast(e?.message || 'Install failed', 'error');
+    } catch (err: any) {
+      toast(err?.message || 'Install failed', 'error');
     } finally {
       installingApp = null;
       yamlInstalling = false;
@@ -38,43 +67,68 @@
   }
 </script>
 
-<h2 class="text-xl font-semibold mb-4">App Catalog</h2>
-{#if loading}
-  <p>Loading…</p>
-{:else if error}
-  <p class="text-red-600">{error}</p>
-{:else}
-  <div class="bg-white rounded border p-4">
-    <h3 class="font-medium mb-2">Curated Apps</h3>
-    <ul class="text-sm space-y-2">
-      {#each catalog.apps ?? [] as app}
-        <li class="border rounded p-2">
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0">
-              <div class="font-medium">{app.name}</div>
-              <div class="text-xs text-gray-600">{app.description}</div>
-              <div class="text-xs text-gray-500 font-mono">{app.image}</div>
-            </div>
-            <div class="shrink-0 space-x-2">
-              <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50" on:click={() => installFromYaml(genYaml(app), app.name)} disabled={installingApp === app.name || yamlInstalling}>
-                {installingApp === app.name ? 'Installing…' : 'Install'}
-              </button>
-              <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50" on:click={() => { yamlText = genYaml(app); }}>View YAML</button>
-            </div>
-          </div>
-        </li>
-      {/each}
-    </ul>
-  </div>
-  <div class="mt-4 bg-white rounded border p-4">
-    <h3 class="font-medium mb-2">Install from YAML</h3>
-    <p class="text-xs text-gray-600 mb-2">Paste an app.yaml and click Install. In demo mode, this shows a success toast and navigates to Apps.</p>
-    <textarea class="w-full border rounded p-2 text-xs font-mono min-h-[120px]" bind:value={yamlText}></textarea>
-    <div class="mt-2">
-      <button class="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50" on:click={() => installFromYaml(yamlText)} disabled={yamlInstalling || installingApp !== null}>
-        {yamlInstalling ? 'Installing…' : 'Install'}
-      </button>
-      <a class="ml-2 text-xs text-blue-600 underline" href="/#/apps">Back to Apps</a>
+<section class="space-y-6">
+  <header class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+    <div>
+      <h2 class="text-2xl font-semibold text-text-primary">Catalog</h2>
+      <p class="text-sm text-text-muted">Curated services ship ready to deploy with Piccolo defaults.</p>
     </div>
-  </div>
-{/if}
+    <div class="flex items-center gap-2 w-full md:max-w-sm">
+      <label for="catalog-search" class="sr-only">Search catalog</label>
+      <input id="catalog-search" class="flex-1 rounded-xl border border-border-subtle bg-surface-1 px-4 py-2 text-sm" placeholder="Search" bind:value={filter} />
+    </div>
+  </header>
+
+  {#if loading}
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      {#each Array(6) as _}
+        <div class="h-40 rounded-2xl border border-border-subtle bg-surface-1 animate-pulse" aria-hidden="true"></div>
+      {/each}
+    </div>
+  {:else if error}
+    <div class="rounded-2xl border border-state-warn/30 bg-state-warn/10 p-5 text-state-warn">{error}</div>
+  {:else}
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      {#each filteredApps() as app}
+        <article class="rounded-2xl border border-border-subtle bg-surface-1 p-4 shadow-sm flex flex-col gap-3">
+          <div>
+            <h3 class="text-base font-semibold text-text-primary">{app.name}</h3>
+            {#if app.description}
+              <p class="text-xs text-text-muted">{app.description}</p>
+            {/if}
+            {#if app.image}
+              <p class="text-[11px] text-text-muted font-mono mt-1">{app.image}</p>
+            {/if}
+          </div>
+          <div class="flex items-center gap-2 text-xs text-text-muted">
+            {#if app.categories}
+              {#each app.categories.slice(0, 3) as category}
+                <span class="px-2 py-0.5 rounded-full bg-surface-2">{category}</span>
+              {/each}
+            {/if}
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-3 py-2 rounded-xl bg-accent text-text-inverse text-xs font-semibold disabled:opacity-60" on:click={() => installFromYaml(genYaml(app), app.name)} disabled={installingApp === app.name || yamlInstalling}>
+              {installingApp === app.name ? 'Installing…' : 'Install'}
+            </button>
+            <button class="px-3 py-2 rounded-xl border border-border-subtle text-xs font-semibold" on:click={() => { yamlText = genYaml(app); }}>
+              View YAML
+            </button>
+          </div>
+        </article>
+      {/each}
+    </div>
+
+    <div class="rounded-2xl border border-border-subtle bg-surface-1 p-5 space-y-3">
+      <h3 class="text-base font-semibold text-text-primary">Install from YAML</h3>
+      <p class="text-xs text-text-muted">Paste an app manifest to deploy custom services. YAML posts directly to the apps API.</p>
+      <textarea class="w-full rounded-xl border border-border-subtle bg-surface-0 p-3 text-xs font-mono min-h-[140px]" bind:value={yamlText}></textarea>
+      <div class="flex items-center gap-3">
+        <button class="px-4 py-2 rounded-xl bg-accent text-text-inverse text-xs font-semibold disabled:opacity-60" on:click={() => installFromYaml(yamlText)} disabled={yamlInstalling || installingApp !== null}>
+          {yamlInstalling ? 'Installing…' : 'Install'}
+        </button>
+        <button class="text-xs font-semibold text-accent-emphasis" on:click={() => window.location.hash = '/apps'}>Back to apps</button>
+      </div>
+    </div>
+  {/if}
+</section>

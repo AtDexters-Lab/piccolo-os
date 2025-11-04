@@ -5,18 +5,25 @@ test.describe('Dashboard panels (real-backed status)', () => {
   test('renders OS/Remote/Storage panels with real API data', async ({ page }) => {
     // Ensure admin is set up for real auth flows; ignore if already initialized
     await ensureSignedIn(page, ADMIN_PASSWORD);
-    await expect(page.locator('h2', { hasText: 'Dashboard' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible();
 
-    const updatesPanel = page.getByRole('heading', { name: 'Updates' }).first().locator('xpath=..');
+    const systemPanel = page.getByTestId('home-widget-system');
+    await expect(systemPanel).toBeVisible();
+    await expect(systemPanel.getByRole('heading', { level: 3, name: 'Health' })).toBeVisible();
+
+    const updatesPanel = page.getByTestId('home-widget-updates');
     await expect(updatesPanel).toBeVisible();
-    await expect(updatesPanel.locator('p').first()).toHaveText(/OS:|Failed to load updates|not found/i, { timeout: 5000 });
+    await expect(updatesPanel.getByRole('heading', { level: 3, name: 'OS & apps' })).toBeVisible();
+    await expect(updatesPanel).toContainText(/Running|Update|Unable to load updates|Check for updates/i, { timeout: 5000 });
 
-    const remotePanel = page.getByRole('heading', { name: 'Remote Access' }).first().locator('xpath=..');
-    await expect(remotePanel).toBeVisible();
-    await expect(remotePanel).toContainText(/Remote access is disabled|ACTIVE|PROVISIONING|PREFLIGHT_REQUIRED|WARNING|ERROR|No portal host/i, { timeout: 5000 });
+    const networkPanel = page.getByTestId('home-widget-network');
+    await expect(networkPanel).toBeVisible();
+    await expect(networkPanel.getByRole('heading', { level: 3, name: 'Reachability' })).toBeVisible();
+    await expect(networkPanel).toContainText(/Primary IP|Network diagnostics|Troubleshoot/i, { timeout: 5000 });
 
-    const storagePanel = page.getByRole('heading', { name: 'Storage' }).first().locator('xpath=..');
+    const storagePanel = page.getByTestId('home-widget-storage');
     await expect(storagePanel).toBeVisible();
-    await expect(storagePanel).toContainText(/disks detected|Failed to load storage/, { timeout: 5000 });
+    await expect(storagePanel.getByRole('heading', { level: 3, name: 'Capacity' })).toBeVisible();
+    await expect(storagePanel).toContainText(/disk|Unable to load storage|Add storage|Manage storage|No disks detected/i, { timeout: 5000 });
   });
 });
