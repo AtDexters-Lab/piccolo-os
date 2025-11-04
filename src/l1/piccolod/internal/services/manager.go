@@ -99,11 +99,22 @@ func (m *ServiceManager) notifyPublish(port int) {
 	}
 }
 
+const ACMEHTTPFallbackPort = 5002
+
+func normalizeRemotePort(port int) int {
+	if port == ACMEHTTPFallbackPort {
+		return 80
+	}
+	return port
+}
+
 func defaultRemotePorts(listener api.AppListener) []int {
 	if len(listener.RemotePorts) == 0 {
 		return []int{80, 443}
 	}
-	return append([]int(nil), listener.RemotePorts...)
+	ports := make([]int, len(listener.RemotePorts))
+	copy(ports, listener.RemotePorts)
+	return ports
 }
 
 // ObserveRuntimeEvents subscribes to leadership and lock-state events for logging.
@@ -417,6 +428,8 @@ func (m *ServiceManager) ResolveListener(listener string, remotePort int) (Servi
 }
 
 func matchesRemotePort(ep ServiceEndpoint, remotePort int) bool {
+	original := remotePort
+	remotePort = normalizeRemotePort(remotePort)
 	if remotePort <= 0 {
 		return true
 	}
@@ -424,7 +437,7 @@ func matchesRemotePort(ep ServiceEndpoint, remotePort int) bool {
 		return remotePort == 80 || remotePort == 443
 	}
 	for _, rp := range ep.RemotePorts {
-		if rp == remotePort {
+		if rp == remotePort || rp == original {
 			return true
 		}
 	}

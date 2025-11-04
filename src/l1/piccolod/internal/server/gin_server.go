@@ -40,6 +40,8 @@ import (
 	webassets "piccolod"
 )
 
+const acmeHTTPFallbackPort = services.ACMEHTTPFallbackPort
+
 type unlockReloader interface {
 	ReloadFromStorage() error
 }
@@ -172,9 +174,14 @@ func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int, isTLS b
 	tlsMuxPort := r.tlsMuxPort
 	r.mu.RUnlock()
 
+	normPort := remotePort
+	if normPort == acmeHTTPFallbackPort {
+		normPort = 80
+	}
+
 	// Portal host: treat as flow=tcp (device-terminated TLS when not 80)
 	if portal != "" && h == portal {
-		if remotePort == 80 {
+		if normPort == 80 {
 			return portalPort, true
 		}
 		if isTLS && tlsMuxPort > 0 {
@@ -200,11 +207,11 @@ func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int, isTLS b
 
 	// Listener host
 	if listener != "" {
-		if ep, ok := r.services.ResolveListener(listener, remotePort); ok {
+		if ep, ok := r.services.ResolveListener(listener, normPort); ok {
 			if ep.Flow == api.FlowTLS {
 				return ep.PublicPort, true
 			}
-			if remotePort == 80 {
+			if normPort == 80 {
 				return ep.PublicPort, true
 			}
 			if isTLS && tlsMuxPort > 0 {
@@ -215,11 +222,11 @@ func (r *serviceRemoteResolver) Resolve(hostname string, remotePort int, isTLS b
 	}
 
 	// Fallback by port only (rare): apply same flow policy when we find an ep
-	if ep, ok := r.services.ResolveByRemotePort(remotePort); ok {
+	if ep, ok := r.services.ResolveByRemotePort(normPort); ok {
 		if ep.Flow == api.FlowTLS {
 			return ep.PublicPort, true
 		}
-		if remotePort == 80 {
+		if normPort == 80 {
 			return ep.PublicPort, true
 		}
 		if isTLS && tlsMuxPort > 0 {
