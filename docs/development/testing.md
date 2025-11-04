@@ -61,6 +61,33 @@ go test ./internal/storage -v
 go test ./internal/trust -v
 ```
 
+# Web UI (Layer 1 / piccolod web-src)
+
+The Svelte/Tailwind portal ships with a Playwright suite that exercises primary flows on desktop and mobile breakpoints.
+
+```bash
+cd src/l1/piccolod/web-src
+
+# Build the UI bundle (vite)
+npm run build
+
+# Run the entire Playwright test suite (headless)
+npx playwright test
+
+# Run only the mobile layout smoke tests (includes logout reachability)
+npx playwright test tests/mobile.spec.ts --project mobile-chromium
+
+# Record new screenshots for visual regression tests when intentional UI changes land
+npx playwright test tests/visual.spec.ts --update-snapshots
+```
+
+Key scenarios include:
+- `mobile.spec.ts` – verifies touch targets, mobile navigation, and ensures a logout control is available on phones.
+- `navigation.spec.ts` – checks primary desktop navigation and quick settings access.
+- `remote_*` specs – cover remote publish configuration, certificate inventory, and connectivity flows.
+
+If you add new UI capabilities, extend the relevant spec or introduce a new one under `src/l1/piccolod/web-src/tests/` so the behaviour is enforced in CI.
+
 ## System-Level Testing
 
 ### Automated VM Testing
