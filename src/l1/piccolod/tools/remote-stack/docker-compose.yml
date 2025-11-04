@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: nexus.Dockerfile
       args:
-        NEXUS_VERSION: ${NEXUS_VERSION:-v0.1.3}
+        NEXUS_VERSION: ${NEXUS_VERSION:-v0.2.0}
     container_name: piccolo-e2e-nexus
     environment:
       - NEXUS_CONFIG=/config/nexus-config.yaml

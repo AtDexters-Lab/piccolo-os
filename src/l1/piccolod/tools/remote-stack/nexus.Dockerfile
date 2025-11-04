@@ -1,6 +1,6 @@
 # Build Nexus proxy server from source
 FROM golang:1.22 AS build
-ARG NEXUS_VERSION=v0.1.3
+ARG NEXUS_VERSION=v0.2.0
 WORKDIR /src
 ENV GOTOOLCHAIN=auto
 RUN go install github.com/AtDexters-Lab/nexus-proxy-server/proxy-server@${NEXUS_VERSION}
