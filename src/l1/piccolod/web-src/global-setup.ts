@@ -97,6 +97,7 @@ peerListenAddress: ":8444"
 relayPorts:
   - 443
   - 80
+  - 5002
 idleTimeoutSeconds: 300
 backendsJWTSecret: "${secret}"
 peers: []
@@ -151,16 +152,36 @@ async function upRemoteStack() {
   await waitTcp(14000, '127.0.0.1', 20_000);
   await waitTcp(8443, '127.0.0.1', 20_000);
 
+  const tld = process.env.PICCOLO_E2E_TLD || 'example.com';
+  const portal = `${process.env.PICCOLO_E2E_PORTAL || 'portal-e2e'}.${tld}`;
+  const sample = `app.${tld}`;
+  const nexusIPv4 = '172.29.0.10';
+  const nexusIPv6 = '::ffff:172.29.0.10';
+
   try {
-    await postJSON('http://127.0.0.1:8055/set-default-ipv4', { ip: '172.29.0.10' });
-    const tld = process.env.PICCOLO_E2E_TLD || 'example.com';
-    const portal = `${process.env.PICCOLO_E2E_PORTAL || 'portal-e2e'}.${tld}`;
-    const sample = `app.${tld}`;
-    const nexusIP = '172.29.0.10';
-    await postJSON('http://127.0.0.1:8055/add-a', { host: portal, addresses: [nexusIP] });
-    await postJSON('http://127.0.0.1:8055/add-a', { host: sample, addresses: [nexusIP] });
+    await postJSON('http://127.0.0.1:8055/set-default-ipv4', { ip: nexusIPv4 });
   } catch (e) {
     console.warn('WARN: challtestsrv set-default-ipv4 failed:', e);
+  }
+
+  try {
+    await postJSON('http://127.0.0.1:8055/set-default-ipv6', { ip: nexusIPv6 });
+  } catch (e) {
+    console.warn('WARN: challtestsrv set-default-ipv6 failed:', e);
+  }
+
+  try {
+    await postJSON('http://127.0.0.1:8055/add-a', { host: portal, addresses: [nexusIPv4] });
+    await postJSON('http://127.0.0.1:8055/add-a', { host: sample, addresses: [nexusIPv4] });
+  } catch (e) {
+    console.warn('WARN: challtestsrv add-a failed:', e);
+  }
+
+  try {
+    await postJSON('http://127.0.0.1:8055/add-aaaa', { host: portal, addresses: [nexusIPv6] });
+    await postJSON('http://127.0.0.1:8055/add-aaaa', { host: sample, addresses: [nexusIPv6] });
+  } catch (e) {
+    console.warn('WARN: challtestsrv add-aaaa failed:', e);
   }
 
   ensurePebbleCA();
