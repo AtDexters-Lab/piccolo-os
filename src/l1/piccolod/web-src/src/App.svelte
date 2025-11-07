@@ -12,6 +12,7 @@
   import Toast from '@components/Toast.svelte';
   import RouteLoading from '@components/RouteLoading.svelte';
   import QuickSettingsPanel from '@components/quick-settings/QuickSettingsPanel.svelte';
+  import RemoteSetupWizard from '@components/remote/RemoteSetupWizard.svelte';
   import ActivityTray from '@components/activity/ActivityTray.svelte';
   import Home from '@routes/home/index.svelte';
   import AppsInstalled from '@routes/apps/index.svelte';
@@ -44,6 +45,7 @@
   let currentPath = '/';
   let deviceName = 'Piccolo Home';
   let quickSettingsOpen = false;
+  let remoteWizardOpen = false;
   let sessionExpired = false;
   let installBanner = false;
   let remoteHydratePending = false;
@@ -54,6 +56,7 @@
   let preferences = { theme: 'system', background: 'aurora' };
   let activityOpen = false;
   let activityOpenListener: (() => void) | null = null;
+  let wizardListener: (() => void) | null = null;
   let session = { authenticated: false, volumes_locked: false } as { authenticated: boolean; volumes_locked?: boolean };
   let sessionUnsubscribe: (() => void) | null = null;
 
@@ -280,13 +283,16 @@
   }
 
   function handleQuickSettingsToggle() {
-    if (layout === 'desktop') {
-      const panel = document.getElementById('quick-settings-desktop');
-      panel?.focus();
-      panel?.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
     quickSettingsOpen = !quickSettingsOpen;
+  }
+
+  function openRemoteWizard() {
+    remoteWizardOpen = true;
+    quickSettingsOpen = false;
+  }
+
+  function closeRemoteWizard() {
+    remoteWizardOpen = false;
   }
 
   function toggleActivityTray() {
@@ -346,6 +352,14 @@
     computeLayout();
     updateCurrentPath();
     attachListeners();
+    const openWizardListener = () => openRemoteWizard();
+    window.addEventListener('remote-wizard-open', openWizardListener);
+    activityOpenListener = () => {
+      activityOpen = true;
+      refreshActivity();
+    };
+    window.addEventListener('piccolo-open-activity', activityOpenListener);
+    wizardListener = openWizardListener;
   });
 
   $: if (session.authenticated) {
@@ -407,6 +421,9 @@
     }
     if (activityOpenListener) {
       window.removeEventListener('piccolo-open-activity', activityOpenListener);
+    }
+    if (wizardListener) {
+      window.removeEventListener('remote-wizard-open', wizardListener);
     }
   });
 </script>
@@ -541,18 +558,27 @@
       </section>
     </main>
 
-    <aside class="app-shell__quick-settings hidden lg:flex flex-col" id="quick-settings-desktop" aria-label="Quick settings" tabindex="-1">
-      <div class="p-6 border-b border-border-subtle">
-        <h2 class="text-base font-semibold text-text-primary flex items-center justify-between">
-          Quick settings
-          <span class="text-xs font-medium text-text-muted">⌘/</span>
-        </h2>
-        <p class="mt-1 text-xs text-text-muted">Toggle Remote, apply updates, export logs, or lock the device.</p>
+    {#if quickSettingsOpen && layout === 'desktop'}
+      <div class="quick-settings-overlay quick-settings-overlay--desktop" role="dialog" aria-modal="true" aria-labelledby="quick-settings-desktop-title" data-quick-settings-modal>
+        <div class="quick-settings-overlay__scrim" aria-hidden="true" on:click={() => quickSettingsOpen = false}></div>
+        <div class="quick-settings-overlay__panel quick-settings-overlay__panel--desktop" role="document">
+          <div class="quick-settings-overlay__header">
+            <div>
+              <p class="text-xs uppercase tracking-[0.12em] text-text-muted">Quick settings</p>
+              <h2 id="quick-settings-desktop-title" class="text-lg font-semibold text-text-primary">Quick settings</h2>
+            </div>
+            <button class="quick-settings-overlay__close" on:click={() => quickSettingsOpen = false}>
+              <span class="sr-only">Close quick settings</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5">
+                <path d="M18 6 6 18" />
+                <path d="m6 6 12 12" />
+              </svg>
+            </button>
+          </div>
+          <QuickSettingsPanel layout="desktop" on:close={() => (quickSettingsOpen = false)} on:logout={handleLogout} />
+        </div>
       </div>
-      <div class="flex-1 overflow-hidden">
-        <QuickSettingsPanel layout="desktop" on:logout={handleLogout} />
-      </div>
-    </aside>
+    {/if}
   </div>
 
   {#if quickSettingsOpen && layout !== 'desktop'}
@@ -577,7 +603,11 @@
     </div>
   {/if}
 
-  <nav class="app-shell__bottom-nav lg:hidden" aria-label="Primary">
+  {#if remoteWizardOpen}
+    <RemoteSetupWizard on:close={closeRemoteWizard} on:updated={() => remoteWizardOpen = false} />
+  {/if}
+
+  <nav class="app-shell__bottom-nav lg:hidden" aria-label="Primary" class:hidden={remoteWizardOpen}>
     {#each navItems as item}
       <button
         class:!text-accent-emphasis={isActive(item.path)}
@@ -591,15 +621,6 @@
         <span>{item.label}</span>
       </button>
     {/each}
-    {#if session.authenticated}
-      <button
-        class="flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-text-muted"
-        on:click={handleLogout}
-      >
-        <span aria-hidden="true" class="text-lg">🚪</span>
-        <span>Logout</span>
-      </button>
-    {/if}
   </nav>
   <ActivityTray open={activityOpen} onClose={() => (activityOpen = false)} />
   <Toast />

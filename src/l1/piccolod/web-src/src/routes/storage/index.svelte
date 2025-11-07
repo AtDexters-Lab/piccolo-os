@@ -22,6 +22,7 @@
       disks = await apiProd('/storage/disks');
     } catch (e: any) {
       error = e?.message || 'Failed to load disks';
+      disks = null;
     } finally {
       loading = false;
     }
@@ -59,7 +60,9 @@
       try {
         const sessionInfo: any = await apiProd('/auth/session');
         sessionStore.set(sessionInfo);
-      } catch {}
+      } catch (err) {
+        console.warn('Unable to refresh session', err);
+      }
     } catch (e: any) {
       toast(e?.message || 'Unlock failed', 'error');
     } finally {
@@ -80,61 +83,319 @@
       working = false;
     }
   }
+
+  $: volumes = disks?.disks ?? [];
+  $: volumesLocked = !!session?.volumes_locked;
+  $: storageStatusTitle = volumesLocked ? 'Volumes locked' : 'Volumes ready';
+  $: storageStatusCopy = volumesLocked
+    ? 'Unlock encrypted volumes before deploying services.'
+    : volumes.length
+      ? `${volumes.length} volume${volumes.length > 1 ? 's' : ''} mounted and ready for Piccolo services.`
+      : 'Piccolo is unlocked, but no additional disks were detected.';
+  $: storageHeroHint = volumesLocked
+    ? 'Encryption keeps device data sealed until the admin password is provided.'
+    : 'Encrypted app data lives under /var/piccolo/apps/<app>/data.';
 </script>
 
-<h2 class="text-xl font-semibold mb-4">Storage</h2>
-<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-  <div class="bg-white rounded border p-4">
-    <div class="flex items-center justify-between mb-2">
-      <h3 class="font-medium">Volumes</h3>
-      <span class="text-xs px-2 py-0.5 rounded"
-        class:bg-yellow-100={session?.volumes_locked}
-        class:text-yellow-800={session?.volumes_locked}
-        class:bg-green-100={!session?.volumes_locked}
-        class:text-green-800={!session?.volumes_locked}
-      >{session?.volumes_locked ? 'Locked' : 'Unlocked'}</span>
+<div class="storage-page space-y-6">
+  <section class={`storage-hero ${volumesLocked ? 'storage-hero--locked' : 'storage-hero--ready'}`} aria-live="polite">
+    <div>
+      <p class="storage-hero__eyebrow">Storage status</p>
+      <h1 class="storage-hero__title">{storageStatusTitle}</h1>
+      <p class="storage-hero__copy">{storageStatusCopy}</p>
     </div>
-    {#if loading}
-      <p class="text-sm text-gray-500">Loading disks…</p>
-    {:else if error}
-      <p class="text-sm text-red-600">{error}</p>
-    {:else}
-      <ul class="text-sm space-y-2">
-        {#each disks?.disks ?? [] as disk}
-          <li class="border rounded p-2">
-            <div class="font-mono text-xs">{disk.id || disk.path}</div>
-            <div class="text-xs text-gray-600">{disk.model || 'Unknown model'} — {disk.size_bytes ? Math.round(disk.size_bytes / 1e9) : '?'} GB</div>
-          </li>
-        {/each}
-        {#if (disks?.disks ?? []).length === 0}
-          <li class="text-xs text-gray-500">No additional disks detected.</li>
-        {/if}
-      </ul>
-    {/if}
-    <div class="mt-3">
-      <label class="text-sm block">Unlock with password
-        <input type="password" class="mt-1 w-full border rounded p-2 text-sm" bind:value={unlockPassword} autocomplete="current-password" />
-      </label>
-      <button class="mt-2 px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50" on:click={unlock} disabled={working}>Unlock volumes</button>
+    <div class="storage-hero__actions">
+      {#if volumesLocked}
+        <label class="storage-hero__field">
+          <span>Admin password</span>
+          <input type="password" autocomplete="current-password" bind:value={unlockPassword} placeholder="••••••••" />
+        </label>
+        <button class="storage-hero__cta" on:click={unlock} disabled={!unlockPassword || working}>
+          {working ? 'Unlocking…' : 'Unlock volumes'}
+        </button>
+      {:else}
+        <div class="storage-hero__ready">
+          <p class="storage-hero__badge">{volumes.length} mounted</p>
+          <button class="storage-hero__ghost" on:click={loadDisks} disabled={loading}>
+            {loading ? 'Refreshing…' : 'Refresh disks'}
+          </button>
+        </div>
+      {/if}
+      <p class="storage-hero__hint">{storageHeroHint}</p>
     </div>
+  </section>
+
+  <div class="storage-grid">
+    <section class="storage-card">
+      <div class="storage-card__header">
+        <div>
+          <h2>Volumes</h2>
+          <p>Attached disks Piccolo can provision.</p>
+        </div>
+        <button class="storage-link" on:click={loadDisks} disabled={loading}>
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+      {#if loading}
+        <p class="storage-card__body">Loading disks…</p>
+      {:else if error}
+        <p class="storage-card__error">{error}</p>
+      {:else if volumes.length === 0}
+        <div class="storage-card__empty">
+          <p>No additional disks detected.</p>
+          <p>Add a drive or attach a volume, then refresh.</p>
+        </div>
+      {:else}
+        <ul class="storage-volume-list">
+          {#each volumes as disk}
+            <li>
+              <p class="storage-volume-list__name">{disk.id || disk.path}</p>
+              <p class="storage-volume-list__meta">{disk.model || 'Unknown model'} · {disk.size_bytes ? Math.round(disk.size_bytes / 1e9) : '?'} GB</p>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    <section class="storage-card">
+      <div class="storage-card__header">
+        <div>
+          <h2>Recovery key</h2>
+          <p>Used once to rekey devices or recover access.</p>
+        </div>
+      </div>
+      {#if loadingRecovery}
+        <p class="storage-card__body">Checking recovery key…</p>
+      {:else if recovery?.words}
+        <div class="storage-recovery">
+          <p class="storage-card__body">Write these words down and store them offline. Generating again invalidates the previous key.</p>
+          <div class="storage-recovery__grid">
+            {#each recovery.words as word, i}
+              <span>{i + 1}. {word}</span>
+            {/each}
+          </div>
+        </div>
+      {:else}
+        <div class="storage-card__empty">
+          <p>No recovery key has been generated yet.</p>
+          <button class="storage-hero__cta" on:click={generateRecoveryKey} disabled={working}>
+            {working ? 'Generating…' : 'Generate recovery key'}
+          </button>
+        </div>
+      {/if}
+    </section>
   </div>
 
-  <div class="bg-white rounded border p-4">
-    <h3 class="font-medium mb-2">Recovery Key</h3>
-    {#if loadingRecovery}
-      <p class="text-sm text-gray-500">Checking recovery key…</p>
-    {:else if recovery?.words}
-      <p class="text-sm text-gray-700 mb-2">Write these words down and store them safely.</p>
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-1 text-xs">
-        {#each recovery.words as word, i}
-          <span class="border rounded px-2 py-1 bg-gray-50">{i + 1}. {word}</span>
-        {/each}
-      </div>
-    {:else}
-      <p class="text-sm text-gray-700">No recovery key has been generated yet.</p>
-      <button class="mt-2 px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-50" on:click={generateRecoveryKey} disabled={working}>Generate Recovery Key</button>
-    {/if}
-  </div>
+  <p class="storage-footer">Need more capacity? Attach a new disk, then unlock and refresh to make it available for services.</p>
 </div>
 
-<p class="mt-6 text-xs text-gray-500">Encrypted application data lives under <code class="font-mono">/var/piccolo/apps/&lt;app&gt;/data</code>. Unlock to mount volumes before starting services.</p>
+<style>
+  .storage-page {
+    padding-bottom: 40px;
+  }
+  .storage-hero {
+    border: 1px solid rgba(var(--border-rgb) / 0.16);
+    border-radius: 32px;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+  }
+  .storage-hero--locked {
+    background: rgba(var(--state-warn-rgb) / 0.08);
+  }
+  .storage-hero--ready {
+    background: rgba(var(--state-ok-rgb) / 0.08);
+  }
+  .storage-hero__eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .storage-hero__title {
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .storage-hero__copy {
+    font-size: 1rem;
+    color: var(--text-muted);
+    max-width: 48ch;
+  }
+  .storage-hero__actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .storage-hero__field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+  }
+  .storage-hero__field input {
+    border: 1px solid rgba(var(--border-rgb) / 0.2);
+    border-radius: 16px;
+    padding: 12px 14px;
+    font-size: 1rem;
+    background: var(--surface-1);
+  }
+  .storage-hero__cta {
+    border-radius: 999px;
+    border: 1px solid var(--accent-emphasis);
+    padding: 12px 20px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    background: var(--accent);
+    color: var(--text-inverse);
+    cursor: pointer;
+  }
+  .storage-hero__cta:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .storage-hero__ready {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .storage-hero__badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: rgba(var(--state-ok-rgb) / 0.16);
+    color: rgb(var(--state-ok-rgb));
+  }
+  .storage-hero__ghost {
+    border-radius: 999px;
+    border: 1px solid rgba(var(--border-rgb) / 0.2);
+    padding: 10px 18px;
+    font-size: 0.9rem;
+    background: var(--surface-1);
+    cursor: pointer;
+  }
+  .storage-hero__ghost:disabled {
+    opacity: 0.6;
+  }
+  .storage-hero__hint {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+  .storage-grid {
+    display: grid;
+    gap: 20px;
+  }
+  @media (min-width: 900px) {
+    .storage-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .storage-card {
+    border: 1px solid rgba(var(--border-rgb) / 0.16);
+    border-radius: 24px;
+    background: var(--surface-1);
+    padding: 24px 28px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .storage-card__header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  @media (min-width: 768px) {
+    .storage-card__header {
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+    }
+  }
+  .storage-card__header h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .storage-card__header p {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+  }
+  .storage-card__body {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+  }
+  .storage-card__error {
+    font-size: 0.9rem;
+    color: rgb(var(--state-critical-rgb));
+  }
+  .storage-card__empty {
+    border: 1px dashed rgba(var(--border-rgb) / 0.3);
+    border-radius: 18px;
+    padding: 16px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    background: rgba(var(--border-rgb) / 0.04);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .storage-volume-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .storage-volume-list li {
+    padding: 12px 14px;
+    border: 1px solid rgba(var(--border-rgb) / 0.12);
+    border-radius: 16px;
+    background: var(--surface-0);
+  }
+  .storage-volume-list__name {
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .storage-volume-list__meta {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .storage-recovery__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+  }
+  .storage-recovery__grid span {
+    border: 1px solid rgba(var(--border-rgb) / 0.12);
+    border-radius: 12px;
+    padding: 8px 10px;
+    background: var(--surface-0);
+  }
+  .storage-link {
+    border: none;
+    background: none;
+    color: var(--accent-emphasis);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .storage-footer {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+  @media (max-width: 640px) {
+    .storage-hero,
+    .storage-card {
+      padding: 20px;
+    }
+  }
+</style>

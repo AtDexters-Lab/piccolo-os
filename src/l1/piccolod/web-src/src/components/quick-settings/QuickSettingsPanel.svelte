@@ -4,6 +4,7 @@
   import { toast } from '@stores/ui';
   import { setRemoteSummary, resetRemoteSummary, markRemoteUnsupported, deviceStore } from '@stores/device';
   import { sessionStore } from '@stores/session';
+  import { ICONS } from '@lib/iconPaths';
   import { get } from 'svelte/store';
 
   export let layout: 'desktop' | 'mobile' = 'desktop';
@@ -34,20 +35,10 @@
   let error: string | null = null;
   let exportBusy = false;
   let updateBusy = false;
-  let remoteBusy = false;
   let lockBusy = false;
   let unsubscribeSession: (() => void) | null = null;
   let unsubscribeDevice: (() => void) | null = null;
   let remoteSupported = true;
-
-  const icons: Record<string, string> = {
-    lock: 'M6.5 10V8a5.5 5.5 0 1 1 11 0v2H19a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h1.5zm2 0h6V8a3 3 0 0 0-6 0v2z',
-    remote: 'M12 2a10 10 0 0 1 10 10h-2a8 8 0 1 0-8 8 8 8 0 0 0 8-8h2a10 10 0 1 1-10-10zm0 6a4 4 0 1 1 0 8 4 4 0 0 1 0-8z',
-    update: 'M12 4a8 8 0 1 1-7.45 5H8l-3.5-4L1 9h3.06A8 8 0 0 1 12 4zm1 4v3.59l2.3 2.3-1.42 1.42L11 13.41V8h2z',
-    network: 'M2 18h20v2H2zm2-5h16v2H4zm3-5h10v2H7zm3-5h4v2h-4z',
-    logs: 'M6 4h12a2 2 0 0 1 2 2v13l-4-2-4 2-4-2-4 2V6a2 2 0 0 1 2-2z',
-    logout: 'M16 17l5-5-5-5v3h-5a4 4 0 0 0 0 8h5v-1zm-2 1h-3a2 2 0 1 1 0-4h3'
-  };
 
   $: remoteEnabled = remoteStatus?.enabled ?? false;
   $: remoteWarnings = remoteStatus?.warnings ?? [];
@@ -130,11 +121,9 @@
     lockBusy = false;
   }
 
-  async function handleRemoteToggle() {
-    if (remoteBusy) return;
-    remoteBusy = true;
-    ensureActionAvailable('Remote toggle');
-    remoteBusy = false;
+  function handleRemoteManage() {
+    close();
+    window.dispatchEvent(new CustomEvent('remote-wizard-open'));
   }
 
   async function handleUpdate() {
@@ -196,7 +185,7 @@
           <div class="flex items-start gap-3">
             <span class="rounded-full bg-accent-subtle text-accent-emphasis p-2 h-10 w-10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="h-5 w-5">
-                <path d={icons.lock} />
+                <path d={ICONS.lock} />
               </svg>
             </span>
             <div class="flex-1">
@@ -215,7 +204,7 @@
           <div class="flex items-start gap-3">
             <span class="rounded-full bg-accent-subtle text-accent-emphasis p-2 h-10 w-10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="h-5 w-5">
-                <path d={icons.remote} />
+                <path d={ICONS.remote} />
               </svg>
             </span>
             <div class="flex-1">
@@ -228,9 +217,9 @@
                 </div>
                 <p class="text-xs text-text-muted mt-1">
                   {#if portalHost}
-                    {portalHost}
+                    Portal reachable at {portalHost}.
                   {:else}
-                    Toggle remote reachability and manage domains.
+                    Run the setup wizard to enable remote access.
                   {/if}
                 </p>
                 {#if remoteWarnings.length}
@@ -246,18 +235,18 @@
               {/if}
             </div>
           </div>
-          {#if remoteSupported}
-            <button class="self-start inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-subtle text-xs font-semibold" on:click={handleRemoteToggle} disabled={remoteBusy}>
-              {remoteBusy ? 'Working…' : remoteEnabled ? 'Turn off' : 'Turn on'}
-            </button>
-          {/if}
+        {#if remoteSupported}
+          <button class="self-start inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-subtle text-xs font-semibold" on:click={handleRemoteManage}>
+            {remoteEnabled ? 'Review remote' : 'Enable remote'}
+          </button>
+        {/if}
         </li>
 
         <li class="px-6 py-5 flex flex-col gap-3">
           <div class="flex items-start gap-3">
             <span class="rounded-full bg-accent-subtle text-accent-emphasis p-2 h-10 w-10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="h-5 w-5">
-                <path d={icons.update} />
+                <path d={ICONS.update} />
               </svg>
             </span>
             <div class="flex-1">
@@ -276,7 +265,7 @@
           <div class="flex items-start gap-3">
             <span class="rounded-full bg-accent-subtle text-accent-emphasis p-2 h-10 w-10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="h-5 w-5">
-                <path d={icons.network} />
+                <path d={ICONS.network} />
               </svg>
             </span>
             <div class="flex-1">
@@ -295,7 +284,7 @@
           <div class="flex items-start gap-3">
             <span class="rounded-full bg-accent-subtle text-accent-emphasis p-2 h-10 w-10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="h-5 w-5">
-                <path d={icons.logs} />
+                <path d={ICONS.logs} />
               </svg>
             </span>
             <div class="flex-1">
@@ -315,7 +304,7 @@
             <div class="flex items-start gap-3">
               <span class="rounded-full bg-accent-subtle text-accent-emphasis p-2 h-10 w-10 flex items-center justify-center">
                 <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="h-5 w-5">
-                  <path d={icons.logout} />
+                  <path d={ICONS.logout ?? ''} />
                 </svg>
               </span>
               <div class="flex-1">

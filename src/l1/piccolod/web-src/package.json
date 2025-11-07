@@ -10,7 +10,8 @@
     "typegen": "openapi-typescript ../docs/api/openapi.yaml -o src/api/types.ts",
     "e2e": "playwright test",
     "e2e:update": "playwright test --update-snapshots",
-    "e2e:headed": "PWDEBUG=1 playwright test --headed"
+    "e2e:headed": "PWDEBUG=1 playwright test --headed",
+    "sync-screenshots": "node tools/sync-review-screenshots.mjs"
   },
   "dependencies": {
     "@tanstack/svelte-query": "^5.48.0",

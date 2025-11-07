@@ -4,6 +4,7 @@
   import { writable } from 'svelte/store';
 
   const STORAGE_REMOTE = 'piccolo_nudge_remote_hidden';
+  const ENABLE_REMOTE_NUDGE = false; // Consolidate remote CTA: use System Bar + Quick Settings only
   const STORAGE_FEATURE = 'piccolo_feature_nudges';
 
   const remoteDismissed = writable<boolean>(false);
@@ -31,7 +32,7 @@
   $: remoteHydrated = !!$deviceStore.remoteHydrated;
   $: remoteSupported = $deviceStore.remoteSupported ?? true;
   $: remoteHidden = $remoteDismissed;
-  $: showRemoteNudge = remoteHydrated && remoteSupported && !remoteEnabled && !remoteHidden;
+  $: showRemoteNudge = ENABLE_REMOTE_NUDGE && remoteHydrated && remoteSupported && !remoteEnabled && !remoteHidden;
 
   $: features = $featuresStore;
   $: dismissals = $featureDismissals;

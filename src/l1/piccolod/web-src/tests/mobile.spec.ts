@@ -20,17 +20,17 @@ test.describe('Mobile layout', () => {
     // Navigate back home
     const homeBtn = page.locator('nav.app-shell__bottom-nav').getByRole('button', { name: 'Home' });
     await homeBtn.click({ force: true });
-    await expect(page.getByRole('heading', { name: 'What matters now' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Keep Piccolo on track' })).toBeVisible();
   });
 
   test('visual tour (mobile screenshots)', async ({ page }) => {
     await ensureSignedIn(page, ADMIN_PASSWORD);
     const shots: Array<{ url: string; waitFor: string; name: string }> = [
-      { url: '/', waitFor: 'h2:text("What matters now")', name: 'm00_home' },
+      { url: '/', waitFor: 'h2:text("Keep Piccolo on track")', name: 'm00_home' },
       { url: '/#/apps', waitFor: 'h2:text("Apps")', name: 'm10_apps' },
-      { url: '/#/storage', waitFor: 'h2:text("Storage")', name: 'm20_storage' },
-      { url: '/#/updates', waitFor: 'h2:text("Updates")', name: 'm30_updates' },
-      { url: '/#/remote', waitFor: 'h2:text("Remote")', name: 'm40_remote' },
+      { url: '/#/storage', waitFor: 'p:text("Storage status")', name: 'm20_storage' },
+      { url: '/#/updates', waitFor: 'h1:text("Updates")', name: 'm30_updates' },
+      { url: '/#/remote', waitFor: 'h1:text("Remote access")', name: 'm40_remote' },
     ];
     for (const s of shots) {
       await page.goto(s.url);
@@ -38,6 +38,11 @@ test.describe('Mobile layout', () => {
       const out = test.info().outputPath(`${s.name}.png`);
       await page.screenshot({ path: out, fullPage: true });
     }
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('remote-wizard-open')));
+    await page.locator('#remote-wizard-title').waitFor({ state: 'visible' });
+    const wizardOut = test.info().outputPath('m45_remote_wizard.png');
+    await page.screenshot({ path: wizardOut, fullPage: true });
+    await page.keyboard.press('Escape');
   });
   test('quick settings control is clearly tappable on mobile', async ({ page }) => {
     await ensureSignedIn(page, ADMIN_PASSWORD);

@@ -67,6 +67,7 @@ test.describe('Remote full flow (UI-driven)', () => {
 
     await page.getByLabel('Nexus endpoint').fill(NEXUS_ENDPOINT);
     await page.getByLabel('JWT signing secret').fill(NEXUS_SECRET);
+    await page.getByRole('button', { name: /Step 2/i }).click();
     await page.getByLabel('Piccolo domain (TLD)').clear();
     await page.getByLabel('Piccolo domain (TLD)').fill(PICCOLO_TLD);
     await expect(page.getByLabel('Piccolo domain (TLD)')).toHaveValue(PICCOLO_TLD);
@@ -76,6 +77,7 @@ test.describe('Remote full flow (UI-driven)', () => {
     await expect(page.getByPlaceholder('portal')).toHaveValue(PORTAL_SUBDOMAIN);
     await expect(page.getByText(`Full host: ${REMOTE_HOST}`)).toBeVisible();
 
+    await page.getByRole('button', { name: /Step 3/i }).click();
     await page.getByRole('button', { name: 'Save & run preflight' }).click();
 
     const deadline = Date.now() + 10 * 60_000;

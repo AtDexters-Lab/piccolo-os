@@ -16,9 +16,10 @@ export async function login(page: Page, password: string = ADMIN_PASSWORD): Prom
   const apiLogin = await page.request.post('/api/v1/auth/login', {
     data: { username: 'admin', password }
   });
+  const homeHeading = { level: 2, name: 'Keep Piccolo on track' as const };
   if (apiLogin.ok()) {
     await page.goto('/#/');
-    await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('heading', homeHeading)).toBeVisible({ timeout: 15000 });
     return;
   }
 
@@ -39,7 +40,7 @@ export async function login(page: Page, password: string = ADMIN_PASSWORD): Prom
     await page.getByRole('button', { name: 'Sign in' }).click({ timeout: 15000 });
     await expect(page).toHaveURL(/#\/?$/);
   }
-  await expect(page.getByRole('heading', { level: 2, name: 'What matters now' })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole('heading', homeHeading)).toBeVisible({ timeout: 15000 });
 }
 
 export async function ensureSignedIn(page: Page, password: string = ADMIN_PASSWORD): Promise<void> {

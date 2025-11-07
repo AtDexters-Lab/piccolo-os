@@ -48,7 +48,7 @@
   --transition-easing: cubic-bezier(0.2, 0, 0, 1);
   --header-height: 64px;
   --quick-settings-width: 380px;
-  --app-background: linear-gradient(145deg, var(--surface-0) 0%, rgba(148, 163, 184, 0.08) 100%);
+  --app-background: linear-gradient(145deg, var(--surface-0) 0%, rgba(148, 163, 184, 0.04) 100%);
 }
 
 [data-theme='dark'] {
@@ -93,7 +93,7 @@
   --focus-ring-shadow: rgba(56, 189, 248, 0.4);
   --scrim-strong: rgba(15, 23, 42, 0.72);
   --scrim-soft: rgba(15, 23, 42, 0.5);
-  --app-background: linear-gradient(145deg, rgba(11 17 32 / 1) 0%, rgba(30 41 59 / 0.6) 100%);
+  --app-background: linear-gradient(145deg, rgba(11 17 32 / 1) 0%, rgba(30 41 59 / 0.3) 100%);
 }
 
 [data-theme='high-contrast'] {
@@ -284,6 +284,12 @@
   backdrop-filter: blur(12px);
   padding: 0 0.5rem;
 }
+.app-shell__bottom-nav.hidden {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(100%);
+  transition: opacity var(--transition-duration) var(--transition-easing), transform var(--transition-duration) var(--transition-easing);
+}
 
 .app-shell__bottom-nav button,
 .app-shell__bottom-nav a {
@@ -313,7 +319,7 @@
 
   .app-shell__body {
     flex-direction: row;
-    max-width: 1600px;
+    max-width: 1200px;
     margin: 0 auto;
     width: 100%;
     padding: 0 1.5rem 1.5rem;
@@ -388,6 +394,12 @@
   pointer-events: none;
 }
 
+.quick-settings-overlay--desktop {
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: min(4vw, 48px);
+}
+
 .quick-settings-overlay__scrim {
   position: absolute;
   inset: 0;
@@ -409,6 +421,14 @@
   pointer-events: auto;
   transform: translateY(0);
   animation: quick-settings-slide-up var(--transition-duration) var(--transition-easing);
+}
+
+.quick-settings-overlay__panel--desktop {
+  border-radius: 24px;
+  max-height: min(80vh, 720px);
+  width: min(420px, 90vw);
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
+  animation: quick-settings-fade-in var(--transition-duration) var(--transition-easing);
 }
 
 .quick-settings-overlay__header {
@@ -439,6 +459,17 @@
 @keyframes quick-settings-slide-up {
   from {
     transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes quick-settings-fade-in {
+  from {
+    transform: translateY(8px);
     opacity: 0;
   }
   to {

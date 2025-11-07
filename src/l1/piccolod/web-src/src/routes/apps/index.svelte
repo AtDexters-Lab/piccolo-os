@@ -153,9 +153,21 @@
       <button class="inline-flex items-center gap-2 text-xs font-semibold text-accent-emphasis" on:click={load}>Retry</button>
     </div>
   {:else if filteredApps.length === 0}
-    <div class="rounded-2xl border border-border-subtle bg-surface-1 p-6 text-sm text-text-muted">
-      <p>No apps match your filters. Install from the catalog or clear filters to see everything.</p>
-    </div>
+    {#if totalApps === 0}
+      <div class="rounded-2xl border border-border-subtle bg-surface-1 p-6 text-sm text-text-muted space-y-3">
+        <p class="text-text-primary font-medium">Install your first app</p>
+        <p>Kickstart your Piccolo with a curated service. You can add or remove apps any time.</p>
+        <div class="flex flex-wrap gap-2">
+          <button class="px-3 py-2 rounded-xl border border-border-subtle text-xs font-semibold" on:click={openCatalog}>
+            Browse catalog
+          </button>
+        </div>
+      </div>
+    {:else}
+      <div class="rounded-2xl border border-border-subtle bg-surface-1 p-6 text-sm text-text-muted">
+        <p>No apps match your filters. Install from the catalog or clear filters to see everything.</p>
+      </div>
+    {/if}
   {:else}
     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
       {#each filteredApps as app}
