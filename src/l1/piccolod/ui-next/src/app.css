@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --color-surface: 248 250 252;
+  --color-surface-strong: 15 23 42;
+  --color-text: 15 23 42;
+  --color-text-muted: 99 107 131;
+  --color-accent: 98 102 255;
+  --color-warning: 245 158 11;
+  --color-success: 16 185 129;
+  --color-info: 59 130 246;
+  --color-critical: 239 68 68;
+  --app-background: radial-gradient(circle at top, rgba(255,255,255,0.8), rgba(226,232,240,0.8));
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --color-surface: 15 23 42;
+  --color-surface-strong: 248 250 252;
+  --color-text: 248 250 252;
+  --color-text-muted: 148 163 184;
+  --color-accent: 129 140 248;
+  --color-warning: 245 158 11;
+  --color-success: 34 197 94;
+  --color-info: 56 189 248;
+  --color-critical: 248 113 113;
+  --app-background: radial-gradient(circle at top, rgba(15,23,42,0.8), rgba(2,6,23,0.9));
+}
+
+body {
+  font-family: 'Inter', 'SF Pro Text', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--app-background);
+  color: rgb(var(--color-text));
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+}

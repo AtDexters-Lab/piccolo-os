@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	stdfs "io/fs"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,12 +34,18 @@ import (
 	"piccolod/internal/state/paths"
 
 	"github.com/coreos/go-systemd/v22/daemon"
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 
 	webassets "piccolod"
 )
 
-const acmeHTTPFallbackPort = services.ACMEHTTPFallbackPort
+const (
+	acmeHTTPFallbackPort  = services.ACMEHTTPFallbackPort
+	maxStaticAssetPathLen = 4 * 1024 // guard against path-based DoS
+)
+
+var errInvalidStaticPath = errors.New("invalid static asset path")
 
 type unlockReloader interface {
 	ReloadFromStorage() error
@@ -474,14 +479,10 @@ func (s *GinServer) Stop() error {
 func (s *GinServer) setupGinRoutes() {
 	r := gin.New()
 
-	// Avoid implicit redirects that can cause loops during SPA routing
-	r.RedirectTrailingSlash = false
-	r.RedirectFixedPath = false
-	r.RemoveExtraSlash = false
-
 	// Add basic middleware
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
+	r.Use(gzip.Gzip(gzip.DefaultCompression))
 	r.Use(s.corsMiddleware())
 	r.Use(s.httpsRedirectMiddleware())
 	r.Use(s.securityHeadersMiddleware())
@@ -501,8 +502,6 @@ func (s *GinServer) setupGinRoutes() {
 		r.Use(s.apiValidator.Middleware())
 	}
 
-	// Root endpoint
-	r.GET("/", s.handleGinRoot)
 	// ACME HTTP-01 challenge for portal hostname
 	r.GET("/.well-known/acme-challenge/:token", func(c *gin.Context) {
 		if s.remoteManager == nil {
@@ -608,37 +607,25 @@ func (s *GinServer) setupGinRoutes() {
 	// Admin routes
 	r.GET("/version", s.handleGinVersion)
 
-	// Static file serving for web UI
-	s.setupStaticRoutes(r)
+	// Static file serving for web UI and fallback
+	r.NoRoute(func(c *gin.Context) {
+		if c.Request.Method == http.MethodGet {
+			requestedPath := c.Request.URL.Path
+			if strings.HasSuffix(requestedPath, "/") {
+				requestedPath += "entry.html"
+			}
+
+			fspath := "web" + requestedPath
+			if _, err := fs.Stat(webassets.FS, fspath); err != nil {
+				fspath = "web/entry.html"
+			}
+			c.FileFromFS(fspath, http.FS(webassets.FS))
+		} else {
+			c.Status(http.StatusNotFound)
+		}
+	})
 
 	s.router = r
-}
-
-// Root handler - serve web UI or API info based on Accept header
-func (s *GinServer) handleGinRoot(c *gin.Context) {
-	// Check if this is an API request (Accept: application/json)
-	if c.GetHeader("Accept") == "application/json" {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Piccolo OS Container Platform API",
-			"version": s.version,
-			"status":  "running",
-		})
-		return
-	}
-
-	// Otherwise serve the web UI (dev override or embedded) without triggering file-server redirects
-	if uiDir := os.Getenv("PICCOLO_UI_DIR"); uiDir != "" {
-		if b, err := os.ReadFile(filepath.Join(uiDir, "index.html")); err == nil {
-			c.Data(http.StatusOK, "text/html; charset=utf-8", b)
-			return
-		}
-	}
-	uiFS := webassets.FS()
-	if b, err := stdfs.ReadFile(uiFS, "index.html"); err == nil {
-		c.Data(http.StatusOK, "text/html; charset=utf-8", b)
-		return
-	}
-	c.String(http.StatusInternalServerError, "index.html not found")
 }
 
 // handleGinServicesAll returns all service endpoints across apps
@@ -966,79 +953,6 @@ func flattenHealth(snapshot map[string]health.Status) []gin.H {
 	return components
 }
 
-// setupStaticRoutes configures static file serving for web UI
-func (s *GinServer) setupStaticRoutes(r *gin.Engine) {
-	// Development override: serve from disk when PICCOLO_UI_DIR is set
-	if uiDir := os.Getenv("PICCOLO_UI_DIR"); uiDir != "" {
-		assetsDir := filepath.Join(uiDir, "assets")
-		r.Static("/assets", assetsDir)
-		r.GET("/assets", func(c *gin.Context) { c.Status(http.StatusNoContent) })
-		// Serve branding and other public files
-		if _, err := os.Stat(filepath.Join(uiDir, "branding")); err == nil {
-			r.Static("/branding", filepath.Join(uiDir, "branding"))
-		}
-		// Favicon and robots from root if present; otherwise 204
-		r.GET("/favicon.ico", func(c *gin.Context) {
-			fp := filepath.Join(uiDir, "favicon.ico")
-			if _, err := os.Stat(fp); err == nil {
-				c.File(fp)
-				return
-			}
-			c.Status(http.StatusNoContent)
-		})
-		r.GET("/robots.txt", func(c *gin.Context) {
-			fp := filepath.Join(uiDir, "robots.txt")
-			if _, err := os.Stat(fp); err == nil {
-				c.File(fp)
-				return
-			}
-			c.Status(http.StatusNoContent)
-		})
-		// Root is handled by handleGinRoot; don't register here
-		// Fallback for client-side routes
-		r.NoRoute(func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
-				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
-				return
-			}
-			c.File(filepath.Join(uiDir, "index.html"))
-		})
-		return
-	}
-
-	// Default: serve embedded UI from go:embed FS
-	uiFS := webassets.FS()
-	if assetsFS, err := stdfs.Sub(uiFS, "assets"); err == nil {
-		r.StaticFS("/assets", http.FS(assetsFS))
-	}
-	if brandingFS, err := stdfs.Sub(uiFS, "branding"); err == nil {
-		r.StaticFS("/branding", http.FS(brandingFS))
-	}
-	r.GET("/assets", func(c *gin.Context) { c.Status(http.StatusNoContent) })
-	r.GET("/favicon.ico", func(c *gin.Context) {
-		if _, err := stdfs.Stat(uiFS, "favicon.ico"); err == nil {
-			c.FileFromFS("favicon.ico", http.FS(uiFS))
-			return
-		}
-		c.Status(http.StatusNoContent)
-	})
-	r.GET("/robots.txt", func(c *gin.Context) {
-		if _, err := stdfs.Stat(uiFS, "robots.txt"); err == nil {
-			c.FileFromFS("robots.txt", http.FS(uiFS))
-			return
-		}
-		c.Status(http.StatusNoContent)
-	})
-	// Root is handled by handleGinRoot; don't register here
-	r.NoRoute(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
-			return
-		}
-		c.FileFromFS("index.html", http.FS(uiFS))
-	})
-}
-
 func (s *GinServer) initSecureLoopback() error {
 	if s == nil {
 		return nil
@@ -1101,7 +1015,22 @@ func (s *GinServer) httpsRedirectMiddleware() gin.HandlerFunc {
 			return
 		}
 		host := canonicalHost(c.Request.Host)
-		if host == "" || !s.remoteResolver.IsRemoteHostname(host) {
+		if host == "" {
+			c.Next()
+			return
+		}
+		// Local development and mDNS names (e.g., piccolo.local) should remain HTTP even
+		// if the remote resolver is configured with a matching TLD.
+		if strings.HasSuffix(host, ".local") || host == "localhost" || host == "127.0.0.1" {
+			c.Next()
+			return
+		}
+		log.Println("[DEBUG] doing redirect")
+		if net.ParseIP(host) != nil {
+			c.Next()
+			return
+		}
+		if !s.remoteResolver.IsRemoteHostname(host) {
 			c.Next()
 			return
 		}

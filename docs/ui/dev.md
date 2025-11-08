@@ -3,19 +3,9 @@
 This playbook keeps every UI pass aligned with the charter and gives reviewers consistent artifacts.
 
 ## 1. Capture fresh screenshots
-- Build and capture desktop tour from `src/l1/piccolod`:
-  ```bash
-  make e2e-visual
-  ```
-  This runs the non-demo build, launches Playwright, and stores desktop captures under `web-src/test-results/visual-Visual-tour-demo-capture-screenshots-of-key-pages-chromium/`.
-- Capture the mobile set separately:
-  ```bash
-  cd web-src
-  npx playwright test tests/mobile.spec.ts --project=mobile-chromium
-  cd ..
-  ```
-  Mobile screenshots land in `web-src/test-results/mobile-Mobile-layout-visual-tour-mobile-screenshots--mobile-chromium/`.
-- Copy both folders into a stable location (for example `reviews/screenshots/desktop` and `reviews/screenshots/mobile`) before running reviews so re-runs do not wipe them.
+- Desktop tour (automation migrating to `ui-next`): run your preferred script (e.g., `codex-ui-run-ui-review` capture pass) against the latest build, then copy the resulting PNGs into `reviews/screenshots/desktop`. The legacy `make e2e-visual` target has been removed because it depended on `web-src`.
+- Mobile: repeat the capture with mobile viewport settings (or a mobile-specific reviewer pass) and stash those artifacts under `reviews/screenshots/mobile`.
+- Keep both folders under `reviews/` so reviewer reruns don’t clobber your evidence.
 
 ## 2. Run automated reviews
 - **Default regression loop – UI reviewer**
@@ -44,9 +34,25 @@ codex-ui-run-ui-review reviews/screenshots/desktop reviews/screenshots/mobile \
 - When follow-up changes ship, rerun the loop so reviewers always see current captures before sign-off.
 
 ## 4. Checklist before submitting PRs
-- ✅ `make e2e-visual` (desktop) and `npx playwright … mobile` succeed without failures.
+- ✅ `make e2e` succeeds (portal smoke + console/network logs) and fresh screenshot folders exist for both breakpoints.
 - ✅ Latest review JSON (UI or Design) attached or linked in the PR.
 - ✅ Reviewer action items triaged—either addressed in the diff or filed as follow-ups.
 - ✅ Any accessibility warnings from the review (contrast, tap targets, focus order) are resolved or tracked.
 
 Sticking to this cadence keeps the “calm control” promise measurable and gives stakeholders a predictable review surface every sprint.
+
+## Appendix: portal smoke test (ui-next)
+
+Use the new harness when you need end-to-end evidence that the embedded portal loads cleanly (no console errors / missing assets):
+
+```bash
+cd src/l1/piccolod
+make e2e
+```
+
+The target compiles the latest piccolod binary (including the Svelte build), starts it on a random localhost port with a scratch state directory (both via `mktemp`), runs the Playwright `portal_logs.spec.ts` suite against `http://127.0.0.1:<port>`, then tears everything down (state dir removed automatically). Artifacts:
+
+- Server log: `src/l1/piccolod/test-results/piccolod-e2e.log`
+- Playwright attachments (console & network JSON): `src/l1/piccolod/ui-next/test-results/e2e/…`
+
+Override defaults with `PICCOLO_E2E_PORT`, `PICCOLO_E2E_STATE_DIR`, or `PICCOLO_BASE_URL` (forwarded to Playwright) if you need to bind to a fixed port or reuse an existing state volume.

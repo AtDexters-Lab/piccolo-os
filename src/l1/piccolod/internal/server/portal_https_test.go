@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"piccolod/internal/remote"
 	"piccolod/internal/remote/nexusclient"
 )
@@ -109,6 +111,56 @@ func TestRemotePortalHTTPRedirectsToHTTPS(t *testing.T) {
 	}
 	if loc := w.Header().Get("Location"); loc != "https://"+host+"/" {
 		t.Fatalf("expected Location https://%s/, got %q", host, loc)
+	}
+}
+
+func TestLocalHostSkipsHTTPSRedirect(t *testing.T) {
+	srv := createGinTestServer(t, t.TempDir())
+	defer srv.tlsMux.Stop()
+
+	const host = "piccolo.local"
+
+	runtimeStatus := remote.Status{Enabled: true, PortalHostname: host, TLD: "local"}
+	srv.applyRemoteRuntimeFromStatus(runtimeStatus)
+	srv.remoteResolver.UpdateConfig(nexusclient.Config{PortalHostname: host, TLD: "local"})
+
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodGet, "http://"+host+"/health/live", nil)
+	req.Host = host
+	ctx.Request = req
+
+	handler := srv.httpsRedirectMiddleware()
+	handler(ctx)
+
+	if ctx.IsAborted() {
+		t.Fatalf("expected middleware to continue for %s, but request was aborted with status %d", host, w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "" {
+		t.Fatalf("expected no redirect for %s, got Location header %q (status %d)", host, loc, w.Code)
+	}
+}
+
+func TestLoopbackIpSkipsHTTPSRedirect(t *testing.T) {
+	srv := createGinTestServer(t, t.TempDir())
+	defer srv.tlsMux.Stop()
+
+	const host = "127.0.0.1"
+
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodGet, "http://"+host+"/health/live", nil)
+	req.Host = host
+	ctx.Request = req
+
+	handler := srv.httpsRedirectMiddleware()
+	handler(ctx)
+
+	if ctx.IsAborted() {
+		t.Fatalf("expected middleware to continue for %s, but request was aborted with status %d", host, w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "" {
+		t.Fatalf("expected no redirect for %s, got Location header %q (status %d)", host, loc, w.Code)
 	}
 }
 
