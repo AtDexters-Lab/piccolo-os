@@ -3,6 +3,13 @@
 ## North Star
 - Anchor all UI work on `src/l1/piccolod/02_product/piccolo_os_ui_charter.md`.
 - Charter targets: calm control, ≤3 deliberate taps for key flows, readiness within 90 seconds, AA contrast and predictable motion.
+- Product context (PRD, acceptance features, etc.) lives under `src/l1/piccolod/02_product/`; review those specs before committing UX changes.
+- API contracts live in `src/l1/piccolod/docs/api/openapi.yaml`; keep UI flows aligned with that source of truth and add/extend endpoints there before coding.
+
+## Design Methodology
+- We currently ship without a dedicated UI designer, so we lean heavily on established design systems (Material, Radix primitives) and high-quality component libraries to reach a mature baseline quickly.
+- Use Material You/M3 rules for spacing, typography, elevation, and motion; customize via tokens but stay within widely recognized patterns for trust and accessibility.
+- When introducing bespoke interactions, document rationale and references to the external guidelines we’re extending.
 
 ## Architecture
 - **Framework:** SvelteKit + TypeScript (SSR, routing, forms).
@@ -49,6 +56,9 @@
 - `npm run review`: runs e2e, syncs screenshots (`tools/sync-review-screenshots.mjs`), triggers reviewer.
 - Storybook/SvelteKit preview documents components with mobile viewports.
 - Design review outputs stored under `src/l1/reviews/<date>/`.
+- **Screenshot cadence:** run `npm run screenshots` (which reuses `scripts/run-e2e-with-server.sh` to boot piccolod and then executes `scripts/capture-ui-screenshots.mjs`) to traverse core flows in a headless browser and save PNGs under `src/l1/piccolod/ui-next/screenshots/<timestamp>/`. Every new screen/flow must add a step to that script so reviewers always get an updated visual record.
+- **Screenshot review ritual:** after capturing, write down (a) the specific states/visual traits you expect to see and (b) anything that must *not* appear (unstyled HTML, incorrect data, etc.). Only then open the images and perform a visual inspection to confirm the expectations list, and document next steps if the captures diverge.
+- **Engineering journal:** any noteworthy build/runtime shifts (framework upgrades, tooling rollbacks, infra decisions) must be logged append-only in `src/l1/piccolod/ui-next/docs/journal.md` with date, cause, action, and follow-ups so future contributors understand why a change happened.
 
 ## Directory Layout
 ```

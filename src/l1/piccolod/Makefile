@@ -59,6 +59,6 @@ clean:
 	cd $(UI_DIR) && rm -rf .svelte-kit build test-results playwright-report
 
 e2e:
-	@$(UI_DIR)/scripts/run-e2e-with-server.sh
+	@$(UI_DIR)/scripts/run-e2e-with-server.sh e2e
 
 # Removed legacy demo and separate real config; unified on single config.

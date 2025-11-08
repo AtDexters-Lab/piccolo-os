@@ -4,6 +4,15 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PICCOLO_DIR=$(cd "$SCRIPT_DIR/../.." && pwd)
 UI_DIR="$PICCOLO_DIR/ui-next"
+
+if [[ $# -ge 1 ]]; then
+  CMD="$1"
+  shift
+else
+  CMD="e2e"
+fi
+CMD_ARGS=("$@")
+
 if [[ -n "${PICCOLO_E2E_PORT:-}" ]]; then
   PORT="$PICCOLO_E2E_PORT"
 else
@@ -77,9 +86,14 @@ if [[ $ready -ne 1 ]]; then
   exit 1
 fi
 
-echo "==> Running Playwright tests against $BASE_URL"
+echo "==> Running npm run $CMD against $BASE_URL"
 cd "$UI_DIR"
-if ! PICCOLO_BASE_URL="$BASE_URL" npm run e2e; then
+if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
+  CMD_ARRAY=(npm run "$CMD" -- "${CMD_ARGS[@]}")
+else
+  CMD_ARRAY=(npm run "$CMD")
+fi
+if ! PICCOLO_BASE_URL="$BASE_URL" "${CMD_ARRAY[@]}"; then
   echo "Playwright failed; tailing server log from $LOG_FILE" >&2
   tail -n 200 "$LOG_FILE" >&2 || true
   exit 1
