@@ -13,7 +13,7 @@
 
 ## Architecture
 - **Framework:** SvelteKit + TypeScript (SSR, routing, forms).
-- **Components:** Radix UI primitives + Tailwind CSS themed with Material 3 tokens.
+- **Components:** Radix UI primitives + Tailwind CSS themed with Material 3 tokens; shared in-house primitives (`Button`, `Stepper`, `ProgressPanel`, etc.) consume the same tokens for consistent theming.
 - **State/data:** TanStack Query (Svelte Query) for fetching/caching; derived Svelte stores for status chips and preferences.
 - **Build:** Vite (via SvelteKit), bundled with piccolod like existing `web-src`.
 
@@ -21,7 +21,7 @@
 - Mobile-first stack; tablet 8-col, desktop max 1200px (12-col grid).
 - Spacing tokens (8/12/16/24) defined as CSS variables + Tailwind config.
 - Semantic colors (surface, on-surface, status ok/warn/error, accent) sourced from Material 3 palette.
-- Typography ramp: 14/16/20/24/32 with consistent letter spacing.
+- Typography ramp: 14/16/20/24/32 with consistent letter spacing; display headlines use Comfortaa (logo-aligned) while body copy stays on Inter for readability.
 
 ## Interaction Patterns
 - Bottom tab bar on mobile, side rail on desktop (identical structure).
@@ -59,6 +59,7 @@
 - **Screenshot cadence:** run `npm run screenshots` (which reuses `scripts/run-e2e-with-server.sh` to boot piccolod and then executes `scripts/capture-ui-screenshots.mjs`) to traverse core flows in a headless browser and save PNGs under `src/l1/piccolod/ui-next/screenshots/<timestamp>/`. Every new screen/flow must add a step to that script so reviewers always get an updated visual record.
 - **Screenshot review ritual:** after capturing, write down (a) the specific states/visual traits you expect to see and (b) anything that must *not* appear (unstyled HTML, incorrect data, etc.). Only then open the images and perform a visual inspection to confirm the expectations list, and document next steps if the captures diverge.
 - **Engineering journal:** any noteworthy build/runtime shifts (framework upgrades, tooling rollbacks, infra decisions) must be logged append-only in `src/l1/piccolod/ui-next/docs/journal.md` with date, cause, action, and follow-ups so future contributors understand why a change happened.
+- **Theme brief:** brainstorm and convergence on the Piccolo visual theme lives in `docs/theme-brief.md`. Keep it updated as we decide on tokens, component styles, and inspirations (Material vs. Apple cues) so future contributors know why the theme looks the way it does.
 
 ## Directory Layout
 ```
