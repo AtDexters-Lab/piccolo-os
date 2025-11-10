@@ -9,6 +9,7 @@
   import DiskCard from '$lib/components/install/DiskCard.svelte';
   import PlanSummary from '$lib/components/install/PlanSummary.svelte';
   import ProgressPanel from '$lib/components/install/ProgressPanel.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
 
   export let data: PageData;
 
@@ -185,12 +186,12 @@
           selecting the correct device, simulating the changes, and monitoring the install until reboot.
         </p>
         <div class="flex flex-wrap gap-3">
-          <button class="rounded-2xl bg-accent px-5 py-3 text-base font-semibold text-white shadow-lg shadow-accent/30" type="button" on:click={startWizard}>
+          <Button variant="primary" on:click={startWizard}>
             Begin install
-          </button>
-          <button class="rounded-2xl border border-white/50 px-5 py-3 text-base font-semibold text-slate-800" type="button" on:click={refreshTargets}>
+          </Button>
+          <Button variant="secondary" on:click={refreshTargets}>
             Refresh disks
-          </button>
+          </Button>
         </div>
       </div>
       <div class="rounded-3xl border border-white/40 bg-white/70 px-6 py-5 text-sm text-muted">
@@ -224,12 +225,12 @@
           <h2 class="text-xl font-semibold text-slate-900">Before you begin</h2>
           <p class="mt-2 text-sm text-muted">Stay near the device during install and confirm you have backed up any data on the target disk.</p>
           <div class="mt-4 flex flex-wrap gap-3">
-            <button class="rounded-2xl bg-accent px-5 py-3 text-base font-semibold text-white shadow-lg shadow-accent/30" type="button" on:click={startWizard}>
+            <Button variant="primary" on:click={startWizard}>
               Continue
-            </button>
-            <a class="rounded-2xl border border-slate-200 px-5 py-3 text-base font-semibold text-slate-700" href="/">
+            </Button>
+            <Button variant="ghost" href="/">
               Cancel
-            </a>
+            </Button>
           </div>
         </section>
       {:else if activeStep === 'disk'}
@@ -261,25 +262,15 @@
               <p class="mt-2 text-xs text-muted">Exact match required to unlock the next step.</p>
             </div>
             <div class="mt-5 flex flex-wrap gap-3">
-              <button class="rounded-2xl border border-slate-200 px-5 py-3 text-base font-semibold text-slate-700" type="button" on:click={goBackToIntro}>
+              <Button variant="ghost" on:click={goBackToIntro}>
                 Back
-              </button>
-              <button
-                class="rounded-2xl bg-accent px-5 py-3 text-base font-semibold text-white shadow-lg shadow-accent/30 disabled:opacity-40"
-                type="button"
-                disabled={!canContinueToPlan || planMutation.isPending}
-                on:click={() => generatePlan(false)}
-              >
+              </Button>
+              <Button variant="primary" disabled={!canContinueToPlan || planMutation.isPending} on:click={() => generatePlan(false)}>
                 {planMutation.isPending ? 'Preparing plan…' : 'Simulate install'}
-              </button>
-              <button
-                class="rounded-2xl border border-accent/60 px-5 py-3 text-base font-semibold text-accent disabled:opacity-40"
-                type="button"
-                disabled={!canContinueToPlan || planMutation.isPending}
-                on:click={() => generatePlan(true)}
-              >
+              </Button>
+              <Button variant="secondary" disabled={!canContinueToPlan || planMutation.isPending} on:click={() => generatePlan(true)}>
                 {planMutation.isPending ? 'Checking latest…' : 'Simulate with latest image'}
-              </button>
+              </Button>
             </div>
           {/if}
         </section>
@@ -306,18 +297,18 @@
                   Fetch latest signed image before installing
                 </label>
                 {#if requestLatest}
-                  <button class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-800 disabled:opacity-50" type="button" disabled={latestMutation.isPending} on:click={() => latestMutation.mutateAsync()}>
+                  <Button variant="secondary" size="compact" disabled={latestMutation.isPending} on:click={() => latestMutation.mutateAsync()}>
                     {latestMutation.isPending ? 'Checking…' : 'Verify latest image'}
-                  </button>
+                  </Button>
                 {/if}
               </div>
               <form class="mt-6 flex flex-wrap gap-3" on:submit={handleRunInstall}>
-                <button class="rounded-2xl border border-slate-200 px-5 py-3 text-base font-semibold text-slate-700" type="button" on:click={goBackToDisks}>
+                <Button variant="ghost" type="button" on:click={goBackToDisks}>
                   Back
-                </button>
-                <button class="rounded-2xl bg-accent px-5 py-3 text-base font-semibold text-white shadow-lg shadow-accent/30 disabled:opacity-40" type="submit" disabled={!canRunInstall || installMutation.isPending}>
+                </Button>
+                <Button variant="primary" type="submit" disabled={!canRunInstall || installMutation.isPending}>
                   {installMutation.isPending ? 'Starting…' : 'Run install'}
-                </button>
+                </Button>
               </form>
             </div>
           {:else}
@@ -330,9 +321,9 @@
         <section class="rounded-3xl border border-white/30 bg-white/95 p-6 shadow-xl">
           <h2 class="text-xl font-semibold text-slate-900">Install in progress</h2>
           <p class="mt-2 text-sm text-muted">Keep the browser open—Piccolo will reboot automatically when the image finishes writing.</p>
-          <button class="mt-4 rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700" type="button" on:click={markFinished}>
+          <Button variant="ghost" size="compact" on:click={markFinished}>
             Show post-install steps
-          </button>
+          </Button>
         </section>
       {:else if activeStep === 'finish'}
         <section class="rounded-3xl border border-white/30 bg-white/95 p-6 shadow-xl text-slate-900">
@@ -341,12 +332,12 @@
             The device is applying the image and will reboot. Once it is back online, visit <code>http://piccolo.local</code> to finish the setup wizard.
           </p>
           <div class="mt-4 flex flex-wrap gap-3">
-            <a class="rounded-2xl bg-accent px-5 py-3 text-base font-semibold text-white shadow-lg shadow-accent/30" href="/setup">
+            <Button variant="primary" href="/setup">
               Continue setup
-            </a>
-            <a class="rounded-2xl border border-slate-200 px-5 py-3 text-base font-semibold text-slate-700" href="/">
+            </Button>
+            <Button variant="secondary" href="/">
               Return home
-            </a>
+            </Button>
           </div>
         </section>
       {/if}

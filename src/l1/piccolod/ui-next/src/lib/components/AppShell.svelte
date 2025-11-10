@@ -2,7 +2,7 @@
   export let title = 'Piccolo';
 </script>
 
-<div class="min-h-screen bg-[var(--app-background)] text-text">
+<div class="min-h-screen text-ink" style="background: var(--hero-gradient);">
   <header class="border-b border-white/20 bg-white/40 backdrop-blur-xl text-slate-900">
     <div class="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
       <div class="flex items-center gap-3">

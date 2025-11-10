@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Button from '$lib/components/ui/Button.svelte';
+</script>
+
 <svelte:head>
   <title>Piccolo UI Next</title>
 </svelte:head>
@@ -11,12 +15,12 @@
       and the surrounding shell using SvelteKit, Tailwind, and TanStack Query.
     </p>
     <div class="mt-4 flex flex-wrap gap-3">
-      <a class="inline-flex items-center justify-center rounded-2xl bg-accent px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-accent/30" href="/setup">
+      <Button variant="primary" href="/setup">
         Open setup wizard
-      </a>
-      <a class="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-800" href="/docs/foundation.md" target="_blank" rel="noopener">
+      </Button>
+      <Button variant="secondary" href="/docs/foundation.md" target="_blank">
         View foundations doc
-      </a>
+      </Button>
     </div>
   </section>
 

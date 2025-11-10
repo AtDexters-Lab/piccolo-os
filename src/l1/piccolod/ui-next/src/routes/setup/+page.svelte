@@ -4,6 +4,7 @@
   import type { ApiError } from '$lib/api/http';
   import { createAdmin, initCrypto } from '$lib/api/setup';
   import Stepper from '$lib/components/Stepper.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
   import type { StepDefinition } from '$lib/types/wizard';
   import type { PageData } from './$types';
 
@@ -102,9 +103,9 @@
         <li>• Keep it confidential—there is only one admin per device.</li>
       </ul>
       <div class="flex gap-3">
-        <button class="rounded-2xl bg-accent px-4 py-3 text-base font-semibold text-white shadow-lg shadow-accent/30" on:click={goToCredentials} type="button">
+        <Button variant="primary" on:click={goToCredentials}>
           {data.initialized ? 'Go to sign in' : 'Start setup'}
-        </button>
+        </Button>
       </div>
     </section>
   {:else if activeStep === 'credentials'}
@@ -148,12 +149,12 @@
         </ul>
       </div>
       <div class="flex gap-3">
-        <button class="rounded-2xl border border-slate-200 px-4 py-3 text-base font-semibold text-slate-700" type="button" on:click={() => (activeStep = 'intro')}>
+        <Button variant="ghost" type="button" on:click={() => (activeStep = 'intro')}>
           Back
-        </button>
-        <button class="rounded-2xl bg-accent px-4 py-3 text-base font-semibold text-white shadow-lg shadow-accent/30 disabled:opacity-60" disabled={!passwordsMatch() || mutation.isPending} type="submit">
+        </Button>
+        <Button variant="primary" disabled={!passwordsMatch() || mutation.isPending} type="submit">
           {mutation.isPending ? 'Creating…' : 'Create admin'}
-        </button>
+        </Button>
       </div>
     </form>
   {:else if activeStep === 'done'}
@@ -162,12 +163,12 @@
       <h2 class="text-2xl font-semibold">Admin ready</h2>
       <p class="text-sm text-muted">Use the password you just created to sign in and finish device setup.</p>
       <div class="flex gap-3">
-        <button class="rounded-2xl bg-accent px-4 py-3 text-base font-semibold text-white shadow-lg shadow-accent/30" on:click={finish} type="button">
+        <Button variant="primary" on:click={finish}>
           Go to dashboard
-        </button>
-        <button class="rounded-2xl border border-slate-200 px-4 py-3 text-base font-semibold text-slate-700" type="button" on:click={() => goto('/login')}>
+        </Button>
+        <Button variant="secondary" on:click={() => goto('/login')}>
           Sign in now
-        </button>
+        </Button>
       </div>
     </section>
   {/if}

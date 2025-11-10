@@ -3,21 +3,34 @@ const config = {
   theme: {
     extend: {
       colors: {
-        surface: 'rgb(var(--color-surface) / <alpha-value>)',
-        'surface-strong': 'rgb(var(--color-surface-strong) / <alpha-value>)',
-        text: 'rgb(var(--color-text) / <alpha-value>)',
-        muted: 'rgb(var(--color-text-muted) / <alpha-value>)',
-        accent: 'rgb(var(--color-accent) / <alpha-value>)',
-        warning: 'rgb(var(--color-warning) / <alpha-value>)',
-        success: 'rgb(var(--color-success) / <alpha-value>)',
-        info: 'rgb(var(--color-info) / <alpha-value>)',
-        critical: 'rgb(var(--color-critical) / <alpha-value>)'
+        surface: 'rgb(var(--sys-surface) / <alpha-value>)',
+        'surface-variant': 'rgb(var(--sys-surface-variant) / <alpha-value>)',
+        'surface-muted': 'rgb(var(--sys-surface-muted) / <alpha-value>)',
+        ink: 'rgb(var(--sys-ink) / <alpha-value>)',
+        muted: 'rgb(var(--sys-ink-muted) / <alpha-value>)',
+        accent: 'rgb(var(--sys-accent) / <alpha-value>)',
+        'accent-hero': 'rgb(var(--sys-accent-hero) / <alpha-value>)',
+        success: 'rgb(var(--sys-success) / <alpha-value>)',
+        info: 'rgb(var(--sys-info) / <alpha-value>)',
+        warning: 'rgb(var(--sys-warning) / <alpha-value>)',
+        critical: 'rgb(var(--sys-critical) / <alpha-value>)'
       },
       borderRadius: {
-        '2xl': '1.5rem'
+        xs: 'var(--radius-xs)',
+        sm: 'var(--radius-sm)',
+        md: 'var(--radius-md)',
+        lg: 'var(--radius-lg)',
+        xl: 'var(--radius-xl)',
+        pill: 'var(--radius-pill)'
+      },
+      boxShadow: {
+        soft: 'var(--shadow-soft)',
+        strong: 'var(--shadow-strong)'
       },
       fontFamily: {
-        sans: ['"Inter"', '"SF Pro Text"', 'system-ui', 'sans-serif']
+        sans: ['Inter', 'SF Pro Text', 'system-ui', 'sans-serif'],
+        display: ['Comfortaa', 'Inter', 'system-ui', 'sans-serif'],
+        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'Liberation Mono', 'monospace']
       }
     }
   },
