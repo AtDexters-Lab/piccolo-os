@@ -15,13 +15,13 @@
 
   type Step = 'intro' | 'disk' | 'plan' | 'install' | 'finish';
 
-  const steps: StepDefinition[] = [
-    { id: 'intro', label: 'Prepare', description: 'Review safety checks' },
-    { id: 'disk', label: 'Disk', description: 'Choose destination' },
-    { id: 'plan', label: 'Plan', description: 'Simulate changes' },
-    { id: 'install', label: 'Install', description: 'Write & verify' },
-    { id: 'finish', label: 'Finish', description: 'Reboot & continue' }
-  ];
+const baseSteps: StepDefinition[] = [
+  { id: 'intro', label: 'Prepare', description: 'Review safety checks' },
+  { id: 'disk', label: 'Disk', description: 'Choose destination' },
+  { id: 'plan', label: 'Plan', description: 'Simulate changes' },
+  { id: 'install', label: 'Install', description: 'Write & verify' },
+  { id: 'finish', label: 'Finish', description: 'Reboot & continue' }
+];
 
   const targetsQuery = createQuery<InstallTarget[]>(() => ({
     queryKey: ['install-targets'],
@@ -37,10 +37,38 @@
   let installPlan: InstallPlan | null = null;
   let latestInfo: FetchLatestImage | null = null;
   let requestLatest = false;
-  let infoMessage = '';
-  let errorMessage = '';
-  let progressNotes: string[] = [];
-  let installComplete = false;
+let infoMessage = '';
+let errorMessage = '';
+let progressNotes: string[] = [];
+let installComplete = false;
+let planHasError = false;
+let installHasError = false;
+let steps: StepDefinition[] = baseSteps;
+
+$: steps = (() => {
+  const started = activeStep !== 'intro';
+  return baseSteps.map((step) => {
+    if (step.id === 'plan') {
+      if (planHasError) {
+        return { ...step, state: 'error' } as StepDefinition;
+      }
+      return step;
+    }
+    if (step.id === 'install') {
+      if (installHasError) {
+        return { ...step, state: 'error' } as StepDefinition;
+      }
+      if (installComplete) {
+        return { ...step, state: 'success' } as StepDefinition;
+      }
+      return step;
+    }
+    if (step.id === 'finish' && installComplete && activeStep === 'finish') {
+      return { ...step, state: 'success' } as StepDefinition;
+    }
+    return step;
+  });
+})();
 
   let targets: InstallTarget[] = data.targets;
   let selectedTarget: InstallTarget | null = targets[0] ?? null;
@@ -62,9 +90,11 @@
       infoMessage = 'Install plan ready. Review and confirm.';
       errorMessage = '';
       activeStep = 'plan';
+      planHasError = false;
     },
     onError: (err: ApiError) => {
       errorMessage = err.message ?? 'Failed to generate install plan';
+      planHasError = true;
     }
   }));
 
@@ -88,21 +118,27 @@
       infoMessage = 'Install request accepted. The device will reboot when finished.';
       errorMessage = '';
       installComplete = true;
+      installHasError = false;
       activeStep = 'install';
     },
     onError: (err: ApiError) => {
       errorMessage = err.message ?? 'Install failed. Please review logs.';
+      installHasError = true;
       activeStep = 'plan';
     }
   }));
 
-  function resetNotices() {
-    infoMessage = '';
-    errorMessage = '';
-  }
+function resetNotices() {
+  infoMessage = '';
+  errorMessage = '';
+  planHasError = false;
+  installHasError = false;
+  installComplete = false;
+}
 
   function startWizard() {
     resetNotices();
+    progressNotes = [];
     activeStep = 'disk';
   }
 
@@ -176,10 +212,10 @@
 </svelte:head>
 
 <div class="space-y-8" data-testid="install-wizard">
-  <section class="rounded-[40px] border border-white/30 bg-gradient-to-br from-white/85 via-white/70 to-slate-50 p-8 shadow-2xl shadow-slate-200/60 text-slate-900">
+  <section class="rounded-[40px] border border-white/30 bg-gradient-to-br from-white/85 via-white/70 to-slate-50 p-8 elev-3 text-ink">
     <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
       <div class="max-w-2xl space-y-3">
-        <p class="text-xs uppercase tracking-[0.4em] text-muted">Install</p>
+        <p class="meta-label">Install</p>
         <h1 class="text-3xl font-semibold">New disk install wizard</h1>
         <p class="text-base text-muted">
           Write the signed Piccolo OS image from this live session onto an internal disk. The flow guides you through
@@ -195,7 +231,7 @@
         </div>
       </div>
       <div class="rounded-3xl border border-white/40 bg-white/70 px-6 py-5 text-sm text-muted">
-        <p class="font-semibold text-slate-900">Safety first</p>
+        <p class="font-semibold text-ink">Safety first</p>
         <ul class="mt-2 list-disc list-inside space-y-1">
           <li>Device must stay on power & wired network.</li>
           <li>Install erases the entire target disk.</li>
@@ -205,24 +241,26 @@
     </div>
   </section>
 
-  <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-    <div class="flex flex-col gap-6">
-      <Stepper steps={steps} activeId={activeStep} />
+  <div class="flex flex-col gap-6">
+    <Stepper steps={steps} activeId={activeStep} />
 
-      {#if infoMessage}
-        <div class="rounded-3xl border border-blue-200 bg-blue-50/80 px-5 py-4 text-sm text-blue-900 shadow-sm">
-          {infoMessage}
-        </div>
-      {/if}
-      {#if errorMessage}
-        <div class="rounded-3xl border border-red-200 bg-red-50/90 px-5 py-4 text-sm text-red-800 shadow-sm">
-          {errorMessage}
-        </div>
-      {/if}
+    {#if infoMessage}
+      <div class="rounded-3xl border border-blue-200 bg-blue-50/80 px-5 py-4 text-sm text-blue-900 elev-1">
+        {infoMessage}
+      </div>
+    {/if}
+    {#if errorMessage}
+      <div class="rounded-3xl border border-red-200 bg-red-50/90 px-5 py-4 text-sm text-red-800 elev-1">
+        {errorMessage}
+      </div>
+    {/if}
+
+    <div class="flex flex-col gap-6 xl:flex-row xl:items-start xl:gap-8">
+      <div class="flex-1 flex flex-col gap-6 min-w-0 xl:pr-4">
 
       {#if activeStep === 'intro'}
-        <section class="rounded-3xl border border-white/30 bg-white/90 p-6 shadow-xl">
-          <h2 class="text-xl font-semibold text-slate-900">Before you begin</h2>
+        <section class="rounded-3xl border border-white/30 bg-white/90 p-6 elev-2">
+          <h2 class="text-xl font-semibold text-ink">Before you begin</h2>
           <p class="mt-2 text-sm text-muted">Stay near the device during install and confirm you have backed up any data on the target disk.</p>
           <div class="mt-4 flex flex-wrap gap-3">
             <Button variant="primary" on:click={startWizard}>
@@ -234,9 +272,9 @@
           </div>
         </section>
       {:else if activeStep === 'disk'}
-        <section class="rounded-3xl border border-white/30 bg-white/90 p-6 shadow-xl">
+        <section class="rounded-3xl border border-white/30 bg-white/90 p-6 elev-2">
           <div class="flex flex-col gap-2">
-            <h2 class="text-xl font-semibold text-slate-900">Choose the installation target</h2>
+            <h2 class="text-xl font-semibold text-ink">Choose the installation target</h2>
             <p class="text-sm text-muted">Disks pulled from `/dev/disk/by-id` with model, capacity, and detected partitions.</p>
           </div>
           {#if loadingTargets}
@@ -250,7 +288,7 @@
               {/each}
             </div>
             <div class="mt-6 rounded-3xl border border-slate-200/70 bg-white/70 px-5 py-5">
-              <label class="text-sm font-semibold text-slate-900" for="confirm-disk">Type disk id to confirm</label>
+              <label class="text-sm font-semibold text-ink" for="confirm-disk">Type disk id to confirm</label>
               <input
                 id="confirm-disk"
                 class="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-base focus:border-accent focus:outline-none"
@@ -279,9 +317,9 @@
           <PlanSummary plan={installPlan} target={selectedTarget} latest={requestLatest ? latestInfo : null} />
 
           {#if installPlan}
-            <div class="rounded-3xl border border-white/30 bg-white/95 p-6 shadow-lg">
+            <div class="rounded-3xl border border-white/30 bg-white/95 p-6 elev-2">
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-semibold text-slate-900" for="plan-confirm">Confirm disk id</label>
+                <label class="text-sm font-semibold text-ink" for="plan-confirm">Confirm disk id</label>
                 <input
                   id="plan-confirm"
                   class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-base focus:border-accent focus:outline-none"
@@ -292,12 +330,19 @@
                 <p class="text-xs text-muted">Re-type {installPlan.target} to acknowledge the irreversible write.</p>
               </div>
               <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
-                <label class="flex items-center gap-2 text-slate-900">
+                <label class="flex items-center gap-2 text-ink">
                   <input type="checkbox" bind:checked={requestLatest} class="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent" />
                   Fetch latest signed image before installing
                 </label>
                 {#if requestLatest}
-                  <Button variant="secondary" size="compact" disabled={latestMutation.isPending} on:click={() => latestMutation.mutateAsync()}>
+                  <Button
+                    variant="secondary"
+                    size="compact"
+                    disabled={latestMutation.isPending}
+                    on:click={() => {
+                      void latestMutation.mutateAsync().catch(() => {});
+                    }}
+                  >
                     {latestMutation.isPending ? 'Checking…' : 'Verify latest image'}
                   </Button>
                 {/if}
@@ -318,15 +363,15 @@
           {/if}
         </section>
       {:else if activeStep === 'install'}
-        <section class="rounded-3xl border border-white/30 bg-white/95 p-6 shadow-xl">
-          <h2 class="text-xl font-semibold text-slate-900">Install in progress</h2>
+        <section class="rounded-3xl border border-white/30 bg-white/95 p-6 elev-2">
+          <h2 class="text-xl font-semibold text-ink">Install in progress</h2>
           <p class="mt-2 text-sm text-muted">Keep the browser open—Piccolo will reboot automatically when the image finishes writing.</p>
           <Button variant="ghost" size="compact" on:click={markFinished}>
             Show post-install steps
           </Button>
         </section>
       {:else if activeStep === 'finish'}
-        <section class="rounded-3xl border border-white/30 bg-white/95 p-6 shadow-xl text-slate-900">
+        <section class="rounded-3xl border border-white/30 bg-white/95 p-6 elev-2 text-ink">
           <h2 class="text-2xl font-semibold">Install underway</h2>
           <p class="mt-2 text-sm text-muted">
             The device is applying the image and will reboot. Once it is back online, visit <code>http://piccolo.local</code> to finish the setup wizard.
@@ -341,13 +386,14 @@
           </div>
         </section>
       {/if}
-    </div>
+      </div>
 
-    <div class="space-y-4 lg:sticky lg:top-6">
-      <ProgressPanel notes={progressNotes} pending={installMutation.isPending} complete={installComplete} />
-      <div class="rounded-3xl border border-white/30 bg-white/85 p-5 text-sm text-muted">
-        <p class="font-semibold text-slate-900">Need to capture logs?</p>
-        <p class="mt-1">Use the portal logs bundle tool if the install reports errors before retrying.</p>
+      <div class="space-y-4 xl:w-[320px] xl:flex-shrink-0 xl:sticky xl:top-6">
+        <ProgressPanel notes={progressNotes} pending={installMutation.isPending} complete={installComplete} />
+        <div class="rounded-3xl border border-white/30 bg-white/85 p-5 text-sm text-muted">
+          <p class="font-semibold text-ink">Need to capture logs?</p>
+          <p class="mt-1">Use the portal logs bundle tool if the install reports errors before retrying.</p>
+        </div>
       </div>
     </div>
   </div>

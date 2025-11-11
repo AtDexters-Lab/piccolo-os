@@ -90,39 +90,27 @@
 
   .ui-btn--primary {
     color: rgb(var(--sys-on-accent));
-    background: linear-gradient(135deg, rgb(var(--sys-accent)), rgb(var(--sys-accent-hero)));
-    box-shadow: 0 18px 35px rgb(var(--sys-accent) / 0.3);
-  }
-
-  .ui-btn--primary:hover {
-    box-shadow: 0 25px 45px rgb(var(--sys-accent) / 0.35);
-    transform: translateY(-1px);
+    background: var(--btn-primary-bg);
+    box-shadow: var(--btn-primary-shadow);
   }
 
   .ui-btn--primary:active {
-    box-shadow: 0 10px 25px rgb(var(--sys-accent) / 0.3);
+    background: var(--btn-primary-bg-pressed);
+    box-shadow: var(--btn-primary-shadow-pressed);
     transform: translateY(1px);
   }
 
   .ui-btn--secondary {
-    color: rgb(var(--sys-ink));
-    background: rgb(var(--sys-surface-variant));
-    border-color: rgb(var(--sys-ink) / 0.08);
+    color: var(--btn-secondary-fg);
+    background: var(--btn-secondary-bg);
+    border-color: var(--btn-secondary-outline);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
-  }
-
-  .ui-btn--secondary:hover {
-    background: rgb(var(--sys-surface-muted));
   }
 
   .ui-btn--ghost {
     color: rgb(var(--sys-ink));
     background: transparent;
-    border-color: rgb(var(--sys-ink) / 0.18);
-  }
-
-  .ui-btn--ghost:hover {
-    background: rgb(var(--sys-surface-muted) / 0.5);
+    border-color: var(--btn-secondary-outline);
   }
 
   .ui-btn--compact {
@@ -132,5 +120,21 @@
 
   .ui-btn--link {
     text-decoration: none;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .ui-btn--primary:hover {
+      background: var(--btn-primary-bg-hover);
+      box-shadow: var(--btn-primary-shadow-hover);
+      transform: translateY(-1px);
+    }
+
+    .ui-btn--secondary:hover {
+      background: var(--btn-secondary-hover-bg);
+    }
+
+    .ui-btn--ghost:hover {
+      background: var(--btn-ghost-hover-bg);
+    }
   }
 </style>

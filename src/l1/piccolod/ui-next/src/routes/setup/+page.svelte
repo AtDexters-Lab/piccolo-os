@@ -12,11 +12,23 @@
 
   type Step = 'intro' | 'credentials' | 'done';
 
-  const steps: StepDefinition[] = [
-    { id: 'intro', label: 'Welcome', description: 'Review prerequisites' },
-    { id: 'credentials', label: 'Credentials', description: 'Create admin password' },
-    { id: 'done', label: 'Finish', description: 'Ready to sign in' }
-  ];
+const baseSteps: StepDefinition[] = [
+  { id: 'intro', label: 'Welcome', description: 'Review prerequisites' },
+  { id: 'credentials', label: 'Credentials', description: 'Create admin password' },
+  { id: 'done', label: 'Finish', description: 'Ready to sign in' }
+];
+
+let steps: StepDefinition[] = baseSteps;
+
+$: steps = baseSteps.map((step) => {
+  if (step.id === 'credentials' && error) {
+    return { ...step, state: 'error' } as StepDefinition;
+  }
+  if (step.id === 'done' && activeStep === 'done') {
+    return { ...step, state: 'success' } as StepDefinition;
+  }
+  return step;
+});
 
   let activeStep: Step = data.initialized ? 'done' : 'intro';
   let password = '';
@@ -81,8 +93,8 @@
 </svelte:head>
 
 <div class="flex flex-col gap-6">
-  <section class="rounded-3xl border border-white/30 bg-white/80 backdrop-blur-xl p-6 shadow-2xl text-slate-900">
-    <p class="text-xs uppercase tracking-[0.3em] text-muted">First run</p>
+  <section class="rounded-3xl border border-white/30 bg-white/80 backdrop-blur-xl p-6 elev-3 text-ink">
+    <p class="meta-label">First run</p>
     <h1 class="mt-2 text-2xl font-semibold">Create admin credentials</h1>
     <p class="mt-2 text-sm text-muted max-w-2xl">
       Choose a strong password for the Piccolo administrator. This account unlocks encrypted volumes and enables remote access.
@@ -92,12 +104,12 @@
   <Stepper steps={steps} activeId={activeStep} />
 
   {#if activeStep === 'intro'}
-    <section class="rounded-3xl border border-white/30 bg-white/85 backdrop-blur-xl shadow-xl p-6 flex flex-col gap-4">
+    <section class="rounded-3xl border border-white/30 bg-white/85 backdrop-blur-xl elev-2 p-6 flex flex-col gap-4">
       <p class="text-sm text-muted max-w-2xl">
         Before we create the admin account, make sure you have physical access to the device and
         have unlocked encrypted volumes if prompted. The admin password controls remote access and recovery actions.
       </p>
-      <ul class="rounded-2xl border border-slate-200 px-4 py-4 text-sm text-slate-800 space-y-2">
+      <ul class="rounded-2xl border border-slate-200 px-4 py-4 text-sm text-ink space-y-2">
         <li>• Minimum 8 characters, avoid obvious strings.</li>
         <li>• This password unlocks volumes and remote access.</li>
         <li>• Keep it confidential—there is only one admin per device.</li>
@@ -109,7 +121,7 @@
       </div>
     </section>
   {:else if activeStep === 'credentials'}
-    <form class="rounded-3xl border border-white/30 bg-white/90 backdrop-blur-xl shadow-xl p-6 flex flex-col gap-4" on:submit={handleSubmit}>
+    <form class="rounded-3xl border border-white/30 bg-white/90 backdrop-blur-xl elev-2 p-6 flex flex-col gap-4" on:submit={handleSubmit}>
       {#if infoMessage}
         <div class="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
           {infoMessage}
@@ -119,7 +131,7 @@
         <p class="text-sm text-red-600">{error}</p>
       {/if}
       <div>
-        <label class="text-sm font-medium text-slate-800" for="admin-password">Password</label>
+        <label class="text-sm font-medium text-ink" for="admin-password">Password</label>
         <input
           id="admin-password"
           class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-base focus:border-accent focus:outline-none"
@@ -130,7 +142,7 @@
         />
       </div>
       <div>
-        <label class="text-sm font-medium text-slate-800" for="confirm-password">Confirm password</label>
+        <label class="text-sm font-medium text-ink" for="confirm-password">Confirm password</label>
         <input
           id="confirm-password"
           class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-base focus:border-accent focus:outline-none"
@@ -141,7 +153,7 @@
         />
       </div>
       <div class="rounded-2xl border border-slate-200 px-4 py-3 text-xs text-muted">
-        <p class="font-semibold text-slate-800">Requirements</p>
+        <p class="font-semibold text-ink">Requirements</p>
         <ul class="mt-1 list-disc list-inside space-y-1">
           <li>Minimum 8 characters</li>
           <li>Match confirmation exactly</li>
@@ -158,8 +170,8 @@
       </div>
     </form>
   {:else if activeStep === 'done'}
-    <section class="rounded-3xl border border-white/30 bg-white/90 backdrop-blur-xl shadow-xl p-6 flex flex-col gap-4 text-slate-900">
-      <p class="text-sm uppercase tracking-[0.3em] text-muted">Complete</p>
+    <section class="rounded-3xl border border-white/30 bg-white/90 backdrop-blur-xl elev-2 p-6 flex flex-col gap-4 text-ink">
+      <p class="meta-label meta-label--lg">Complete</p>
       <h2 class="text-2xl font-semibold">Admin ready</h2>
       <p class="text-sm text-muted">Use the password you just created to sign in and finish device setup.</p>
       <div class="flex gap-3">

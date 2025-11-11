@@ -17,7 +17,29 @@ const baseUrl = process.env.PICCOLO_BASE_URL ?? 'http://localhost:5173';
 const flows = [
   { name: 'home', path: '/' },
   { name: 'setup', path: '/setup' },
-  { name: 'install', path: '/install' }
+  {
+    name: 'setup-start',
+    path: '/setup',
+    action: async (page) => {
+      const startButton = page.getByRole('button', { name: /start setup/i });
+      if (await startButton.isVisible().catch(() => false)) {
+        await startButton.click();
+        await page.locator('#admin-password').waitFor({ timeout: 3000 });
+      }
+    }
+  },
+  { name: 'install', path: '/install' },
+  {
+    name: 'install-begin',
+    path: '/install',
+    action: async (page) => {
+      const beginButton = page.getByRole('button', { name: /begin install/i });
+      if (await beginButton.isVisible().catch(() => false)) {
+        await beginButton.click();
+        await page.getByRole('heading', { name: /choose the installation target/i }).waitFor({ timeout: 5000 });
+      }
+    }
+  }
 ];
 
 async function ensureReachable(url) {
@@ -41,15 +63,28 @@ async function capture() {
   await ensureReachable(`${baseUrl}/`);
 
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const schemes = ['light', 'dark'];
 
-  for (const [index, flow] of flows.entries()) {
-    const url = new URL(flow.path, baseUrl).toString();
-    console.log(`→ (${index + 1}/${flows.length}) ${flow.name}: ${url}`);
-    await page.goto(url, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(500);
-    const filename = `${String(index + 1).padStart(2, '0')}-${flow.name}.png`;
-    await page.screenshot({ path: path.join(outputDir, filename), fullPage: true });
+  for (const scheme of schemes) {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
+    const page = await context.newPage();
+    console.log(`Capturing ${scheme} theme`);
+
+    for (const [index, flow] of flows.entries()) {
+      const url = new URL(flow.path, baseUrl).toString();
+      console.log(`→ (${index + 1}/${flows.length}) ${flow.name}: ${url}`);
+      await page.goto(url, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(500);
+      if (typeof flow.action === 'function') {
+        await flow.action(page);
+        await page.waitForTimeout(300);
+      }
+      const prefix = scheme === 'dark' ? 'dark-' : '';
+      const filename = `${prefix}${String(index + 1).padStart(2, '0')}-${flow.name}.png`;
+      await page.screenshot({ path: path.join(outputDir, filename), fullPage: true });
+    }
+
+    await context.close();
   }
 
   await browser.close();
