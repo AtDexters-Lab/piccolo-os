@@ -56,11 +56,19 @@
 - `npm run review`: runs e2e, syncs screenshots (`tools/sync-review-screenshots.mjs`), triggers reviewer.
 - Storybook/SvelteKit preview documents components with mobile viewports.
 - Design review outputs stored under `src/l1/reviews/<date>/`.
-- **Screenshot cadence:** run `npm run screenshots` (which reuses `scripts/run-e2e-with-server.sh` to boot piccolod and then executes `scripts/capture-ui-screenshots.mjs`) to traverse core flows in a headless browser and save PNGs under `src/l1/piccolod/ui-next/screenshots/<timestamp>/`. The script captures both light and dark themes via Chrome's color-scheme emulation, so reviewers can verify theme parity. Every new screen/flow must add a step to that script so reviewers always get an updated visual record.
+- **Screenshot cadence:** run `npm run screenshots` (which reuses `scripts/run-e2e-with-server.sh` to boot piccolod and then executes `scripts/capture-ui-screenshots.mjs`) to traverse core flows in a headless browser and save PNGs under `src/l1/piccolod/ui-next/screenshots/<timestamp>/`. The script now captures **light theme only by default** to keep runs fast; set `PICCOLO_SCREENSHOTS_THEME=dark` or `PICCOLO_SCREENSHOTS_THEME=light,dark` (or pass `--theme=dark` / `--theme=light,dark`) when invoking `capture:screenshots` to request dark-only or full parity runs during reviews. Every new screen/flow must add a step to that script so reviewers always get an updated visual record.
 - **Screenshot review ritual:** after capturing, write down (a) the specific states/visual traits you expect to see and (b) anything that must *not* appear (unstyled HTML, incorrect data, etc.). Only then open the images and perform a visual inspection to confirm the expectations list, and document next steps if the captures diverge.
 - **Engineering journal:** any noteworthy build/runtime shifts (framework upgrades, tooling rollbacks, infra decisions) must be logged append-only in `src/l1/piccolod/ui-next/docs/journal.md` with date, cause, action, and follow-ups so future contributors understand why a change happened.
 - **Bug-fixing journal:** every time we discover and fix a defect, append an entry to `src/l1/piccolod/ui-next/docs/bug-fixing-journal.md` capturing the symptom, root cause, fix, and any guardrails/tests added. Record it as part of the bug-fix cadence (write failing test or repro, fix minimally, log RCA, update docs/tests, then append the journal entry before closing the task).
 - **Theme brief:** brainstorm and convergence on the Piccolo visual theme lives in `docs/theme-brief.md`. Keep it updated as we decide on tokens, component styles, and inspirations (Material vs. Apple cues) so future contributors know why the theme looks the way it does.
+
+## Screen Playbooks
+- Treat this section as the directory of “flow playbooks.” Each significant screen/wizard must have its own markdown doc under `src/l1/piccolod/ui-next/docs/` that explains UX goals, API contracts, happy-path screenshots, and edge cases.
+- When creating a new screen doc:
+  1. Add `docs/<screen-name>.md` beside `setup-wizard.md` and follow the same structure (goal, data sources, states, open questions).
+  2. Append a bullet here describing the screen, its current ownership/status, and the file location so future contributors can jump straight from `foundation.md` to the detailed brief.
+- Current playbooks:
+  - **Setup wizard** (`docs/setup-wizard.md`): covers `/setup` and `/unlock`, crypto state transitions, recovery key UX, and first-run vs. routine unlock behaviors.
 
 ## Directory Layout
 ```

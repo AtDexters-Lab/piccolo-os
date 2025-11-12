@@ -12,6 +12,7 @@
   export let stretch = false;
   export let target: string | undefined = undefined;
   export let rel: string | undefined = undefined;
+  export let loading = false;
 
   $: computedRel = rel ?? (target === '_blank' ? 'noopener noreferrer' : undefined);
   const dispatch = createEventDispatcher<{ click: MouseEvent }>();
@@ -40,22 +41,28 @@
 
 {#if href}
   <a
-    class={`ui-btn ui-btn--link ui-btn--${variant} ui-btn--${size} ${stretch ? 'ui-btn--stretch' : ''}`}
+    class={`ui-btn ui-btn--link ui-btn--${variant} ui-btn--${size} ${stretch ? 'ui-btn--stretch' : ''} ${loading ? 'ui-btn--loading' : ''}`}
     href={href}
     target={target}
     rel={computedRel}
-    aria-disabled={disabled}
+    aria-disabled={disabled || loading}
     on:click={handleAnchorClick}
   >
+    {#if loading}
+      <span class="ui-btn__spinner" aria-hidden="true"></span>
+    {/if}
     <slot />
   </a>
 {:else}
   <button
     {type}
-    class={`ui-btn ui-btn--${variant} ui-btn--${size} ${stretch ? 'ui-btn--stretch' : ''}`}
-    disabled={disabled}
+    class={`ui-btn ui-btn--${variant} ui-btn--${size} ${stretch ? 'ui-btn--stretch' : ''} ${loading ? 'ui-btn--loading' : ''}`}
+    disabled={disabled || loading}
     on:click={handleButtonClick}
   >
+    {#if loading}
+      <span class="ui-btn__spinner" aria-hidden="true"></span>
+    {/if}
     <slot />
   </button>
 {/if}
@@ -80,6 +87,35 @@
 
   .ui-btn--stretch {
     width: 100%;
+  }
+
+  .ui-btn__spinner {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 999px;
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    border-top-color: rgba(255, 255, 255, 0.1);
+    animation: ui-btn-spin 600ms linear infinite;
+    margin-right: 0.5rem;
+  }
+
+  .ui-btn--secondary .ui-btn__spinner,
+  .ui-btn--ghost .ui-btn__spinner {
+    border-color: rgba(20, 24, 33, 0.45);
+    border-top-color: transparent;
+  }
+
+  .ui-btn--loading {
+    pointer-events: none;
+  }
+
+  @keyframes ui-btn-spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .ui-btn:disabled,

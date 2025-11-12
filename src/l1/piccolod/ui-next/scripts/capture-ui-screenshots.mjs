@@ -9,10 +9,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 const screenshotsRoot = path.join(projectRoot, 'screenshots');
 
-const tagArg = process.argv.slice(2).find((arg) => arg.startsWith('--tag='));
+const cliArgs = process.argv.slice(2);
+const tagArg = cliArgs.find((arg) => arg.startsWith('--tag='));
+const themeArg = cliArgs.find((arg) => arg.startsWith('--theme='));
 const tag = tagArg ? tagArg.split('=')[1] : new Date().toISOString().replace(/[:.]/g, '-');
 const outputDir = path.join(screenshotsRoot, tag);
 const baseUrl = process.env.PICCOLO_BASE_URL ?? 'http://localhost:5173';
+const themeInput = themeArg ? themeArg.split('=')[1] : process.env.PICCOLO_SCREENSHOTS_THEME;
+
+const validThemes = ['light', 'dark'];
+const defaultThemes = ['light'];
+const selectedThemes = (() => {
+  if (!themeInput) return defaultThemes;
+  const parsed = themeInput
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  const unique = [...new Set(parsed)];
+  const invalid = unique.filter((theme) => !validThemes.includes(theme));
+  if (invalid.length) {
+    console.warn(`Ignoring invalid theme(s): ${invalid.join(', ')}. Allowed themes: light,dark.`);
+  }
+  const filtered = unique.filter((theme) => validThemes.includes(theme));
+  return filtered.length ? filtered : defaultThemes;
+})();
 
 const flows = [
   { name: 'home', path: '/' },
@@ -63,7 +83,7 @@ async function capture() {
   await ensureReachable(`${baseUrl}/`);
 
   const browser = await chromium.launch({ headless: true });
-  const schemes = ['light', 'dark'];
+  const schemes = selectedThemes;
 
   for (const scheme of schemes) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });

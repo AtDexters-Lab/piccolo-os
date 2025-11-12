@@ -56,9 +56,10 @@ cleanup() {
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
-if [[ ${REMOVE_STATE:-0} -eq 1 && -d "$STATE_DIR" ]]; then
+  if [[ ${REMOVE_STATE:-0} -eq 1 && -d "$STATE_DIR" ]]; then
+    sleep 2
     rm -rf "$STATE_DIR"
-fi
+  fi
   exit $exit_code
 }
 trap cleanup EXIT
@@ -68,7 +69,7 @@ echo "==> Building piccolod + ui"
 make build
 
 echo "==> Launching piccolod on $BASE_URL (state: $STATE_DIR)"
-PICCOLO_STATE_DIR="$STATE_DIR" PORT="$PORT" ./piccolod >"$LOG_FILE" 2>&1 &
+PICCOLO_STATE_DIR="$STATE_DIR" PORT="$PORT" PICCOLO_DISABLE_MDNS="1" ./piccolod >"$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 
 ready=0
