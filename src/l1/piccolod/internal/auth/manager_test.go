@@ -37,3 +37,24 @@ func TestArgon2_HashAndVerify(t *testing.T) {
 		t.Fatalf("verifyArgon2id failed: %s", ref)
 	}
 }
+
+func TestManager_ChangePasswordWithRecovery(t *testing.T) {
+	dir := t.TempDir()
+	m, err := NewManager(dir)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	ctx := context.Background()
+	if err := m.Setup(ctx, "initial"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := m.ChangePasswordWithRecovery(ctx, "recovered"); err != nil {
+		t.Fatalf("ChangePasswordWithRecovery: %v", err)
+	}
+	if ok, _ := m.Verify(ctx, "admin", "initial"); ok {
+		t.Fatalf("expected old password to fail")
+	}
+	if ok, err := m.Verify(ctx, "admin", "recovered"); err != nil || !ok {
+		t.Fatalf("expected recovered password to verify, ok=%v err=%v", ok, err)
+	}
+}

@@ -56,6 +56,7 @@ type GinServer struct {
 	appManager     *app.AppManager
 	serviceManager *services.ServiceManager
 	persistence    persistence.Service
+	authRepo       persistence.AuthRepo
 	mdnsManager    *mdns.Manager
 	remoteManager  *remote.Manager
 	router         *gin.Engine
@@ -80,6 +81,7 @@ type GinServer struct {
 	sessions    *authpkg.SessionStore
 	// simple rate-limit counters for login failures
 	loginFailures int
+	resetFailures int
 
 	// Crypto manager for lock/unlock of app data volumes
 	cryptoManager *crypt.Manager
@@ -376,7 +378,8 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	}
 
 	// Initialize auth & sessions
-	authStorage := newPersistenceAuthStorage(persist.Control().Auth())
+	authRepo := persist.Control().Auth()
+	authStorage := newPersistenceAuthStorage(authRepo)
 	var am *authpkg.Manager
 	if authStorage != nil {
 		am, err = authpkg.NewManagerWithStorage(authStorage)
@@ -388,6 +391,7 @@ func NewGinServer(opts ...GinServerOption) (*GinServer, error) {
 	}
 	s.authManager = am
 	s.sessions = authpkg.NewSessionStore()
+	s.authRepo = authRepo
 
 	// Remote manager
 	bootstrapDir := persist.BootstrapVolume().MountDir
@@ -548,6 +552,8 @@ func (s *GinServer) setupGinRoutes() {
 		v1.GET("/crypto/status", s.handleCryptoStatus)
 		v1.POST("/crypto/setup", s.handleCryptoSetup)
 		v1.POST("/crypto/unlock", s.handleCryptoUnlock)
+		v1.POST("/crypto/reset-password", s.handleCryptoResetPassword)
+		v1.GET("/crypto/recovery-key", s.handleCryptoRecoveryStatus)
 
 		// All other API endpoints require session + CSRF
 		authed := v1.Group("/")
@@ -556,7 +562,6 @@ func (s *GinServer) setupGinRoutes() {
 
 		// Crypto endpoints (session required for lock/recovery management)
 		authed.POST("/crypto/lock", s.handleCryptoLock)
-		authed.GET("/crypto/recovery-key", s.handleCryptoRecoveryStatus)
 		authed.POST("/crypto/recovery-key/generate", s.handleCryptoRecoveryGenerate)
 
 		// App management endpoints
@@ -595,6 +600,7 @@ func (s *GinServer) setupGinRoutes() {
 		// Auth-only endpoints
 		authed.POST("/auth/logout", s.handleAuthLogout)
 		authed.POST("/auth/password", s.handleAuthPassword)
+		authed.POST("/auth/staleness/ack", s.handleAuthStalenessAck)
 		authed.GET("/auth/csrf", s.handleAuthCSRF)
 
 		// Catalog (read-only) and services require auth

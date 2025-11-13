@@ -113,6 +113,9 @@ func (r *guardedAuthRepo) IsInitialized(ctx context.Context) (bool, error) {
 func (r *guardedAuthRepo) PasswordHash(ctx context.Context) (string, error) {
 	return r.repo.PasswordHash(ctx)
 }
+func (r *guardedAuthRepo) Staleness(ctx context.Context) (AuthStaleness, error) {
+	return r.repo.Staleness(ctx)
+}
 
 func (r *guardedAuthRepo) SetInitialized(ctx context.Context) error {
 	if r.store.leader != nil && !r.store.leader() {
@@ -126,6 +129,13 @@ func (r *guardedAuthRepo) SavePasswordHash(ctx context.Context, hash string) err
 		return ErrNotLeader
 	}
 	return r.store.notifyCommit(ctx, r.repo.SavePasswordHash(ctx, hash))
+}
+
+func (r *guardedAuthRepo) UpdateStaleness(ctx context.Context, update AuthStalenessUpdate) error {
+	if r.store.leader != nil && !r.store.leader() {
+		return ErrNotLeader
+	}
+	return r.store.notifyCommit(ctx, r.repo.UpdateStaleness(ctx, update))
 }
 
 func (r *guardedRemoteRepo) CurrentConfig(ctx context.Context) (RemoteConfig, error) {

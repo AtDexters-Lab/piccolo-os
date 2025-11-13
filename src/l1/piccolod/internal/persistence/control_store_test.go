@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type staticKeyProvider struct {
@@ -349,6 +350,97 @@ func TestNewControlStoreReturnsSQLiteImplementation(t *testing.T) {
 
 	if _, ok := store.(*sqliteControlStore); !ok {
 		t.Fatalf("expected sqliteControlStore, got %T", store)
+	}
+}
+
+func TestSQLiteControlStoreAuthStalenessPersists(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PICCOLO_ALLOW_UNMOUNTED_TESTS", "1")
+	key, _ := hex.DecodeString("7f1c8a6c3b5d7e91aabbccddeeff00112233445566778899aabbccddeeff0011")
+	prepareControlCipherDir(t, dir)
+
+	store, err := newSQLiteControlStore(dir, staticKeyProvider{key: key})
+	if err != nil {
+		t.Fatalf("newSQLiteControlStore: %v", err)
+	}
+	defer store.Close(context.Background())
+	if err := store.Unlock(context.Background()); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+
+	st, err := store.Auth().Staleness(context.Background())
+	if err != nil {
+		t.Fatalf("initial Staleness: %v", err)
+	}
+	if st.PasswordStale || st.RecoveryStale {
+		t.Fatalf("expected flags false initially, got %+v", st)
+	}
+
+	tsPassword := time.Date(2025, time.November, 13, 12, 0, 0, 0, time.UTC)
+	tsRecovery := tsPassword.Add(1 * time.Hour)
+	trueVal := true
+	update := AuthStalenessUpdate{
+		PasswordStale:   &trueVal,
+		PasswordStaleAt: &tsPassword,
+		RecoveryStale:   &trueVal,
+		RecoveryStaleAt: &tsRecovery,
+	}
+	if err := store.Auth().UpdateStaleness(context.Background(), update); err != nil {
+		t.Fatalf("UpdateStaleness mark: %v", err)
+	}
+	st, err = store.Auth().Staleness(context.Background())
+	if err != nil {
+		t.Fatalf("Staleness after mark: %v", err)
+	}
+	if !st.PasswordStale || !st.RecoveryStale {
+		t.Fatalf("expected staleness flags true, got %+v", st)
+	}
+	if !st.PasswordStaleAt.Equal(tsPassword) || !st.RecoveryStaleAt.Equal(tsRecovery) {
+		t.Fatalf("expected timestamps to persist, got %+v", st)
+	}
+
+	falseVal := false
+	tsAck := tsRecovery.Add(30 * time.Minute)
+	ackUpdate := AuthStalenessUpdate{
+		PasswordStale: &falseVal,
+		PasswordAckAt: &tsAck,
+		RecoveryStale: &falseVal,
+		RecoveryAckAt: &tsAck,
+	}
+	if err := store.Auth().UpdateStaleness(context.Background(), ackUpdate); err != nil {
+		t.Fatalf("UpdateStaleness ack: %v", err)
+	}
+	st, err = store.Auth().Staleness(context.Background())
+	if err != nil {
+		t.Fatalf("Staleness after ack: %v", err)
+	}
+	if st.PasswordStale || st.RecoveryStale {
+		t.Fatalf("expected flags cleared after ack, got %+v", st)
+	}
+	if !st.PasswordAckAt.Equal(tsAck) || !st.RecoveryAckAt.Equal(tsAck) {
+		t.Fatalf("expected ack timestamps recorded, got %+v", st)
+	}
+	if !st.PasswordStaleAt.Equal(tsPassword) || !st.RecoveryStaleAt.Equal(tsRecovery) {
+		t.Fatalf("stale timestamps should remain, got %+v", st)
+	}
+
+	store2, err := newSQLiteControlStore(dir, staticKeyProvider{key: key})
+	if err != nil {
+		t.Fatalf("newSQLiteControlStore restart: %v", err)
+	}
+	defer store2.Close(context.Background())
+	if err := store2.Unlock(context.Background()); err != nil {
+		t.Fatalf("unlock restart: %v", err)
+	}
+	st2, err := store2.Auth().Staleness(context.Background())
+	if err != nil {
+		t.Fatalf("Staleness restart: %v", err)
+	}
+	if !st2.PasswordAckAt.Equal(tsAck) || !st2.RecoveryAckAt.Equal(tsAck) {
+		t.Fatalf("expected ack timestamps after restart, got %+v", st2)
+	}
+	if st2.PasswordStale || st2.RecoveryStale {
+		t.Fatalf("expected cleared flags after restart, got %+v", st2)
 	}
 }
 

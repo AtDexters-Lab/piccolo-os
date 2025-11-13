@@ -42,6 +42,12 @@ type controlPayload struct {
 	Remote          *RemoteConfig `json:"remote,omitempty"`
 	Apps            []AppRecord   `json:"apps,omitempty"`
 	PasswordHash    string        `json:"password_hash,omitempty"`
+	PasswordStale   bool          `json:"password_stale,omitempty"`
+	PasswordStaleAt string        `json:"password_stale_at,omitempty"`
+	PasswordAckAt   string        `json:"password_ack_at,omitempty"`
+	RecoveryStale   bool          `json:"recovery_stale,omitempty"`
+	RecoveryStaleAt string        `json:"recovery_stale_at,omitempty"`
+	RecoveryAckAt   string        `json:"recovery_ack_at,omitempty"`
 	Revision        uint64        `json:"revision"`
 	Checksum        string        `json:"checksum"`
 }
@@ -70,6 +76,12 @@ type controlState struct {
 	remoteConfig    *RemoteConfig
 	apps            map[string]AppRecord
 	passwordHash    string
+	passwordStale   bool
+	passwordStaleAt time.Time
+	passwordAckAt   time.Time
+	recoveryStale   bool
+	recoveryStaleAt time.Time
+	recoveryAckAt   time.Time
 	revision        uint64
 	checksum        string
 }
@@ -200,8 +212,61 @@ func applyMigrations(db *sql.DB) error {
 			return err
 		}
 	}
+	if err := ensureAuthStateColumns(tx); err != nil {
+		return err
+	}
 	err = tx.Commit()
 	return err
+}
+
+func ensureAuthStateColumns(tx *sql.Tx) error {
+	rows, err := tx.Query(`PRAGMA table_info(auth_state);`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	cols := make(map[string]bool)
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			colType    string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultVal, &pk); err != nil {
+			return err
+		}
+		cols[strings.ToLower(name)] = true
+	}
+	addColumn := func(name, definition string) error {
+		if cols[strings.ToLower(name)] {
+			return nil
+		}
+		_, err := tx.Exec(fmt.Sprintf("ALTER TABLE auth_state ADD COLUMN %s %s", name, definition))
+		return err
+	}
+	if err := addColumn("password_stale", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumn("password_stale_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := addColumn("password_ack_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := addColumn("recovery_stale", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumn("recovery_stale_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := addColumn("recovery_ack_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *sqliteControlStore) Close(ctx context.Context) error {
@@ -282,17 +347,51 @@ func (s *sqliteControlStore) loadState() (controlState, error) {
 	state.checksum = checksum
 
 	var (
-		initInt      int
-		passwordHash sql.NullString
-		authUpdated  string
+		initInt          int
+		passwordHash     sql.NullString
+		passwordStaleInt sql.NullInt64
+		passwordStaleAt  sql.NullString
+		passwordAckAt    sql.NullString
+		recoveryStaleInt sql.NullInt64
+		recoveryStaleAt  sql.NullString
+		recoveryAckAt    sql.NullString
+		authUpdated      string
 	)
-	err = s.db.QueryRow(`SELECT initialized, password_hash, updated_at FROM auth_state WHERE id=1`).Scan(&initInt, &passwordHash, &authUpdated)
+	err = s.db.QueryRow(`SELECT initialized, password_hash, password_stale, password_stale_at, password_ack_at, recovery_stale, recovery_stale_at, recovery_ack_at, updated_at FROM auth_state WHERE id=1`).Scan(
+		&initInt,
+		&passwordHash,
+		&passwordStaleInt,
+		&passwordStaleAt,
+		&passwordAckAt,
+		&recoveryStaleInt,
+		&recoveryStaleAt,
+		&recoveryAckAt,
+		&authUpdated,
+	)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return state, err
 	}
 	state.authInitialized = initInt == 1
 	if passwordHash.Valid {
 		state.passwordHash = passwordHash.String
+	}
+	if passwordStaleInt.Valid {
+		state.passwordStale = passwordStaleInt.Int64 == 1
+	}
+	if v := strings.TrimSpace(passwordStaleAt.String); v != "" {
+		state.passwordStaleAt = parseTimestamp(v)
+	}
+	if v := strings.TrimSpace(passwordAckAt.String); v != "" {
+		state.passwordAckAt = parseTimestamp(v)
+	}
+	if recoveryStaleInt.Valid {
+		state.recoveryStale = recoveryStaleInt.Int64 == 1
+	}
+	if v := strings.TrimSpace(recoveryStaleAt.String); v != "" {
+		state.recoveryStaleAt = parseTimestamp(v)
+	}
+	if v := strings.TrimSpace(recoveryAckAt.String); v != "" {
+		state.recoveryAckAt = parseTimestamp(v)
 	}
 
 	var payload []byte
@@ -433,6 +532,20 @@ func (s *sqliteControlStore) withWrite(mutator func(tx *sql.Tx) error) error {
 		PasswordHash:    s.state.passwordHash,
 		Revision:        s.state.revision + 1,
 	}
+	payload.PasswordStale = s.state.passwordStale
+	if !s.state.passwordStaleAt.IsZero() {
+		payload.PasswordStaleAt = formatTimestamp(s.state.passwordStaleAt)
+	}
+	if !s.state.passwordAckAt.IsZero() {
+		payload.PasswordAckAt = formatTimestamp(s.state.passwordAckAt)
+	}
+	payload.RecoveryStale = s.state.recoveryStale
+	if !s.state.recoveryStaleAt.IsZero() {
+		payload.RecoveryStaleAt = formatTimestamp(s.state.recoveryStaleAt)
+	}
+	if !s.state.recoveryAckAt.IsZero() {
+		payload.RecoveryAckAt = formatTimestamp(s.state.recoveryAckAt)
+	}
 	if s.state.remoteConfig != nil {
 		rc := cloneRemoteConfig(*s.state.remoteConfig)
 		payload.Remote = &rc
@@ -479,6 +592,67 @@ func (s *sqliteControlStore) updateAuthState(initialized bool, passwordHash *str
 		s.state.authInitialized = initialized
 		if passwordHash != nil {
 			s.state.passwordHash = *passwordHash
+		}
+		return nil
+	})
+}
+
+func (s *sqliteControlStore) updateAuthStaleness(update AuthStalenessUpdate) error {
+	if update.PasswordStale == nil &&
+		update.PasswordStaleAt == nil &&
+		update.PasswordAckAt == nil &&
+		update.RecoveryStale == nil &&
+		update.RecoveryStaleAt == nil &&
+		update.RecoveryAckAt == nil {
+		return nil
+	}
+	return s.withWrite(func(tx *sql.Tx) error {
+		sets := make([]string, 0, 8)
+		args := make([]any, 0, 8)
+
+		if update.PasswordStale != nil {
+			sets = append(sets, "password_stale=?")
+			args = append(args, boolToInt(*update.PasswordStale))
+			s.state.passwordStale = *update.PasswordStale
+		}
+		if update.PasswordStaleAt != nil {
+			canon := canonicalTime(*update.PasswordStaleAt)
+			sets = append(sets, "password_stale_at=?")
+			args = append(args, formatTimestamp(canon))
+			s.state.passwordStaleAt = canon
+		}
+		if update.PasswordAckAt != nil {
+			canon := canonicalTime(*update.PasswordAckAt)
+			sets = append(sets, "password_ack_at=?")
+			args = append(args, formatTimestamp(canon))
+			s.state.passwordAckAt = canon
+		}
+		if update.RecoveryStale != nil {
+			sets = append(sets, "recovery_stale=?")
+			args = append(args, boolToInt(*update.RecoveryStale))
+			s.state.recoveryStale = *update.RecoveryStale
+		}
+		if update.RecoveryStaleAt != nil {
+			canon := canonicalTime(*update.RecoveryStaleAt)
+			sets = append(sets, "recovery_stale_at=?")
+			args = append(args, formatTimestamp(canon))
+			s.state.recoveryStaleAt = canon
+		}
+		if update.RecoveryAckAt != nil {
+			canon := canonicalTime(*update.RecoveryAckAt)
+			sets = append(sets, "recovery_ack_at=?")
+			args = append(args, formatTimestamp(canon))
+			s.state.recoveryAckAt = canon
+		}
+		if len(sets) == 0 {
+			return nil
+		}
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		sets = append(sets, "updated_at=?")
+		args = append(args, now, 1)
+		stmt := fmt.Sprintf("UPDATE auth_state SET %s WHERE id=?", strings.Join(sets, ", "))
+		if _, err := tx.Exec(stmt, args...); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -578,6 +752,32 @@ func boolToInt(v bool) int {
 	return 0
 }
 
+func canonicalTime(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Time{}
+	}
+	return t.UTC()
+}
+
+func formatTimestamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return canonicalTime(t).Format(time.RFC3339Nano)
+}
+
+func parseTimestamp(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return ts.UTC()
+}
+
 func buildSQLiteDSN(path string, readOnly bool) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -638,6 +838,31 @@ func (r *sqliteAuthRepo) SavePasswordHash(ctx context.Context, hash string) erro
 		return err
 	}
 	return r.store.updateAuthState(r.store.state.authInitialized, &hash)
+}
+
+func (r *sqliteAuthRepo) Staleness(ctx context.Context) (AuthStaleness, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+	if !r.store.loaded {
+		return AuthStaleness{}, ErrLocked
+	}
+	return AuthStaleness{
+		PasswordStale:   r.store.state.passwordStale,
+		PasswordStaleAt: r.store.state.passwordStaleAt,
+		PasswordAckAt:   r.store.state.passwordAckAt,
+		RecoveryStale:   r.store.state.recoveryStale,
+		RecoveryStaleAt: r.store.state.recoveryStaleAt,
+		RecoveryAckAt:   r.store.state.recoveryAckAt,
+	}, nil
+}
+
+func (r *sqliteAuthRepo) UpdateStaleness(ctx context.Context, update AuthStalenessUpdate) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	if err := r.store.ensureWritableLocked(); err != nil {
+		return err
+	}
+	return r.store.updateAuthStaleness(update)
 }
 
 type sqliteRemoteRepo struct{ store *sqliteControlStore }

@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"piccolod/internal/crypt"
-	"piccolod/internal/persistence"
-
 	"github.com/gin-gonic/gin"
+
+	"piccolod/internal/crypt"
+	"piccolod/internal/events"
+	"piccolod/internal/persistence"
 )
 
 // cookie name as per OpenAPI cookieAuth
@@ -58,6 +59,15 @@ func (s *GinServer) resetLoginFailures() {
 	s.loginFailures = 0
 }
 
+func (s *GinServer) recordResetFailure() bool {
+	s.resetFailures++
+	return s.resetFailures >= 5
+}
+
+func (s *GinServer) resetResetFailures() {
+	s.resetFailures = 0
+}
+
 func (s *GinServer) getSession(c *gin.Context) (id string, ok bool) {
 	v, err := c.Cookie(sessionCookieName)
 	if err != nil || v == "" {
@@ -69,6 +79,12 @@ func (s *GinServer) getSession(c *gin.Context) (id string, ok bool) {
 // handleAuthSession: GET /api/v1/auth/session
 func (s *GinServer) handleAuthSession(c *gin.Context) {
 	id, ok := s.getSession(c)
+	passwordStale := false
+	recoveryStale := false
+	if st, err := s.readAuthStaleness(c.Request.Context()); err == nil {
+		passwordStale = st.PasswordStale
+		recoveryStale = st.RecoveryStale
+	}
 	if ok {
 		if sess, ok := s.sessions.Get(id); ok {
 			locked := false
@@ -80,6 +96,8 @@ func (s *GinServer) handleAuthSession(c *gin.Context) {
 				"user":           sess.User,
 				"expires_at":     time.Unix(sess.ExpiresAt, 0).UTC().Format(time.RFC3339),
 				"volumes_locked": locked,
+				"password_stale": passwordStale,
+				"recovery_stale": recoveryStale,
 			})
 			return
 		}
@@ -93,6 +111,8 @@ func (s *GinServer) handleAuthSession(c *gin.Context) {
 		"user":           "",
 		"expires_at":     time.Now().UTC().Format(time.RFC3339),
 		"volumes_locked": locked,
+		"password_stale": passwordStale,
+		"recovery_stale": recoveryStale,
 	})
 }
 
@@ -239,6 +259,68 @@ func (s *GinServer) handleAuthPassword(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "crypto rewrap failed: " + err.Error()})
 			return
 		}
+	}
+	update := persistence.AuthStalenessUpdate{
+		PasswordStale:   boolPtr(false),
+		PasswordStaleAt: timePtr(time.Time{}),
+		PasswordAckAt:   timePtr(time.Time{}),
+	}
+	if err := s.applyStalenessUpdate(c.Request.Context(), update); err != nil {
+		log.Printf("WARN: failed to clear password staleness: %v", err)
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+}
+
+// handleAuthStalenessAck: POST /api/v1/auth/staleness/ack
+func (s *GinServer) handleAuthStalenessAck(c *gin.Context) {
+	var body struct {
+		Password bool `json:"password"`
+		Recovery bool `json:"recovery"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	if !body.Password && !body.Recovery {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no flags selected"})
+		return
+	}
+	ctx := c.Request.Context()
+	now := time.Now().UTC()
+	falseVal := false
+	update := persistence.AuthStalenessUpdate{}
+	if body.Password {
+		update.PasswordStale = boolPtr(falseVal)
+		update.PasswordAckAt = timePtr(now)
+	}
+	if body.Recovery {
+		update.RecoveryStale = boolPtr(falseVal)
+		update.RecoveryAckAt = timePtr(now)
+	}
+	if err := s.applyStalenessUpdate(ctx, update); err != nil {
+		log.Printf("WARN: staleness ack failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update staleness"})
+		return
+	}
+	if s.events != nil {
+		targets := []string{}
+		if body.Password {
+			targets = append(targets, "password")
+		}
+		if body.Recovery {
+			targets = append(targets, "recovery")
+		}
+		s.events.Publish(events.Event{
+			Topic: events.TopicAudit,
+			Payload: events.AuditEvent{
+				Kind:   "auth.staleness_ack",
+				Time:   now,
+				Source: c.ClientIP(),
+				Metadata: map[string]any{
+					"flags": targets,
+				},
+			},
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }

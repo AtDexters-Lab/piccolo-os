@@ -78,6 +78,8 @@ type AuthRepo interface {
 	SetInitialized(ctx context.Context) error
 	PasswordHash(ctx context.Context) (string, error)
 	SavePasswordHash(ctx context.Context, hash string) error
+	Staleness(ctx context.Context) (AuthStaleness, error)
+	UpdateStaleness(ctx context.Context, update AuthStalenessUpdate) error
 }
 
 type RemoteRepo interface {
@@ -187,4 +189,24 @@ type ControlHealthReport struct {
 	Status    ControlHealthStatus
 	Message   string
 	CheckedAt time.Time
+}
+
+// AuthStaleness captures credential health flags and audit timestamps.
+type AuthStaleness struct {
+	PasswordStale   bool
+	PasswordStaleAt time.Time
+	PasswordAckAt   time.Time
+	RecoveryStale   bool
+	RecoveryStaleAt time.Time
+	RecoveryAckAt   time.Time
+}
+
+// AuthStalenessUpdate describes partial updates applied atomically.
+type AuthStalenessUpdate struct {
+	PasswordStale   *bool
+	PasswordStaleAt *time.Time
+	PasswordAckAt   *time.Time
+	RecoveryStale   *bool
+	RecoveryStaleAt *time.Time
+	RecoveryAckAt   *time.Time
 }

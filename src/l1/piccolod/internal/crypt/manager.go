@@ -279,6 +279,59 @@ func (m *Manager) Rewrap(oldPassword, newPassword string) error {
 	return nil
 }
 
+// RewrapUnlocked reseals the in-memory SDEK with a new password without
+// requiring the previous password, assuming the manager is currently unlocked.
+func (m *Manager) RewrapUnlocked(newPassword string) error {
+	if newPassword == "" {
+		return errors.New("password required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.inited {
+		return errors.New("not initialized")
+	}
+	if len(m.sdek) == 0 {
+		return ErrLocked
+	}
+	b, err := os.ReadFile(m.path)
+	if err != nil {
+		return err
+	}
+	var st fileState
+	if err := json.Unmarshal(b, &st); err != nil {
+		return err
+	}
+	if st.KDF.Alg != "argon2id" {
+		return fmt.Errorf("unsupported kdf: %s", st.KDF.Alg)
+	}
+	newSalt := make([]byte, 16)
+	if _, err := rand.Read(newSalt); err != nil {
+		return err
+	}
+	keyNew := m.deriveKey(newPassword, newSalt, st.KDF)
+	block, err := aes.NewCipher(keyNew)
+	if err != nil {
+		return err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return err
+	}
+	newNonce := make([]byte, aead.NonceSize())
+	if _, err := rand.Read(newNonce); err != nil {
+		return err
+	}
+	newCT := aead.Seal(nil, newNonce, m.sdek, nil)
+	st.SDEK = base64.RawStdEncoding.EncodeToString(newCT)
+	st.Salt = base64.RawStdEncoding.EncodeToString(newSalt)
+	st.Nonce = base64.RawStdEncoding.EncodeToString(newNonce)
+	nb, err := json.MarshalIndent(&st, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.path, nb, 0o600)
+}
+
 // Recovery key management
 var wordlist = []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango", "uniform", "victor", "whiskey", "xray", "yankee", "zulu"}
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	authpkg "piccolod/internal/auth"
@@ -31,13 +32,83 @@ func setupAuthTestServer(t *testing.T) *GinServer {
 
 	// Reuse createGinTestServer to get a minimal server/router
 	srv := createGinTestServer(t, tempDir)
-	am, err := authpkg.NewManager(tempDir)
+	repo := newMemoryAuthRepo()
+	authStorage := newPersistenceAuthStorage(repo)
+	am, err := authpkg.NewManagerWithStorage(authStorage)
 	if err != nil {
 		t.Fatalf("auth manager: %v", err)
 	}
 	srv.authManager = am
+	srv.authRepo = repo
 	srv.sessions = authpkg.NewSessionStore()
 	return srv
+}
+
+type memoryAuthRepo struct {
+	mu          sync.Mutex
+	initialized bool
+	hash        string
+	staleness   persistence.AuthStaleness
+}
+
+func newMemoryAuthRepo() *memoryAuthRepo {
+	return &memoryAuthRepo{}
+}
+
+func (m *memoryAuthRepo) IsInitialized(ctx context.Context) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.initialized, nil
+}
+
+func (m *memoryAuthRepo) SetInitialized(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.initialized = true
+	return nil
+}
+
+func (m *memoryAuthRepo) PasswordHash(ctx context.Context) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hash, nil
+}
+
+func (m *memoryAuthRepo) SavePasswordHash(ctx context.Context, hash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hash = hash
+	return nil
+}
+
+func (m *memoryAuthRepo) Staleness(ctx context.Context) (persistence.AuthStaleness, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.staleness, nil
+}
+
+func (m *memoryAuthRepo) UpdateStaleness(ctx context.Context, update persistence.AuthStalenessUpdate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if update.PasswordStale != nil {
+		m.staleness.PasswordStale = *update.PasswordStale
+	}
+	if update.PasswordStaleAt != nil {
+		m.staleness.PasswordStaleAt = *update.PasswordStaleAt
+	}
+	if update.PasswordAckAt != nil {
+		m.staleness.PasswordAckAt = *update.PasswordAckAt
+	}
+	if update.RecoveryStale != nil {
+		m.staleness.RecoveryStale = *update.RecoveryStale
+	}
+	if update.RecoveryStaleAt != nil {
+		m.staleness.RecoveryStaleAt = *update.RecoveryStaleAt
+	}
+	if update.RecoveryAckAt != nil {
+		m.staleness.RecoveryAckAt = *update.RecoveryAckAt
+	}
+	return nil
 }
 
 func TestAuth_Setup_Login_Session_Logout(t *testing.T) {
@@ -195,6 +266,191 @@ func TestAuth_LoginRateLimit(t *testing.T) {
 	}
 	if got := w.Result().Header.Get("Retry-After"); got == "" {
 		t.Fatalf("missing Retry-After")
+	}
+}
+
+func TestAuthSessionIncludesStaleness(t *testing.T) {
+	srv := setupAuthTestServer(t)
+	ctx := context.Background()
+
+	// initialize auth
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/auth/setup", strings.NewReader(`{"password":"pw123456"}`))
+	req.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("setup: %d", w.Code)
+	}
+
+	repo, ok := srv.authRepo.(*memoryAuthRepo)
+	if !ok {
+		t.Fatalf("unexpected repo type %T", srv.authRepo)
+	}
+	if err := repo.UpdateStaleness(ctx, persistence.AuthStalenessUpdate{
+		PasswordStale: boolPtr(true),
+	}); err != nil {
+		t.Fatalf("update staleness: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/auth/session", nil)
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("session: %d", w.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp["password_stale"].(bool) {
+		t.Fatalf("expected password_stale=true, got %v", resp["password_stale"])
+	}
+	if resp["recovery_stale"].(bool) {
+		t.Fatalf("expected recovery_stale=false by default")
+	}
+}
+
+func TestAuthStalenessAckClearsFlags(t *testing.T) {
+	srv := setupAuthTestServer(t)
+	sessionCookie, csrf := setupTestAdminSession(t, srv)
+
+	repo, ok := srv.authRepo.(*memoryAuthRepo)
+	if !ok {
+		t.Fatalf("unexpected repo type %T", srv.authRepo)
+	}
+	now := time.Now().UTC()
+	if err := repo.UpdateStaleness(context.Background(), persistence.AuthStalenessUpdate{
+		PasswordStale:   boolPtr(true),
+		PasswordStaleAt: timePtr(now),
+		RecoveryStale:   boolPtr(true),
+		RecoveryStaleAt: timePtr(now),
+	}); err != nil {
+		t.Fatalf("update staleness: %v", err)
+	}
+
+	body := `{"password":true,"recovery":true}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/auth/staleness/ack", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	attachAuth(req, sessionCookie, csrf)
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ack: %d body=%s", w.Code, w.Body.String())
+	}
+
+	state, err := repo.Staleness(context.Background())
+	if err != nil {
+		t.Fatalf("repo staleness: %v", err)
+	}
+	if state.PasswordStale || state.RecoveryStale {
+		t.Fatalf("expected flags cleared, got %+v", state)
+	}
+	if state.PasswordAckAt.IsZero() || state.RecoveryAckAt.IsZero() {
+		t.Fatalf("expected ack timestamps set")
+	}
+}
+
+func TestCryptoRecoveryStatusStale(t *testing.T) {
+	srv := setupAuthTestServer(t)
+	// Setup auth to ensure repo initialized to avoid ErrLocked
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/auth/setup", strings.NewReader(`{"password":"pw123456"}`))
+	req.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("setup: %d", w.Code)
+	}
+	repo := srv.authRepo.(*memoryAuthRepo)
+	if err := repo.UpdateStaleness(context.Background(), persistence.AuthStalenessUpdate{
+		RecoveryStale: boolPtr(true),
+	}); err != nil {
+		t.Fatalf("update staleness: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/crypto/recovery-key", nil)
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("recovery status: %d", w.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp["stale"].(bool) {
+		t.Fatalf("expected stale=true, got %v", resp["stale"])
+	}
+}
+
+func TestCryptoResetPasswordFlow(t *testing.T) {
+	srv := setupAuthTestServer(t)
+	ctx := context.Background()
+
+	// Setup crypto
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/crypto/setup", strings.NewReader(`{"password":"OrigPass123!"}`))
+	req.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("crypto setup: %d", w.Code)
+	}
+	// Setup auth
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/v1/auth/setup", strings.NewReader(`{"password":"OrigPass123!"}`))
+	req.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("auth setup: %d", w.Code)
+	}
+
+	// Generate recovery key
+	words, err := srv.cryptoManager.GenerateRecoveryKeyWithPassword("OrigPass123!")
+	if err != nil {
+		t.Fatalf("generate recovery key: %v", err)
+	}
+	recoveryKey := strings.Join(words, " ")
+
+	// Ensure locked before reset
+	srv.cryptoManager.Lock()
+
+	// Reset password with recovery key
+	body := fmt.Sprintf(`{"recovery_key":%q,"new_password":"NewPass456!"}`, recoveryKey)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/v1/crypto/reset-password", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("reset password: status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	if !srv.cryptoManager.IsLocked() {
+		t.Fatalf("expected crypto to relock after reset")
+	}
+	if err := srv.cryptoManager.Unlock("OrigPass123!"); err == nil {
+		t.Fatalf("expected old password to fail after reset")
+	}
+	if err := srv.cryptoManager.Unlock("NewPass456!"); err != nil {
+		t.Fatalf("new password unlock failed: %v", err)
+	}
+
+	ok, err := srv.authManager.Verify(ctx, "admin", "NewPass456!")
+	if err != nil || !ok {
+		t.Fatalf("expected auth manager to accept new password, ok=%v err=%v", ok, err)
+	}
+	ok, err = srv.authManager.Verify(ctx, "admin", "OrigPass123!")
+	if err != nil {
+		t.Fatalf("verify old password err: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected old password to fail verification")
+	}
+
+	state, err := srv.authRepo.Staleness(ctx)
+	if err != nil {
+		t.Fatalf("staleness fetch: %v", err)
+	}
+	if !state.PasswordStale || !state.RecoveryStale {
+		t.Fatalf("expected staleness flags set, got %+v", state)
 	}
 }
 

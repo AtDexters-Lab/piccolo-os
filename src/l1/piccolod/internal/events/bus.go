@@ -2,6 +2,7 @@ package events
 
 import (
 	"sync"
+	"time"
 
 	"piccolod/internal/cluster"
 )
@@ -18,6 +19,7 @@ const (
 	TopicControlStoreCommit    Topic = "control_store_commit"
 	TopicRemoteConfigChanged   Topic = "remote_config_changed"
 	TopicVolumeStateChanged    Topic = "volume_state_changed"
+	TopicAudit                 Topic = "audit"
 )
 
 // Event represents a message broadcast on the event bus.
@@ -34,6 +36,14 @@ type VolumeStateChanged struct {
 	Generation  int
 	NeedsRepair bool
 	LastError   string
+}
+
+// AuditEvent captures operator-visible security events.
+type AuditEvent struct {
+	Kind     string
+	Time     time.Time
+	Source   string
+	Metadata map[string]any
 }
 
 // LeadershipChanged describes a leadership role update for a resource.

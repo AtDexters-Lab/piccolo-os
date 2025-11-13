@@ -151,6 +151,24 @@ func (m *Manager) ChangePassword(ctx context.Context, old, newp string) error {
 	})
 }
 
+// ChangePasswordWithRecovery bypasses verification for recovery-key scenarios.
+func (m *Manager) ChangePasswordWithRecovery(ctx context.Context, newp string) error {
+	if strings.TrimSpace(newp) == "" {
+		return errors.New("password required")
+	}
+	return m.updateState(ctx, func(state *State) error {
+		if !state.Initialized {
+			return errors.New("not initialized")
+		}
+		ref, err := hashArgon2id(newp)
+		if err != nil {
+			return err
+		}
+		state.PasswordHash = ref
+		return nil
+	})
+}
+
 // Verify returns true if (username=="admin" && password valid).
 func (m *Manager) Verify(ctx context.Context, username, password string) (bool, error) {
 	if username != "admin" {

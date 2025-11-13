@@ -61,6 +61,12 @@ func (n *noopAuthRepo) PasswordHash(ctx context.Context) (string, error) {
 func (n *noopAuthRepo) SavePasswordHash(ctx context.Context, hash string) error {
 	return ErrNotImplemented
 }
+func (n *noopAuthRepo) Staleness(ctx context.Context) (AuthStaleness, error) {
+	return AuthStaleness{}, ErrNotImplemented
+}
+func (n *noopAuthRepo) UpdateStaleness(ctx context.Context, update AuthStalenessUpdate) error {
+	return ErrNotImplemented
+}
 
 type noopRemoteRepo struct{}
 

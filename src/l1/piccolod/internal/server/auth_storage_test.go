@@ -16,6 +16,7 @@ type fakeAuthRepo struct {
 	setCalled   bool
 	loadErr     error
 	saveErr     error
+	staleness   persistence.AuthStaleness
 }
 
 func (f *fakeAuthRepo) IsInitialized(ctx context.Context) (bool, error) {
@@ -44,6 +45,38 @@ func (f *fakeAuthRepo) SavePasswordHash(ctx context.Context, hash string) error 
 	}
 	f.lastSaved = hash
 	f.hash = hash
+	return nil
+}
+
+func (f *fakeAuthRepo) Staleness(ctx context.Context) (persistence.AuthStaleness, error) {
+	if f.loadErr != nil {
+		return persistence.AuthStaleness{}, f.loadErr
+	}
+	return f.staleness, nil
+}
+
+func (f *fakeAuthRepo) UpdateStaleness(ctx context.Context, update persistence.AuthStalenessUpdate) error {
+	if f.saveErr != nil {
+		return f.saveErr
+	}
+	if update.PasswordStale != nil {
+		f.staleness.PasswordStale = *update.PasswordStale
+	}
+	if update.PasswordStaleAt != nil {
+		f.staleness.PasswordStaleAt = *update.PasswordStaleAt
+	}
+	if update.PasswordAckAt != nil {
+		f.staleness.PasswordAckAt = *update.PasswordAckAt
+	}
+	if update.RecoveryStale != nil {
+		f.staleness.RecoveryStale = *update.RecoveryStale
+	}
+	if update.RecoveryStaleAt != nil {
+		f.staleness.RecoveryStaleAt = *update.RecoveryStaleAt
+	}
+	if update.RecoveryAckAt != nil {
+		f.staleness.RecoveryAckAt = *update.RecoveryAckAt
+	}
 	return nil
 }
 
