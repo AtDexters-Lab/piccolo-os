@@ -1,4 +1,4 @@
-import { get, writable } from 'svelte/store';
+import { writable } from 'svelte/store';
 import type { ApiError } from '$lib/api/http';
 import {
   createAdmin,
@@ -73,10 +73,7 @@ export function createSetupController() {
     await createAdmin(password);
   }
 
-  async function submitCredentials(
-    { password, recoveryKey, mode }: { password?: string; recoveryKey?: string; mode: SubmissionMode },
-    signal?: AbortSignal
-  ) {
+  async function submitCredentials({ password, mode }: { password?: string; mode: SubmissionMode }, signal?: AbortSignal) {
     try {
       const flow = mode;
       if (mode === 'first-run') {
@@ -88,10 +85,10 @@ export function createSetupController() {
       }
 
       store.set({ phase: 'submitting', flow, step: 'crypto-unlock' });
-      if (mode === 'unlock' && !password && !recoveryKey) {
-        throw new Error('Provide a password or recovery key to unlock Piccolo.');
+      if (!password) {
+        throw new Error('Enter the admin password to unlock Piccolo.');
       }
-      await unlockCrypto({ password, recoveryKey }, signal);
+      await unlockCrypto(password, signal);
 
       store.set({ phase: 'submitting', flow, step: 'auth-setup' });
       await ensureAdmin(password);

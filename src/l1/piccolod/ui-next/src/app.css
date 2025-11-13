@@ -221,10 +221,10 @@ a:visited {
   color: var(--link-visited);
 }
 
+:where(button, [role='button'], a, input, select, textarea):focus,
 :where(button, [role='button'], a, input, select, textarea):focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  border-radius: inherit;
 }
 
 [data-theme='dark'] input,

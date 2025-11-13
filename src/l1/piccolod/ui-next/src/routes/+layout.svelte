@@ -6,8 +6,6 @@
   import AppShell from '$lib/components/AppShell.svelte';
   import { onMount } from 'svelte';
 
-import { platformState } from '$lib/stores/platform';
-
 const prefs = preferencesStore;
 
 onMount(() => {

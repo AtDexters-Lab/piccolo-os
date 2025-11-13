@@ -42,6 +42,13 @@ Keep this doc in sync as flows evolve; append decision dates in the engineering 
 
 All mutation helpers should accept `AbortSignal` and propagate detailed `ApiError` objects (`code`, `message`, `details?`).
 
+## Recovery Key Requirements
+- The setup wizard now includes a first-class Recovery step that blocks completion until the operator saves a 24-word key.
+- `/crypto/recovery-key` is checked whenever the wizard reaches the ready phase. Missing or `stale=true` keys automatically reopen the Recovery step; `/setup?focus=recovery` deep links to it as well.
+- Operators must either generate a fresh key (copy/download, acknowledge) or explicitly “Continue with existing key” when the backend marks it stale. Continuing acknowledges the risk via `/auth/staleness/ack`.
+- Regenerating a key uses the same `/crypto/recovery-key/generate` endpoint but is gated by a confirmation modal so the previous key can’t be overwritten accidentally.
+- The Staleness banner in AppShell links to `/setup?focus=recovery` so users can immediately address stale credentials.
+
 ## State Machine Sketch
 ```
 boot → fetch /crypto/status

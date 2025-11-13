@@ -103,3 +103,11 @@ export async function http<T = unknown>(path: string, options: RequestOptions = 
   const text = await response.text();
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
+
+export async function primeCsrfToken(): Promise<void> {
+  await ensureCsrfToken();
+}
+
+export function resetCsrfToken(): void {
+  csrfToken = null;
+}

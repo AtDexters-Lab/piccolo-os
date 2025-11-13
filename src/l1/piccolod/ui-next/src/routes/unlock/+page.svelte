@@ -3,16 +3,15 @@
   import { page } from '$app/stores';
   import { onDestroy, onMount } from 'svelte';
   import Button from '$lib/components/ui/Button.svelte';
-  import type { StepDefinition } from '$lib/types/wizard';
   import { createSetupController, type SetupState } from '$lib/stores/setupState';
 
   const controller = createSetupController();
   let setupState: SetupState = { phase: 'loading' };
   let password = '';
-  let recoveryKey = '';
   let localError = '';
   let submitting = false;
   let redirectTarget = '/';
+  let passwordRecoveryTarget = '/login';
 
   function sanitizeRedirect(value: string | null): string {
     if (!value) return '/';
@@ -41,6 +40,7 @@
   const unsubscribePage = page.subscribe(($page) => {
     const decoded = decodeRedirect($page.url.searchParams.get('redirect'));
     redirectTarget = sanitizeRedirect(decoded);
+    passwordRecoveryTarget = redirectTarget || '/login';
   });
 
   onMount(() => {
@@ -52,17 +52,18 @@
     unsubscribePage();
   });
 
+  $: passwordRecoveryHref = `/password-recovery?redirect=${encodeURIComponent(passwordRecoveryTarget)}`;
+
   async function handleUnlock(event: SubmitEvent) {
     event.preventDefault();
     localError = '';
-    if (!password && !recoveryKey.trim()) {
-      localError = 'Enter your admin password or the 24-word recovery key.';
+    if (!password) {
+      localError = 'Enter your admin password. Use your recovery key on the reset page if needed.';
       return;
     }
     submitting = true;
     await controller.submitCredentials({
       password,
-      recoveryKey: recoveryKey.trim() || undefined,
       mode: 'unlock'
     });
     submitting = false;
@@ -70,7 +71,6 @@
 
   function resetForm() {
     password = '';
-    recoveryKey = '';
     localError = '';
   }
 </script>
@@ -89,7 +89,7 @@
       <span class="status-chip">Device locked</span>
     </div>
     <p class="text-sm text-muted">
-      The device rebooted or locked itself. Enter your admin password or recovery key to bring services back online.
+      The device rebooted or locked itself. Enter the admin password to bring services back online, or use the recovery reset link below if the password is lost.
     </p>
   </section>
 
@@ -111,32 +111,23 @@
     {#if localError}
       <p class="text-sm text-red-600">{localError}</p>
     {/if}
-    <div class="grid gap-4 md:grid-cols-2">
-      <div class="flex flex-col gap-2">
-        <label class="text-sm font-medium text-ink" for="unlock-password">Admin password</label>
-        <input
-          id="unlock-password"
-          class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-base focus:border-accent focus:outline-none"
-          type="password"
-          bind:value={password}
-          placeholder="••••••••"
-          disabled={submitting}
-        />
-      </div>
-      <div class="flex flex-col gap-2">
-        <label class="text-sm font-medium text-ink" for="unlock-recovery">Recovery key (optional)</label>
-        <textarea
-          id="unlock-recovery"
-          class="min-h-[96px] rounded-2xl border border-slate-200 px-4 py-3 text-base focus:border-accent focus:outline-none"
-          bind:value={recoveryKey}
-          placeholder="24-word key"
-          disabled={submitting}
-        ></textarea>
-      </div>
+    <div class="flex flex-col gap-2">
+      <label class="text-sm font-medium text-ink" for="unlock-password">Admin password</label>
+      <input
+        id="unlock-password"
+        class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-base focus:border-accent focus:outline-none"
+        type="password"
+        bind:value={password}
+        placeholder="••••••••"
+        disabled={submitting}
+      />
+      <p class="text-xs text-muted">
+        Forgot it? <a class="font-semibold text-accent underline" href={passwordRecoveryHref}>Reset with your recovery key</a>
+      </p>
     </div>
     <div class="rounded-2xl border border-slate-200 px-4 py-3 text-xs text-muted">
       <p class="font-semibold text-ink">Tip</p>
-      <p class="mt-1">You only need one of the two inputs. Leave the recovery key blank if you know the admin password.</p>
+      <p class="mt-1">Unlock requires the admin password. Recovery reset lives on its own page for auditing.</p>
     </div>
     <div class="flex gap-3 flex-wrap">
       <Button variant="ghost" type="button" on:click={resetForm} disabled={submitting}>
@@ -163,7 +154,4 @@
     padding: 0.35rem 0.85rem;
   }
 
-  textarea {
-    resize: vertical;
-  }
 </style>
