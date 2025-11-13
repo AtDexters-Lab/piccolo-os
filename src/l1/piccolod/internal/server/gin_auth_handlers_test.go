@@ -404,7 +404,7 @@ func TestCryptoResetPasswordFlow(t *testing.T) {
 	}
 
 	// Generate recovery key
-	words, err := srv.cryptoManager.GenerateRecoveryKeyWithPassword("OrigPass123!")
+	words, err := srv.cryptoManager.GenerateRecoveryKeyWithPassword("OrigPass123!", false)
 	if err != nil {
 		t.Fatalf("generate recovery key: %v", err)
 	}
@@ -451,6 +451,64 @@ func TestCryptoResetPasswordFlow(t *testing.T) {
 	}
 	if !state.PasswordStale || !state.RecoveryStale {
 		t.Fatalf("expected staleness flags set, got %+v", state)
+	}
+}
+
+func TestCryptoRecoveryKeyGenerateRotatesAndClearsStaleness(t *testing.T) {
+	srv := setupAuthTestServer(t)
+	sessionCookie, csrf := setupTestAdminSession(t, srv)
+	repo, ok := srv.authRepo.(*memoryAuthRepo)
+	if !ok {
+		t.Fatalf("unexpected repo type %T", srv.authRepo)
+	}
+
+	initialWords, err := srv.cryptoManager.GenerateRecoveryKeyWithPassword("TestPass123!", false)
+	if err != nil {
+		t.Fatalf("initial generate: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := repo.UpdateStaleness(context.Background(), persistence.AuthStalenessUpdate{
+		RecoveryStale:   boolPtr(true),
+		RecoveryStaleAt: timePtr(now),
+	}); err != nil {
+		t.Fatalf("set staleness: %v", err)
+	}
+	if err := srv.cryptoManager.Unlock("TestPass123!"); err != nil {
+		t.Fatalf("unlock before rotation: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/crypto/recovery-key/generate", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	attachAuth(req, sessionCookie, csrf)
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("rotate generate: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Words []string `json:"words"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if len(resp.Words) != 24 {
+		t.Fatalf("expected 24 words, got %d", len(resp.Words))
+	}
+	if strings.Join(resp.Words, " ") == strings.Join(initialWords, " ") {
+		t.Fatalf("expected rotation to return new mnemonic")
+	}
+	state, err := repo.Staleness(context.Background())
+	if err != nil {
+		t.Fatalf("staleness fetch: %v", err)
+	}
+	if state.RecoveryStale {
+		t.Fatalf("expected recovery staleness cleared, got %+v", state)
+	}
+	if !state.RecoveryStaleAt.IsZero() {
+		t.Fatalf("expected stale timestamp reset, got %+v", state)
+	}
+	if !state.RecoveryAckAt.IsZero() {
+		t.Fatalf("expected ack timestamp reset, got %+v", state)
 	}
 }
 

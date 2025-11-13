@@ -255,11 +255,12 @@ func (s *GinServer) handleCryptoRecoveryGenerate(c *gin.Context) {
 	_ = c.ShouldBindJSON(&body)
 	var words []string
 	var err error
+	rotating := s.cryptoManager.HasRecoveryKey()
 	// Prefer unlocked path; else use direct with password
 	if !s.cryptoManager.IsLocked() {
-		words, err = s.cryptoManager.GenerateRecoveryKey()
+		words, err = s.cryptoManager.GenerateRecoveryKey(rotating)
 	} else if strings.TrimSpace(body.Password) != "" {
-		words, err = s.cryptoManager.GenerateRecoveryKeyWithPassword(body.Password)
+		words, err = s.cryptoManager.GenerateRecoveryKeyWithPassword(body.Password, rotating)
 	} else {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unlock required"})
 		return
@@ -274,6 +275,26 @@ func (s *GinServer) handleCryptoRecoveryGenerate(c *gin.Context) {
 		RecoveryAckAt:   timePtr(time.Time{}),
 	}); err != nil {
 		log.Printf("WARN: failed to clear recovery staleness: %v", err)
+	}
+	if err := s.applyStalenessUpdate(c.Request.Context(), persistence.AuthStalenessUpdate{
+		RecoveryStale:   boolPtr(false),
+		RecoveryStaleAt: timePtr(time.Time{}),
+		RecoveryAckAt:   timePtr(time.Time{}),
+	}); err != nil {
+		log.Printf("WARN: failed to clear recovery staleness: %v", err)
+	}
+	if s.events != nil {
+		s.events.Publish(events.Event{
+			Topic: events.TopicAudit,
+			Payload: events.AuditEvent{
+				Kind:   "auth.recovery_key_generate",
+				Time:   time.Now().UTC(),
+				Source: c.ClientIP(),
+				Metadata: map[string]any{
+					"rotated": rotating,
+				},
+			},
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{"words": words})
 }

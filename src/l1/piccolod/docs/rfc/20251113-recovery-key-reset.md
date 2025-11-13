@@ -87,6 +87,6 @@ After this change, `/crypto/unlock` accepts only the password. Operators must us
   - `POST /api/v1/crypto/reset-password`, rate-limited like `/auth/login`, unlocks only for the operation, rotates auth + SDEK, raises audit events.
   - Control-store schema now persists `password_stale`, `recovery_stale`, and ack timestamps. `AuthRepo.Staleness`/`UpdateStaleness` expose helpers for server/UI.
   - `GET /auth/session` and `GET /crypto/recovery-key` surface staleness booleans; `POST /auth/staleness/ack` clears them with its own audit log entry.
-  - `/api/v1/crypto/unlock` now accepts only the password, keeping the UI flow aligned with this RFC.
+  - `/api/v1/crypto/recovery-key/generate` now rotates the mnemonic when one already exists (single active key), and `/api/v1/crypto/unlock` accepts only the password, keeping the UI flow aligned with this RFC.
 - Test coverage: `go test ./...` (including `gin_auth_handlers_test.go`, persistence/auth/crypt suites) plus manual recovery-reset validation on dev nodes.
 - Track work via issue `TBD` once created; UI follow-ups remain pending.

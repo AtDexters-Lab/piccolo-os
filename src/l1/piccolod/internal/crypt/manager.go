@@ -335,7 +335,7 @@ func (m *Manager) RewrapUnlocked(newPassword string) error {
 // Recovery key management
 var wordlist = []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango", "uniform", "victor", "whiskey", "xray", "yankee", "zulu"}
 
-func (m *Manager) GenerateRecoveryKey() ([]string, error) {
+func (m *Manager) GenerateRecoveryKey(force bool) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.inited {
@@ -349,7 +349,7 @@ func (m *Manager) GenerateRecoveryKey() ([]string, error) {
 	if err := json.Unmarshal(b, &st); err != nil {
 		return nil, err
 	}
-	if st.SDEKRK != "" {
+	if st.SDEKRK != "" && !force {
 		return nil, errors.New("recovery key already set")
 	}
 	// Use plaintext SDEK if already unlocked; otherwise require password via helper
@@ -402,7 +402,7 @@ func (m *Manager) GenerateRecoveryKey() ([]string, error) {
 }
 
 // GenerateRecoveryKeyWithPassword unlocks SDEK using provided password and sets recovery wrapper.
-func (m *Manager) GenerateRecoveryKeyWithPassword(password string) ([]string, error) {
+func (m *Manager) GenerateRecoveryKeyWithPassword(password string, force bool) ([]string, error) {
 	if password == "" {
 		return nil, errors.New("password required")
 	}
@@ -419,7 +419,7 @@ func (m *Manager) GenerateRecoveryKeyWithPassword(password string) ([]string, er
 	if err := json.Unmarshal(b, &st); err != nil {
 		return nil, err
 	}
-	if st.SDEKRK != "" {
+	if st.SDEKRK != "" && !force {
 		return nil, errors.New("recovery key already set")
 	}
 	salt, _ := base64.RawStdEncoding.DecodeString(st.Salt)

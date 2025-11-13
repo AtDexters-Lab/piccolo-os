@@ -370,7 +370,7 @@ paths:
                   stale: { type: boolean }
   /crypto/recovery-key/generate:
     post:
-      summary: Generate recovery key (requires unlocked)
+      summary: Generate or rotate recovery key (requires session; rotates if one already exists)
       requestBody:
         required: false
         content:
