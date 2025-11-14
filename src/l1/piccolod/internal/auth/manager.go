@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -239,20 +240,35 @@ func (s *filesystemStorage) Save(ctx context.Context, state State) error {
 
 // Argon2id helpers (simple encoded format: argon2id$v=19$m=...,t=...,p=...$saltB64$hashB64)
 func hashArgon2id(password string) (string, error) {
-	// Parameters (moderate defaults suitable for small devices)
+	// Soft profile defaults
 	var (
 		time    uint32 = 3
 		memory  uint32 = 64 * 1024 // 64MB
-		threads uint8  = 1
 		keyLen  uint32 = 32
 		saltLen        = 16
 	)
+	threads := uint8(selectAuthParallelism())
 	salt := make([]byte, saltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
 	hash := argon2.IDKey([]byte(password), salt, time, memory, threads, keyLen)
 	return fmt.Sprintf("argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", memory, time, threads, base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(hash)), nil
+}
+
+func selectAuthParallelism() int {
+	cores := runtime.NumCPU()
+	if cores <= 1 {
+		return 1
+	}
+	p := cores / 2
+	if p < 1 {
+		p = 1
+	}
+	if p > 4 {
+		p = 4
+	}
+	return p
 }
 
 func verifyArgon2id(encoded, password string) bool {

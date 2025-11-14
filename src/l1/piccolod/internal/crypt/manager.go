@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"piccolod/internal/state/paths"
@@ -117,8 +118,8 @@ func (m *Manager) Setup(password string) error {
 		return errors.New("already initialized")
 	}
 
-	// KDF defaults (moderate)
-	params := kdfParams{Alg: "argon2id", Time: 3, Memory: 64 * 1024, Threads: 1}
+	// KDF defaults (hard profile)
+	params := kdfParams{Alg: "argon2id", Time: 3, Memory: 512 * 1024, Threads: uint8(selectCryptoParallelism())}
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return err
@@ -222,6 +223,21 @@ func zeroBytes(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}
+}
+
+func selectCryptoParallelism() int {
+	cores := runtime.NumCPU()
+	if cores <= 1 {
+		return 1
+	}
+	p := cores - 1
+	if p < 1 {
+		p = 1
+	}
+	if p > 8 {
+		p = 8
+	}
+	return p
 }
 
 // Rewrap decrypts SDEK with old password and re-seals it with new password.
