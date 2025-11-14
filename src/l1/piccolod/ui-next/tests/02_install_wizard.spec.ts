@@ -92,10 +92,17 @@ async function ensureSetupCompleted(page: Page) {
   }
 }
 
+async function loginViaUi(page: Page, redirectPath: string) {
+  const redirectQuery = encodeURIComponent(redirectPath);
+  await page.goto(`/login?redirect=${redirectQuery}`, { waitUntil: 'domcontentloaded' });
+  await page.getByLabel(/Admin password/i).fill(testPassword);
+  await page.getByRole('button', { name: /(Continue|Sign in)/i }).click();
+  await page.waitForURL((url) => url.pathname === redirectPath);
+}
+
 test('install wizard scaffold renders and advances to disk step', async ({ page }) => {
   await ensureSetupCompleted(page);
-
-  await page.goto(installPath, { waitUntil: 'domcontentloaded' });
+  await loginViaUi(page, installPath);
 
   await expect(page.getByTestId('install-wizard')).toBeVisible();
   await expect(page.getByRole('heading', { name: /New disk install wizard/i })).toBeVisible();

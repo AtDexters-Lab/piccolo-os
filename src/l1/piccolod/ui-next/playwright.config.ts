@@ -5,7 +5,8 @@ const baseURL = process.env.PICCOLO_BASE_URL ?? 'http://piccolo.local';
 export default defineConfig({
   testDir: './tests',
   outputDir: 'test-results/e2e',
-  fullyParallel: true,
+  fullyParallel: false,
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: [
