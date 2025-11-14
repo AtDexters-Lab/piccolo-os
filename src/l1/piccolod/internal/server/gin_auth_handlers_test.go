@@ -462,6 +462,15 @@ func TestCryptoRecoveryKeyGenerateRotatesAndClearsStaleness(t *testing.T) {
 		t.Fatalf("unexpected repo type %T", srv.authRepo)
 	}
 
+	// Initialize crypto with the same password used for auth setup.
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/crypto/setup", strings.NewReader(`{"password":"TestPass123!"}`))
+	req.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("crypto setup: %d body=%s", w.Code, w.Body.String())
+	}
+
 	initialWords, err := srv.cryptoManager.GenerateRecoveryKeyWithPassword("TestPass123!", false)
 	if err != nil {
 		t.Fatalf("initial generate: %v", err)
@@ -477,8 +486,8 @@ func TestCryptoRecoveryKeyGenerateRotatesAndClearsStaleness(t *testing.T) {
 		t.Fatalf("unlock before rotation: %v", err)
 	}
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/crypto/recovery-key/generate", strings.NewReader(`{}`))
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/v1/crypto/recovery-key/generate", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	attachAuth(req, sessionCookie, csrf)
 	srv.router.ServeHTTP(w, req)

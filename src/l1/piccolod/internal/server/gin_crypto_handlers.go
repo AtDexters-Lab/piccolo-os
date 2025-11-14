@@ -276,13 +276,6 @@ func (s *GinServer) handleCryptoRecoveryGenerate(c *gin.Context) {
 	}); err != nil {
 		log.Printf("WARN: failed to clear recovery staleness: %v", err)
 	}
-	if err := s.applyStalenessUpdate(c.Request.Context(), persistence.AuthStalenessUpdate{
-		RecoveryStale:   boolPtr(false),
-		RecoveryStaleAt: timePtr(time.Time{}),
-		RecoveryAckAt:   timePtr(time.Time{}),
-	}); err != nil {
-		log.Printf("WARN: failed to clear recovery staleness: %v", err)
-	}
 	if s.events != nil {
 		s.events.Publish(events.Event{
 			Topic: events.TopicAudit,
