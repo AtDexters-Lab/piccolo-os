@@ -307,7 +307,16 @@ $: showRecoveryStep = setupState.phase === 'ready' && (!recoveryStepComplete && 
     goto(resolveRedirect('finish'));
   }
 
-async function handleRecoveryContinue({ useExisting } = { useExisting: false }) {
+  async function clearFocusQuery() {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('focus')) return;
+    url.searchParams.delete('focus');
+    const search = url.search ? `?${url.searchParams.toString()}` : '';
+    await goto(`${url.pathname}${search}${url.hash}`, { replaceState: true, noScroll: true });
+  }
+
+  async function handleRecoveryContinue({ useExisting } = { useExisting: false }) {
     if (!useExisting) {
       if (!generatedRecoveryWords.length || !recoveryAcknowledged) {
         recoveryCopyNotice = 'Generate and save the recovery key before continuing.';
@@ -317,6 +326,8 @@ async function handleRecoveryContinue({ useExisting } = { useExisting: false }) 
       generatedRecoveryWords = [];
       recoveryAcknowledged = false;
       recoveryStatus = { present: true, stale: false };
+      recoveryStepComplete = true;
+      await clearFocusQuery();
       return;
     }
 
@@ -327,6 +338,7 @@ async function handleRecoveryContinue({ useExisting } = { useExisting: false }) 
       await platformController.refreshSession();
       recoveryStatus = { present: true, stale: false };
       recoveryStepComplete = true;
+      await clearFocusQuery();
     } catch (error) {
       const apiError = error as ApiError | undefined;
       continueExistingError = apiError?.message ?? 'Unable to continue with the existing key.';
