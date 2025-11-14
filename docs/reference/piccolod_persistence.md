@@ -12,6 +12,9 @@ Piccolod persists its control plane in the Piccolod Datastore (PDD) and exposes 
 - The PDD keybag sits beside the ciphertext and wraps the single SDEK twice: `KEK_pwd` (admin password + TPM pepper in strict mode) and `KEK_recovery` (24-word recovery key). There are no duplicate SDEKs.
 - BSS maintains its own TPM-sealed SDEK. No user secrets are stored inside BSS beyond what is needed pre-unlock.
 - Piccolod releases exactly one AionFS Encryption Key (EK) after unlock. AionFS derives per-application Data Encryption Keys (DEKs) internally.
+- **KDF profiles:** We use Argon2id in two places and persist the chosen parameters with each secret:
+  - _Soft profile (auth password hashes):_ `time=3`, `memory=64 MB`, `parallelism=clamp(cpu/2,1..4)`. These hashes live inside the encrypted control store, so the cost is tuned for responsive logins while still resisting offline checks if the datastore leaks.
+  - _Hard profile (SDEK wrapping):_ `time=3`, `memory=512 MB`, `parallelism=clamp(cpu-1,1..8)`. These values protect the volume master key itself, so they favour stronger RAM/CPU usage. The exact parameters are serialized in `crypto/keyset.json`, ensuring older installations remain readable even as defaults evolve.
 
 ## Boot and Unlock Flow
 1. **Boot:** TPM unseals the BSS SDEK, mounts BSS, and AionFS enters pre-unlock mode (federation heartbeat, DiEK-backed chunk handling). Piccolod remains sealed.
