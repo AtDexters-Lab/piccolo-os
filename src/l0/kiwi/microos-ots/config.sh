@@ -92,16 +92,10 @@ if [ -f /etc/chrony.conf ]; then
 fi
 
 # Enable jeos-firstboot if installed, disabled by combustion/ignition.
-# However, on s390x without KVM the console is not capable of running
-# jeos-firstboot, use systemd-firstboot as minimal alternative.
-if [[ "$kiwi_profiles" =~ s390x-(dasd|fba|fcp) ]]; then
-	systemctl enable systemd-firstboot
-	# Enable prompting for the root password
-	echo 'root:!unprovisioned' | chpasswd -e
-elif rpm -q --whatprovides jeos-firstboot >/dev/null; then
-        mkdir -p /var/lib/YaST2
-        touch /var/lib/YaST2/reconfig_system
-        systemctl enable jeos-firstboot.service
+if rpm -q --whatprovides jeos-firstboot >/dev/null; then
+	mkdir -p /var/lib/YaST2
+	touch /var/lib/YaST2/reconfig_system
+	systemctl enable jeos-firstboot.service
 fi
 
 # The %post script can't edit /etc/fstab sys due to https://github.com/OSInside/kiwi/issues/945
@@ -160,23 +154,14 @@ sed -i 's/.*rpm.install.excludedocs.*/rpm.install.excludedocs = yes/g' /etc/zypp
 consoles='console=ttyS0,115200 console=tty0'
 [[ "$kiwi_profiles" == *"RaspberryPi2"* ]] && consoles='console=ttyAMA0,115200 console=tty0'
 [[ "$kiwi_profiles" == *"Rock64"* ]] && consoles='console=ttyS2,1500000 console=tty0'
-[[ "$kiwi_profiles" == *"ppc64"* ]] && consoles='console=hvc0,115200 console=tty0'
-[[ "$kiwi_profiles" == *"s390x-Cloud"* ]] && consoles='' # autodetect
-[[ "$kiwi_profiles" == *"s390x-dasd"* ]] && consoles='hvc_iucv=8'
 
 cmdline=('quiet' 'systemd.show_status=yes' ${consoles})
 rpm -q wicked && cmdline+=('net.ifnames=0')
 
 ignition_platform='metal'
 case "${kiwi_profiles}" in
-	*kvm*) ignition_platform='qemu' ;;
-	*DigitalOcean*) ignition_platform='digitalocean' ;;
-	*VMware*) ignition_platform='vmware' ;;
-	*OpenStack*) ignition_platform='openstack' ;;
 	*VirtualBox*) ignition_platform='virtualbox' ;;
-	*HyperV*) ignition_platform='metal'
-	          cmdline+=('rootdelay=300') ;;
-	*Pine64*|*RaspberryPi*|*Rock64*|*Vagrant*|*s390x*|*ppc64le*) ignition_platform='metal' ;;
+	*RaspberryPi*|*Rock64*) ignition_platform='metal' ;;
 	# Use autodetection on selfinstall. The first boot doesn't use the grub
 	# cmdline anyway, it's started with kexec using kiwi's builtin default.
 	*SelfInstall*) ignition_platform='' ;;
@@ -235,13 +220,6 @@ else
 fi
 
 #======================================
-# Configure Pine64 specifics
-#--------------------------------------
-if [[ "$kiwi_profiles" == *"Pine64"* ]]; then
-	echo 'add_drivers+=" fixed sunxi-mmc axp20x-regulator axp20x-rsb "' > /etc/dracut.conf.d/sunxi_modules.conf
-fi
-
-#======================================
 # Configure Raspberry Pi specifics, unless done by raspberrypi-firmware already (on TW)
 #--------------------------------------
 if [[ "$kiwi_profiles" == *"RaspberryPi"* ]] && ! [[ -e /usr/lib/dracut/dracut.conf.d/raspberrypi_modules.conf ]]; then
@@ -261,29 +239,6 @@ if [[ "$kiwi_profiles" == *"RaspberryPi"* ]] && ! [[ -e /usr/lib/dracut/dracut.c
 		# Avoid running out of DMA pages for smsc95xx (bsc#1012449)
 		vm.min_free_kbytes = 2048
 	EOF
-fi
-
-#======================================
-# Configure Vagrant specifics
-#--------------------------------------
-if [[ "$kiwi_profiles" == *"Vagrant"* ]]; then
-	echo "Add user vagrant"
-	# create vagrant user
-	useradd vagrant
-	# allow password-less sudo
-	echo "vagrant ALL=(ALL)NOPASSWD:ALL" > /etc/sudoers.d/vagrant
-	# add vagrant's insecure key
-	mkdir -p /home/vagrant/.ssh
-	chmod 0700 /home/vagrant/.ssh
-	cat > /home/vagrant/.ssh/authorized_keys << EOF
-ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA6NF8iallvQVp22WDkTkyrtvp9eWW6A8YVr+kz4TjGYe7gHzIw+niNltGEFHzD8+v1I2YJ6oXevct1YeS0o9HZyN1Q9qgCgzUFtdOKLv6IedplqoPkcmF0aYet2PkEDo3MlTBckFXPITAMzF8dJSIFo9D8HfdOV0IAdx4O7PtixWKn5y2hMNG0zQPyUecp4pzC6kivAIhyfHilFR61RGL+GPXQ2MWZWFYbAGjyiYJnAmCP3NOTd0jMZEnDkbUvxhMmBYSdETk1rRgm+R4LOzFUGaHqHDLKLX+FIPKcF96hrucXzcWyLbIbEgE98OHlnVYCzRdK8jlqm8tehUc9c9WhQ== vagrant insecure public key
-EOF
-	chmod 0600 /home/vagrant/.ssh/authorized_keys
-	chown -R vagrant /home/vagrant
-
-	echo "Disable jeos-firstboot.service for Vagrant boxes"
-	systemctl disable jeos-firstboot.service
-	systemctl mask jeos-firstboot.service
 fi
 
 #======================================
