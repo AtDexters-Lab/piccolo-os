@@ -1,4 +1,0 @@
-    <!-- DEVELOPMENT ADDITIONS: Add SSH and Cloud-Init support -->
-    <package name="openssh-server"/>
-    <package name="cloud-init"/>
-    <package name="cloud-init-config-MicroOS"/>
