@@ -174,7 +174,7 @@
         <package name="patterns-microos-base-zypper" />
         <package name="patterns-microos-defaults" />
         <!-- TODO: Causes build to fail when container_runtime is added -->
-        <!-- <package name="patterns-microos-selinux" /> -->
+        <package name="patterns-microos-selinux" />
         <package name="kernel-default" />
         <package name="dracut-kiwi-oem-repart" />
         <!-- Make it easier to add encryption later, like with
