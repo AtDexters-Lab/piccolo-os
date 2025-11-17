@@ -152,7 +152,6 @@ sed -i 's/.*rpm.install.excludedocs.*/rpm.install.excludedocs = yes/g' /etc/zypp
 # Add default kernel boot options
 #--------------------------------------
 consoles='console=ttyS0,115200 console=tty0'
-[[ "$kiwi_profiles" == *"RaspberryPi2"* ]] && consoles='console=ttyAMA0,115200 console=tty0'
 [[ "$kiwi_profiles" == *"Rock64"* ]] && consoles='console=ttyS2,1500000 console=tty0'
 
 cmdline=('quiet' 'systemd.show_status=yes' ${consoles})
