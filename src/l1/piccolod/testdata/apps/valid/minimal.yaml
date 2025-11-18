@@ -1,5 +1,0 @@
-name: test-minimal
-image: alpine:latest
-listeners:
-  - name: web
-    guest_port: 80
