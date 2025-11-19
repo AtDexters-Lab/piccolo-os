@@ -98,13 +98,8 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 - System apps (federated storage) alpha.
 - Piccolo Network (optional managed remote access and services).
 
-## Documentation
-Key planning documents:
-- **Pre-beta PRD**: `docs/pre-beta-prd.md`
-- **Product PRD**: `src/l1/piccolod/piccolo_os_prd.md` (symlink to org context)
-- **Portal overview**: `src/l1/piccolod/docs/ui/portal-overview.md`
-- **App platform spec**: `src/l1/piccolod/docs/app-platform/specification.yaml`
-- **HTTP API (OpenAPI)**: `src/l1/piccolod/docs/api/openapi.yaml`
+## Piccolod
+- [piccolod](https://github.com/AtDexters-Lab/piccolod) is the control-plane daemon for Piccolo OS. It exposes the HTTP API, manages runtime supervisors, and serves the minimal UI.
 
 ## Contribute
 We’re early, scrappy, and community‑powered. PRs, issues, and design discussions are welcome.
