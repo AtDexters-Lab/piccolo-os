@@ -166,6 +166,17 @@
         <source path="http://192.168.0.100:8888/oss" />
     </repository>
 
+    <repository type="rpm-md" alias="piccolo-os-x86_64" priority="80" imageinclude="true"
+        arch="x86_64">
+        <source
+            path="https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os/openSUSE_Tumbleweed/" />
+    </repository>
+    <repository type="rpm-md" alias="piccolo-os-aarch64" priority="80" imageinclude="true"
+        arch="aarch64">
+        <source
+            path="https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os/openSUSE_Factory_ARM/" />
+    </repository>
+
     <packages type="image">
         <package name="live-add-yast-repos" />
         <!-- Apparently zypper (?) doesn't like having multiple patterns with the same name,
@@ -187,6 +198,9 @@
 
         <package name="growpart-generator" />
         <package name="patterns-base-bootloader" />
+
+        <!-- piccolo-os specific packages -->
+        <package name="piccolo-os-support" />
     </packages>
 
     <packages type="image" profiles="SelfInstall,RaspberryPi,Rock64">
