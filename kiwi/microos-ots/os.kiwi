@@ -31,7 +31,7 @@
             btrfs_root_is_readonly_snapshot="true"
             btrfs_quota_groups="true"
         >
-            <bootloader name="grub2" console="gfxterm" />
+            <bootloader name="grub2" console="gfxterm" timeout="1" />
             <systemdisk>
                 <volume name="home" />
                 <volume name="root" />
@@ -66,7 +66,7 @@
             btrfs_root_is_readonly_snapshot="true"
             btrfs_quota_groups="false"
         >
-            <bootloader name="grub2" console="gfxterm" />
+            <bootloader name="grub2" console="gfxterm" timeout="1" />
             <systemdisk>
                 <volume name="home" />
                 <volume name="root" />
@@ -100,7 +100,7 @@
             btrfs_quota_groups="false"
             disk_start_sector="32768"
         >
-            <bootloader name="grub2" />
+            <bootloader name="grub2" timeout="1" />
             <systemdisk>
                 <volume name="home" />
                 <volume name="root" />
@@ -134,7 +134,7 @@
             btrfs_root_is_readonly_snapshot="true"
             btrfs_quota_groups="true"
         >
-            <bootloader name="grub2" console="gfxterm" />
+            <bootloader name="grub2" console="gfxterm" timeout="1" />
             <systemdisk>
                 <volume name="home" />
                 <volume name="root" />
@@ -159,9 +159,9 @@
     </preferences>
 
     <!-- TODO: Make Users and Repository Dynamic -->
-    <users>
+     <!-- <users>
         <user password="$1$NKUVf3Nl$jGxe0eJvarRvygY9NsQPi." home="/root" name="root" groups="root" />
-    </users>
+    </users> -->
     <repository type="rpm-md" alias="tw-oss" priority="99">
         <source path="http://192.168.0.100:8888/oss" />
     </repository>
@@ -228,6 +228,13 @@
         <package name="u-boot-rock64-rk3328" arch="aarch64" />
         <package name="dtb-rockchip" arch="aarch64" />
     </packages>
+
+    <packages type="delete">
+        <package name="openssh" />
+        <package name="openssh-server" />
+        <package name="openssh-clients" />
+    </packages>
+
     <packages type="bootstrap">
         <!-- Avoid that zypper picks the busybox-foo variant for those, that would fail later -->
         <package name="coreutils" />

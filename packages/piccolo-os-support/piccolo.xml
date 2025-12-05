@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone target="DROP">
+  <short>Piccolo</short>
+  <description>Piccolo OS hardened zone. Default deny. Allows LAN access to Portal and Apps.</description>
+
+  <!-- Allow mDNS for Discovery -->
+  <service name="mdns"/>
+
+  <!-- 
+    LAN Allow-list Rule 
+    We accept traffic to Portal (80) and Proxy Range (35000-45000)
+    ONLY from private subnets.
+  -->
+  <rule family="ipv4">
+    <source address="192.168.0.0/16"/>
+    <port protocol="tcp" port="80"/>
+    <accept/>
+  </rule>
+  <rule family="ipv4">
+    <source address="10.0.0.0/8"/>
+    <port protocol="tcp" port="80"/>
+    <accept/>
+  </rule>
+  <rule family="ipv4">
+    <source address="172.16.0.0/12"/>
+    <port protocol="tcp" port="80"/>
+    <accept/>
+  </rule>
+
+  <rule family="ipv4">
+    <source address="192.168.0.0/16"/>
+    <port protocol="tcp" port="35000-45000"/>
+    <accept/>
+  </rule>
+  <rule family="ipv4">
+    <source address="10.0.0.0/8"/>
+    <port protocol="tcp" port="35000-45000"/>
+    <accept/>
+  </rule>
+  <rule family="ipv4">
+    <source address="172.16.0.0/12"/>
+    <port protocol="tcp" port="35000-45000"/>
+    <accept/>
+  </rule>
+</zone>
