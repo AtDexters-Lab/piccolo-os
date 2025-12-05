@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- OBS-Profiles: @BUILD_FLAVOR@ -->
+<image schemaversion="7.4" name="piccolo-os" displayname="Piccolo OS">
+    <description type="system">
+        <author>AtDexters Lab</author>
+        <contact>piccolo-factory@atdexters.com</contact>
+        <specification>Piccolo OS</specification>
+    </description>
+    <profiles>
+        <!-- Platforms -->
+        <profile name="VirtualBox" description="VirtualBox for x86_64" arch="x86_64" />
+        <profile name="RaspberryPi" description="RaspberryPi (3+, aarch64)" arch="aarch64" />
+        <profile name="Rock64" description="Rock64" arch="aarch64" />
+        <profile name="SelfInstall" description="Self Installing Image" arch="x86_64,aarch64" />
+    </profiles>
+    <preferences profiles="VirtualBox">
+        <version>16.0.0</version>
+        <packagemanager>zypper</packagemanager>
+        <bootloader-theme>openSUSE</bootloader-theme>
+        <rpm-excludedocs>true</rpm-excludedocs>
+        <locale>en_US</locale>
+        <type
+            image="oem"
+            filesystem="btrfs"
+            format="vdi"
+            firmware="uefi"
+            bootpartition="false"
+            bootkernel="custom"
+            devicepersistency="by-uuid"
+            btrfs_root_is_snapshot="true"
+            btrfs_root_is_readonly_snapshot="true"
+            btrfs_quota_groups="true"
+        >
+            <bootloader name="grub2" console="gfxterm" timeout="1" />
+            <systemdisk>
+                <volume name="home" />
+                <volume name="root" />
+                <volume name="opt" />
+                <volume name="srv" />
+                <volume name="boot/grub2/i386-pc" />
+                <volume name="boot/grub2/x86_64-efi" mountpoint="boot/grub2/x86_64-efi" />
+                <volume name="boot/writable" />
+                <volume name="usr/local" />
+                <volume name="var" copy_on_write="false" />
+            </systemdisk>
+            <size unit="G">20</size>
+        </type>
+    </preferences>
+    <preferences profiles="RaspberryPi">
+        <version>16.0.0</version>
+        <packagemanager>zypper</packagemanager>
+        <bootloader-theme>openSUSE</bootloader-theme>
+        <rpm-excludedocs>true</rpm-excludedocs>
+        <locale>en_US</locale>
+        <type
+            image="oem"
+            initrd_system="dracut"
+            filesystem="btrfs"
+            fsmountoptions="noatime,compress=lzo"
+            firmware="efi"
+            bootpartition="false"
+            devicepersistency="by-uuid"
+            btrfs_root_is_snapshot="true"
+            efipartsize="16"
+            editbootinstall="editbootinstall_rpi.sh"
+            btrfs_root_is_readonly_snapshot="true"
+            btrfs_quota_groups="false"
+        >
+            <bootloader name="grub2" console="gfxterm" timeout="1" />
+            <systemdisk>
+                <volume name="home" />
+                <volume name="root" />
+                <volume name="opt" />
+                <volume name="srv" />
+                <volume name="boot/grub2/arm64-efi" mountpoint="boot/grub2/arm64-efi" />
+                <volume name="boot/writable" />
+                <volume name="usr/local" />
+                <volume name="var" copy_on_write="false" />
+            </systemdisk>
+        </type>
+    </preferences>
+    <preferences profiles="Rock64">
+        <version>16.0.0</version>
+        <packagemanager>zypper</packagemanager>
+        <bootloader-theme>openSUSE</bootloader-theme>
+        <rpm-excludedocs>true</rpm-excludedocs>
+        <locale>en_US</locale>
+        <type
+            image="oem"
+            initrd_system="dracut"
+            filesystem="btrfs"
+            fsmountoptions="noatime,compress=lzo"
+            firmware="efi"
+            bootpartition="false"
+            devicepersistency="by-uuid"
+            btrfs_root_is_snapshot="true"
+            efipartsize="16"
+            editbootinstall="editbootinstall_rock64.sh"
+            btrfs_root_is_readonly_snapshot="true"
+            btrfs_quota_groups="false"
+            disk_start_sector="32768"
+        >
+            <bootloader name="grub2" timeout="1" />
+            <systemdisk>
+                <volume name="home" />
+                <volume name="root" />
+                <volume name="opt" />
+                <volume name="srv" />
+                <volume name="boot/grub2/arm64-efi" mountpoint="boot/grub2/arm64-efi" />
+                <volume name="boot/writable" />
+                <volume name="usr/local" />
+                <volume name="var" copy_on_write="false" />
+            </systemdisk>
+        </type>
+    </preferences>
+    <preferences profiles="SelfInstall">
+        <version>16.0.0</version>
+        <packagemanager>zypper</packagemanager>
+        <bootsplash-theme>openSUSE</bootsplash-theme>
+        <bootloader-theme>openSUSE</bootloader-theme>
+        <rpm-excludedocs>true</rpm-excludedocs>
+        <locale>en_US</locale>
+        <type
+            image="oem"
+            filesystem="btrfs"
+            firmware="uefi"
+            initrd_system="dracut"
+            installiso="true"
+            installpxe="true"
+            bootpartition="false"
+            bootkernel="custom"
+            devicepersistency="by-uuid"
+            btrfs_root_is_snapshot="true"
+            btrfs_root_is_readonly_snapshot="true"
+            btrfs_quota_groups="true"
+        >
+            <bootloader name="grub2" console="gfxterm" timeout="1" />
+            <systemdisk>
+                <volume name="home" />
+                <volume name="root" />
+                <volume name="tmp" />
+                <volume name="opt" />
+                <volume name="srv" />
+                <volume name="boot/grub2/i386-pc" />
+                <volume name="boot/grub2/x86_64-efi" mountpoint="boot/grub2/x86_64-efi" />
+                <volume name="boot/writable" />
+                <volume name="usr/local" />
+                <volume name="var" copy_on_write="false" />
+            </systemdisk>
+            <oemconfig>
+                <oem-device-filter>/dev/ram</oem-device-filter>
+                <oem-multipath-scan>false</oem-multipath-scan>
+            </oemconfig>
+            <machine memory="512" guestOS="suse" HWversion="4">
+                <vmdisk id="0" controller="ide" />
+                <vmnic driver="e1000" interface="0" mode="bridged" />
+            </machine>
+        </type>
+    </preferences>
+
+    <!-- TODO: Make Users and Repository Dynamic -->
+     <!-- <users>
+        <user password="$1$NKUVf3Nl$jGxe0eJvarRvygY9NsQPi." home="/root" name="root" groups="root" />
+    </users> -->
+    <repository type="rpm-md" alias="obs-repo" priority="99">
+        <source path="obsrepositories:/" />
+    </repository>
+
+    <packages type="image">
+        <package name="live-add-yast-repos" />
+        <!-- Apparently zypper (?) doesn't like having multiple patterns with the same name,
+             so avoid using namedCollection at least for basesystem -->
+        <package name="patterns-microos-basesystem" />
+        <package name="patterns-microos-base-zypper" />
+        <package name="patterns-microos-defaults" />
+        <!-- TODO: Causes build to fail when container_runtime is added -->
+        <package name="patterns-microos-selinux" />
+        <package name="kernel-default" />
+        <package name="dracut-kiwi-oem-repart" />
+        <!-- Make it easier to add encryption later, like with
+        https://github.com/lnussel/addimageencryption -->
+        <package name="device-mapper" />
+        <package name="cryptsetup" />
+        <!-- New version with /etc as subvolume -->
+        <package name="read-only-root-fs &gt;= 1.0+git20250414" />
+        <package name="patterns-containers-container_runtime" />
+
+        <package name="growpart-generator" />
+        <package name="patterns-base-bootloader" />
+
+        <!-- piccolo-os specific packages -->
+        <package name="piccolo-os-support" />
+    </packages>
+
+    <packages type="image" profiles="SelfInstall,RaspberryPi,Rock64">
+        <package name="patterns-microos-hardware" />
+        <package name="kernel-firmware-all" /> <!-- Fix choice between kernel-firmware and
+        kernel-firmware-all -->
+    </packages>
+
+    <packages type="image" profiles="VirtualBox">
+        <package name="virtualbox-guest-tools" />
+    </packages>
+
+    <packages type="image" profiles="RaspberryPi">
+        <package name="raspberrypi-firmware" arch="aarch64" />
+        <package name="raspberrypi-firmware-config" arch="aarch64" />
+        <package name="raspberrypi-firmware-dt" arch="aarch64" />
+        <package name="arm-trusted-firmware-rpi4" arch="aarch64" />
+        <package name="u-boot-rpiarm64" arch="aarch64" />
+        <package name="bcm43xx-firmware" />
+        <package name="wireless-regdb" />
+        <package name="wireless-tools" />
+        <package name="wpa_supplicant" />
+    </packages>
+    <packages type="image" profiles="Rock64">
+        <package name="u-boot-rock64-rk3328" arch="aarch64" />
+        <package name="dtb-rockchip" arch="aarch64" />
+    </packages>
+
+    <packages type="delete">
+        <package name="openssh" />
+        <package name="openssh-server" />
+        <package name="openssh-clients" />
+    </packages>
+
+    <packages type="bootstrap">
+        <!-- Avoid that zypper picks the busybox-foo variant for those, that would fail later -->
+        <package name="coreutils" />
+        <package name="gawk" />
+        <package name="gzip" />
+        <package name="hostname" />
+        <!-- Avoid libressl -->
+        <package name="openssl" />
+        <!-- Avoid libz-ng-compat1, boo#1245263 -->
+        <package name="libz1" />
+
+        <package name="filesystem" />
+        <package name="glibc-locale-base" />
+        <!-- So that https repos work for image package downloads -->
+        <package name="ca-certificates-mozilla" />
+        <!-- TODO: Use the proper flavors once available -->
+        <package name="MicroOS-release-dvd" />
+    </packages>
+</image>
