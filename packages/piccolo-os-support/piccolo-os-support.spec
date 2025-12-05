@@ -1,17 +1,19 @@
 Name:           piccolo-os-support
-Version:        0.1.0
+Version:        0.2.0
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
 URL:            https://github.com/AtDexters-Lab/piccolo-os
-BuildArch:      noarch
+ExclusiveArch:  x86_64 aarch64
 Source0:        piccolo.xml
+Source1:        piccolo-os-support-rpmlintrc
 
 BuildRequires:  systemd
 BuildRequires:  firewalld
 BuildRequires:  libxml2-tools
 Requires:       piccolod
 Requires:       firewalld
+Requires:       zypper
 Requires(post): systemd
 
 %description
@@ -36,6 +38,26 @@ EOT
 
 # Install Firewalld Zone
 install -D -m 644 %{SOURCE0} %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
+
+# Install Repo File
+install -d -m 755 %{buildroot}/etc/zypp/repos.d
+%ifarch x86_64
+REPO_URL="https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os/openSUSE_Tumbleweed/"
+%endif
+%ifarch aarch64
+REPO_URL="https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os/openSUSE_Factory_ARM/"
+%endif
+
+cat > %{buildroot}/etc/zypp/repos.d/piccolo-os.repo <<EOF
+[piccolo-os]
+name=Piccolo OS
+enabled=1
+autorefresh=1
+baseurl=$REPO_URL
+type=rpm-md
+gpgcheck=1
+gpgkey=${REPO_URL}repodata/repomd.xml.key
+EOF
 
 %check
 # Validate the firewall zone XML
@@ -65,7 +87,15 @@ fi
 %dir %{_prefix}/lib/firewalld
 %dir %{_prefix}/lib/firewalld/zones
 %{_prefix}/lib/firewalld/zones/piccolo.xml
+%dir /etc/zypp
+%dir /etc/zypp/repos.d
+%config(noreplace) /etc/zypp/repos.d/piccolo-os.repo
 
 %changelog
+* Fri Dec 05 2025 Piccolo Team <dev@piccolo.local> 0.2.0-0
+- Added repository configuration (/etc/zypp/repos.d/piccolo-os.repo)
+- Removed BuildArch: noarch to support architecture-specific repo URLs
+- Updated to support OBS build workflow
+
 * Wed Nov 19 2025 Piccolo Team <dev@piccolo.local> 0.1.0-0
 - Initial package; enforce piccolod presence on Piccolo OS images.

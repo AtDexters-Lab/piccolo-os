@@ -1,0 +1,17 @@
+<services>
+  <service name="obs_scm">
+    <param name="url">https://github.com/AtDexters-Lab/piccolo-os.git</param>
+    <param name="scm">git</param>
+    <param name="revision">main</param>
+    <param name="subdir">kiwi/microos-ots</param>
+    <param name="versionformat">@PARENT_TAG@+git@TAG_OFFSET@.%h</param>
+    <param name="changesgenerate">enable</param>
+  </service>
+  <service name="tar" mode="buildtime"/>
+  <service name="recompress" mode="buildtime">
+    <param name="file">*.tar</param>
+    <param name="compression">xz</param>
+  </service>
+  <service name="set_version" mode="buildtime"/>
+  <service name="kiwi_metainfo_helper" mode="buildtime"/>
+</services>
