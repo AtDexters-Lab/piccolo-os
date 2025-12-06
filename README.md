@@ -60,25 +60,49 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 
 ## Install and Quick Start
 
-### Requirements
-- x86_64: UEFI Secure Boot‑capable PC/mini‑PC; Ethernet; 4 GB RAM recommended (2 GB minimum for light apps). TPM 2.0 optional (recommended).
-- Raspberry Pi: RPi 4/5; quality SD card (USB SSD recommended for performance); Ethernet.
+Piccolo OS is built for x86_64 and ARM64. The easiest way to try it is in a Virtual Machine or by flashing it to a USB drive/SD card for bare metal.
 
-### x86_64 (Live USB with in‑portal “Install to Disk”)
-1. Download: get the live UEFI Secure Boot `.img` from Releases.
-2. Create bootable USB: use BalenaEtcher or `dd`.
-3. Boot: enable Secure Boot; boot from USB. Within ~60s, `http://piccolo.local` shows the portal.
-4. Install: in the portal, choose “Install to Disk”, review target disk contents, type‑to‑confirm, and install. The installer writes the image, grows partitions/FS, and creates data subvolumes. Reboot to the installed system.
+### Option 1: VirtualBox (Try it now)
+Perfect for testing the portal and "time-to-first-service" experience on your laptop.
 
-### Raspberry Pi (SD Image)
-1. Download: get the Pi SD image from Releases.
-2. Flash: write to SD card; insert and power on.
-3. Access: open `http://piccolo.local` within ~60s and complete setup.
-4. Note: no in‑portal install/migration in v1 (SD image is the install medium).
+1.  **Download:** [piccolo-os.x86_64-VirtualBox.vdi.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Tumbleweed/piccolo-os.x86_64-VirtualBox.vdi.xz)
+2.  **Extract:** Unzip the file to get the `.vdi` disk image.
+    ```bash
+    unxz piccolo-os.x86_64-VirtualBox.vdi.xz
+    ```
+3.  **Create VM:**
+    *   **Type:** Linux / openSUSE (64-bit).
+    *   **Hardware:** 4GB RAM (Rec.), 2 vCPUs.
+    *   **Disk:** "Use an Existing Virtual Hard Disk File" -> Select the extracted `.vdi`.
+4.  **Configure (Critical):**
+    *   **System:** Enable **EFI** (Motherboard -> Enable EFI). *Piccolo OS requires UEFI.*
+    *   **Network:** Set Adapter 1 to **Bridged Adapter** (so it gets a LAN IP and is reachable).
+5.  **Boot:** Start the VM. Within ~60 seconds, access the portal at `http://piccolo.local`.
+
+### Option 2: Hardware (x86_64)
+Runs directly on Intel/AMD mini-PCs, laptops, or servers.
+
+> **Note:** This is currently a "Flash-and-Run" image. You flash it directly to your target boot drive (SSD/USB), plug that drive into your machine, and boot. An interactive installer is coming soon.
+
+1.  **Download:** [piccolo-os.x86_64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Tumbleweed/piccolo-os.x86_64-SelfInstall.raw.xz)
+2.  **Flash:** Write the image to your SSD or USB stick using [BalenaEtcher](https://etcher.balena.io/) or `dd`.
+    ```bash
+    xzcat piccolo-os.x86_64-SelfInstall.raw.xz | sudo dd of=/dev/sdX bs=4M status=progress
+    ```
+3.  **Boot:**
+    *   Insert the drive into your target machine.
+    *   Power on. **UEFI Secure Boot is fully supported** and recommended.
+    *   Connect Ethernet.
+4.  **Setup:** Access `http://piccolo.local` from another device on the same LAN.
+
+### Option 3: Raspberry Pi & Rock64
+*ARM64 support is currently experimental and images are being finalized.*
+*   **Status:** Coming Soon.
+
+---
 
 ## Two Ways to Use
 ### Self‑Hosted (Free Forever)
-- Compile from source.
 - Run your own [Nexus Proxy](https://github.com/AtDexters-Lab/nexus-proxy-server).
 - Control every service, every update, every byte.
 
@@ -104,10 +128,17 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 ## Contribute
 We’re early, scrappy, and community‑powered. PRs, issues, and design discussions are welcome.
 
+### Build Infrastructure
+Piccolo OS is built transparently on the Open Build Service (OBS).
+- **RPMs (piccolod, support):** [home:abhishekborar93:piccolo-os](https://build.opensuse.org/project/show/home:abhishekborar93:piccolo-os)
+- **OS Images (ISO/VDI):** [home:abhishekborar93:piccolo-os:images](https://build.opensuse.org/project/show/home:abhishekborar93:piccolo-os:images)
+- **Artifacts/Downloads:** [Repository Browser](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/)
+
+### Local Development
 ```bash
 git clone https://github.com/AtDexters-Lab/piccolo-os
 cd piccolo-os
-# Build instructions: use `make run` (daemon) or see pre-beta PRD for scope
+# See kiwi/ directory for image definitions and packages/ for RPM specs.
 ```
 
 Join the conversation:
