@@ -68,6 +68,13 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 
 Piccolo OS is built for x86_64 and ARM64. The easiest way to try it is in a Virtual Machine or by flashing it to a USB drive/SD card for bare metal.
 
+> **Tip: Faster Downloads**
+> Browser downloads can be slow for large OS images. We recommend using a download manager like `aria2c` with multiple streams.
+> ```bash
+> # Example: Download with 16 connections
+> aria2c -x 16 <image-url>
+> ```
+
 ### Option 1: VirtualBox (Try it now)
 Perfect for testing the portal and "time-to-first-service" experience on your laptop.
 
@@ -105,9 +112,13 @@ Runs directly on generic x86_64 (Intel/AMD) and ARM64 hardware (UEFI).
     *   Connect Ethernet.
 3.  **Setup:** Access `http://piccolo.local` from another device on the same LAN.
 
-### Option 3: Optimized Raspberry Pi & Rock64
+### Option 3: ARM64 (Raspberry Pi & Rock64)
 *Board-specific optimized images (bootloader/firmware pre-configured).*
-*   **Status:** Coming Soon.
+
+*   **Raspberry Pi (3+/4/5):** [piccolo-os.aarch64-RaspberryPi.raw.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Factory_ARM/piccolo-os.aarch64-RaspberryPi.raw.xz)
+*   **Rock64:** [piccolo-os.aarch64-Rock64.raw.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Factory_ARM/piccolo-os.aarch64-Rock64.raw.xz)
+
+Follow the standard **Flash** and **Boot** instructions from Option 2. Ensure your board is connected to Ethernet.
 
 ---
 
