@@ -14,9 +14,8 @@
         <profile name="SelfInstall" description="Self Installing Image" arch="x86_64,aarch64" />
     </profiles>
     <preferences profiles="VirtualBox">
-        <version>16.0.0</version>
+        <version>0.2.0</version>
         <packagemanager>zypper</packagemanager>
-        <bootloader-theme>openSUSE</bootloader-theme>
         <rpm-excludedocs>true</rpm-excludedocs>
         <locale>en_US</locale>
         <type
@@ -47,9 +46,8 @@
         </type>
     </preferences>
     <preferences profiles="RaspberryPi">
-        <version>16.0.0</version>
+        <version>0.2.0</version>
         <packagemanager>zypper</packagemanager>
-        <bootloader-theme>openSUSE</bootloader-theme>
         <rpm-excludedocs>true</rpm-excludedocs>
         <locale>en_US</locale>
         <type
@@ -80,9 +78,8 @@
         </type>
     </preferences>
     <preferences profiles="Rock64">
-        <version>16.0.0</version>
+        <version>0.2.0</version>
         <packagemanager>zypper</packagemanager>
-        <bootloader-theme>openSUSE</bootloader-theme>
         <rpm-excludedocs>true</rpm-excludedocs>
         <locale>en_US</locale>
         <type
@@ -114,10 +111,8 @@
         </type>
     </preferences>
     <preferences profiles="SelfInstall">
-        <version>16.0.0</version>
+        <version>0.2.0</version>
         <packagemanager>zypper</packagemanager>
-        <bootsplash-theme>openSUSE</bootsplash-theme>
-        <bootloader-theme>openSUSE</bootloader-theme>
         <rpm-excludedocs>true</rpm-excludedocs>
         <locale>en_US</locale>
         <type
@@ -159,9 +154,25 @@
     </preferences>
 
     <!-- TODO: Make Users and Repository Dynamic -->
-     <!-- <users>
+
+    <!-- <users>
         <user password="$1$NKUVf3Nl$jGxe0eJvarRvygY9NsQPi." home="/root" name="root" groups="root" />
-    </users> -->
+    </users>
+    <repository type="rpm-md" alias="tw-oss" priority="99">
+        <source path="http://192.168.0.100:8888/oss" />
+    </repository>
+
+    <repository type="rpm-md" alias="piccolo-os-x86_64" priority="80" imageinclude="true"
+        arch="x86_64">
+        <source
+            path="https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os/openSUSE_Tumbleweed/" />
+    </repository>
+    <repository type="rpm-md" alias="piccolo-os-aarch64" priority="80" imageinclude="true"
+        arch="aarch64">
+        <source
+            path="https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os/openSUSE_Factory_ARM/" />
+    </repository> -->
+
     <repository type="rpm-md" alias="obs-repo" priority="99">
         <source path="obsrepositories:/" />
     </repository>
@@ -199,7 +210,7 @@
     </packages>
 
     <packages type="image" profiles="SelfInstall">
-        <package name="dracut-kiwi-oem-dump"/>
+        <package name="dracut-kiwi-oem-dump" />
     </packages>
 
     <packages type="image" profiles="VirtualBox">
