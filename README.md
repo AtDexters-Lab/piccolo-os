@@ -4,6 +4,12 @@ A privacy-first, headless operating system for homelabs — built for tinkerers,
 
 > Note: Piccolo OS is in early development. This repo captures our vision, architecture, and current progress. Follow along, contribute, or roll up your sleeves and build with us.
 
+## Table of Contents
+- [Install and Quick Start](#install-and-quick-start)
+- [Why Piccolo OS](#why-piccolo-os)
+- [Architecture](#system-architecture)
+- [Contribute](#contribute)
+
 ## Why Piccolo OS
 - Self-host with confidence: run services 24×7 on your own hardware.
 - Local-first: fully usable on LAN with no cloud dependency.
@@ -79,24 +85,28 @@ Perfect for testing the portal and "time-to-first-service" experience on your la
     *   **Network:** Set Adapter 1 to **Bridged Adapter** (so it gets a LAN IP and is reachable).
 5.  **Boot:** Start the VM. Within ~60 seconds, access the portal at `http://piccolo.local`.
 
-### Option 2: Hardware (x86_64)
-Runs directly on Intel/AMD mini-PCs, laptops, or servers.
+### Option 2: Hardware (x86_64 & ARM64)
+Runs directly on generic x86_64 (Intel/AMD) and ARM64 hardware (UEFI).
 
 > **Note:** This is currently a "Flash-and-Run" image. You flash it directly to your target boot drive (SSD/USB), plug that drive into your machine, and boot. An interactive installer is coming soon.
 
-1.  **Download:** [piccolo-os.x86_64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Tumbleweed/piccolo-os.x86_64-SelfInstall.raw.xz)
-2.  **Flash:** Write the image to your SSD or USB stick using [BalenaEtcher](https://etcher.balena.io/) or `dd`.
+**Downloads:**
+*   **x86_64 (Intel/AMD):** [piccolo-os.x86_64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Tumbleweed/piccolo-os.x86_64-SelfInstall.raw.xz)
+*   **ARM64 (Generic):** [piccolo-os.aarch64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Factory_ARM/piccolo-os.aarch64-SelfInstall.raw.xz)
+
+1.  **Flash:** Write the image to your SSD or USB stick using [BalenaEtcher](https://etcher.balena.io/) or `dd`.
     ```bash
+    # Example for x86_64
     xzcat piccolo-os.x86_64-SelfInstall.raw.xz | sudo dd of=/dev/sdX bs=4M status=progress
     ```
-3.  **Boot:**
+2.  **Boot:**
     *   Insert the drive into your target machine.
     *   Power on. **UEFI Secure Boot is fully supported** and recommended.
     *   Connect Ethernet.
-4.  **Setup:** Access `http://piccolo.local` from another device on the same LAN.
+3.  **Setup:** Access `http://piccolo.local` from another device on the same LAN.
 
-### Option 3: Raspberry Pi & Rock64
-*ARM64 support is currently experimental and images are being finalized.*
+### Option 3: Optimized Raspberry Pi & Rock64
+*Board-specific optimized images (bootloader/firmware pre-configured).*
 *   **Status:** Coming Soon.
 
 ---
