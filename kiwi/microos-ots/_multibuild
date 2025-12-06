@@ -1,0 +1,6 @@
+<multibuild>
+    <flavor>VirtualBox</flavor>
+    <flavor>SelfInstall</flavor>
+    <!-- <flavor>RaspberryPi</flavor> -->
+    <!-- <flavor>Rock64</flavor> -->
+</multibuild>

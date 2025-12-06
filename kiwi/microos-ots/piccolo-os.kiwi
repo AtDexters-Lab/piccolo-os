@@ -198,6 +198,10 @@
         kernel-firmware-all -->
     </packages>
 
+    <packages type="image" profiles="SelfInstall">
+        <package name="dracut-kiwi-oem-dump"/>
+    </packages>
+
     <packages type="image" profiles="VirtualBox">
         <package name="virtualbox-guest-tools" />
     </packages>
