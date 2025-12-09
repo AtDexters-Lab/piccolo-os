@@ -1,6 +1,6 @@
 Name:           piccolo-os-support
 Version:        0.2.0
-Release:        4
+Release:        5
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
 URL:            https://github.com/AtDexters-Lab/piccolo-os
