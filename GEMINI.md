@@ -76,3 +76,11 @@ Since there is no automated CI yet, every change requires manual validation:
       nmap -p- piccolo.local
       ```
       *Expected:* Only ports 80 (HTTP) and potentially 5353 (mDNS) should be open. SSH (22) should be closed/filtered.
+
+## 7. Critical Maintenance
+
+- **GPG Key Expiry:**
+    - The repository signing key (`packages/piccolo-os-support/piccolo-os.key`) expires on **2028-01-23**.
+    - **Action:** If the current date is within 3 months of this date, YOU MUST initiate the "Rotate & Overlap" SOP defined in `piccolo-os-support.spec`.
+    - **Check:** Periodically verify with `gpg --show-keys packages/piccolo-os-support/piccolo-os.key`.
+

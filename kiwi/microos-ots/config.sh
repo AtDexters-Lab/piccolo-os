@@ -252,3 +252,11 @@ if rpm -q sdbootutil; then
 
 	[ -e /var/lib/YaST2/reconfig_system ] && systemctl enable sdbootutil-enroll.service
 fi
+
+# Import all GPG keys (Piccolo) from /etc/pki/rpm-gpg
+if [ -d /etc/pki/rpm-gpg ]; then
+	echo "Importing GPG keys..."
+	for key in /etc/pki/rpm-gpg/*; do
+		[ -f "$key" ] && rpm --import "$key"
+	done
+fi
