@@ -1,6 +1,6 @@
 Name:           piccolo-os-support
 Version:        0.2.0
-Release:        5
+Release:        6
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
 URL:            https://github.com/AtDexters-Lab/piccolo-os
@@ -84,6 +84,11 @@ repo_gpgcheck=1
 gpgkey=file://%{_sysconfdir}/pki/rpm-gpg/RPM-GPG-KEY-piccolo-os
 EOF
 
+# 4. Configure Transactional Update
+# Disable automatic reboots by transactional-update.
+# We want to control reboots via piccolod/user interaction, especially for TPM unlocks.
+echo "REBOOT_METHOD=none" > %{buildroot}%{_sysconfdir}/transactional-update.conf
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -117,8 +122,12 @@ fi
 %dir %{_sysconfdir}/zypp
 %dir %{_sysconfdir}/zypp/repos.d
 %config(noreplace) %{_sysconfdir}/zypp/repos.d/piccolo-os.repo
+%config(noreplace) %{_sysconfdir}/transactional-update.conf
 
 %changelog
+* Thu Dec 11 2025 Piccolo Team <dev@piccolo.local> 0.2.0-6
+- Added /etc/transactional-update.conf with REBOOT_METHOD=none to disable automatic reboots.
+
 * Tue Dec 09 2025 Piccolo Team <dev@piccolo.local> 0.2.0-2
 - Switched to file-based GPG trust (canonical method).
 - Key is now installed to /etc/pki/rpm-gpg/RPM-GPG-KEY-piccolo-os.

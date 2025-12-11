@@ -238,6 +238,7 @@
         <package name="openssh" />
         <package name="openssh-server" />
         <package name="openssh-clients" />
+        <package name="rebootmgr" />
     </packages>
 
     <packages type="bootstrap">
