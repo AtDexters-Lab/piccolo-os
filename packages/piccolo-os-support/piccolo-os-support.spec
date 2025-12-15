@@ -8,6 +8,8 @@ ExclusiveArch:  x86_64 aarch64
 Source0:        piccolo.xml
 Source1:        piccolo-os-support-rpmlintrc
 Source2:        piccolo-os.key
+Source3:        piccolo-health-check.sh
+Source4:        health-checker-piccolo.conf
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -37,6 +39,8 @@ BuildRequires:  libxml2-tools
 Requires:       piccolod
 Requires:       firewalld
 Requires:       zypper
+Requires:       health-checker
+Requires:       curl
 Requires(post): systemd
 
 %description
@@ -89,6 +93,15 @@ EOF
 # We want to control reboots via piccolod/user interaction, especially for TPM unlocks.
 echo "REBOOT_METHOD=none" > %{buildroot}%{_sysconfdir}/transactional-update.conf
 
+# 5. Install Health Check Plugin
+# Used by health-checker.service to validate boot success.
+install -d -m 755 %{buildroot}%{_libexecdir}/health-checker
+install -m 755 %{SOURCE3} %{buildroot}%{_libexecdir}/health-checker/piccolod.sh
+
+# 6. Install Health Checker Ordering Drop-in
+install -d -m 755 %{buildroot}%{_sysconfdir}/systemd/system/health-checker.service.d
+install -m 644 %{SOURCE4} %{buildroot}%{_sysconfdir}/systemd/system/health-checker.service.d/piccolo.conf
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -123,8 +136,19 @@ fi
 %dir %{_sysconfdir}/zypp/repos.d
 %config(noreplace) %{_sysconfdir}/zypp/repos.d/piccolo-os.repo
 %config(noreplace) %{_sysconfdir}/transactional-update.conf
+%dir %{_libexecdir}/health-checker
+%{_libexecdir}/health-checker/piccolod.sh
+%dir %{_sysconfdir}/systemd/system/health-checker.service.d
+%config(noreplace) %{_sysconfdir}/systemd/system/health-checker.service.d/piccolo.conf
 
 %changelog
+* Mon Dec 15 2025 Piccolo Team <dev@piccolo.local> 0.2.0-7
+- Added health-checker plugin to verify piccolod availability (/api/v1/health/live).
+- Added Requires: health-checker and curl.
+- Implemented automatic rollback support via health-checker service.
+- Added systemd drop-in to order health-checker.service After=piccolod.service.
+- Added retry logic to health check script (30s timeout) to handle slow startups.
+
 * Thu Dec 11 2025 Piccolo Team <dev@piccolo.local> 0.2.0-6
 - Added /etc/transactional-update.conf with REBOOT_METHOD=none to disable automatic reboots.
 
