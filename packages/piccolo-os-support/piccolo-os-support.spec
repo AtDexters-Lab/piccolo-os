@@ -99,8 +99,8 @@ install -d -m 755 %{buildroot}%{_libexecdir}/health-checker
 install -m 755 %{SOURCE3} %{buildroot}%{_libexecdir}/health-checker/piccolod.sh
 
 # 6. Install Health Checker Ordering Drop-in
-install -d -m 755 %{buildroot}%{_sysconfdir}/systemd/system/health-checker.service.d
-install -m 644 %{SOURCE4} %{buildroot}%{_sysconfdir}/systemd/system/health-checker.service.d/piccolo.conf
+install -d -m 755 %{buildroot}%{_prefix}/lib/systemd/system/health-checker.service.d
+install -m 644 %{SOURCE4} %{buildroot}%{_prefix}/lib/systemd/system/health-checker.service.d/piccolo.conf
 
 %check
 # Validate the firewall zone XML
@@ -138,8 +138,8 @@ fi
 %config(noreplace) %{_sysconfdir}/transactional-update.conf
 %dir %{_libexecdir}/health-checker
 %{_libexecdir}/health-checker/piccolod.sh
-%dir %{_sysconfdir}/systemd/system/health-checker.service.d
-%config(noreplace) %{_sysconfdir}/systemd/system/health-checker.service.d/piccolo.conf
+%dir %{_prefix}/lib/systemd/system/health-checker.service.d
+%{_prefix}/lib/systemd/system/health-checker.service.d/piccolo.conf
 
 %changelog
 * Mon Dec 15 2025 Piccolo Team <dev@piccolo.local> 0.2.0-7
