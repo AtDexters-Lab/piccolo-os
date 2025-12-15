@@ -78,7 +78,7 @@ Piccolo OS is built for x86_64 and ARM64. The easiest way to try it is in a Virt
 ### Option 1: VirtualBox (Try it now)
 Perfect for testing the portal and "time-to-first-service" experience on your laptop.
 
-1.  **Download:** [piccolo-os.x86_64-VirtualBox.vdi.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Tumbleweed/piccolo-os.x86_64-VirtualBox.vdi.xz)
+1.  **Download:** [piccolo-os.x86_64-VirtualBox.vdi.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.x86_64-VirtualBox.vdi.xz)
 2.  **Extract:** Unzip the file to get the `.vdi` disk image.
     ```bash
     unxz piccolo-os.x86_64-VirtualBox.vdi.xz
@@ -98,8 +98,8 @@ Runs directly on generic x86_64 (Intel/AMD) and ARM64 hardware (UEFI).
 > **Note:** This is currently a "Flash-and-Run" image. You flash it directly to your target boot drive (SSD/USB), plug that drive into your machine, and boot. An interactive installer is coming soon.
 
 **Downloads:**
-*   **x86_64 (Intel/AMD):** [piccolo-os.x86_64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Tumbleweed/piccolo-os.x86_64-SelfInstall.raw.xz)
-*   **ARM64 (Generic):** [piccolo-os.aarch64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Factory_ARM/piccolo-os.aarch64-SelfInstall.raw.xz)
+*   **x86_64 (Intel/AMD):** [piccolo-os.x86_64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.x86_64-SelfInstall.raw.xz)
+*   **ARM64 (Generic):** [piccolo-os.aarch64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.aarch64-SelfInstall.raw.xz)
 
 1.  **Flash:** Write the image to your SSD or USB stick using [BalenaEtcher](https://etcher.balena.io/) or `dd`.
     ```bash
@@ -115,8 +115,8 @@ Runs directly on generic x86_64 (Intel/AMD) and ARM64 hardware (UEFI).
 ### Option 3: ARM64 (Raspberry Pi & Rock64)
 *Board-specific optimized images (bootloader/firmware pre-configured).*
 
-*   **Raspberry Pi (3+/4/5):** [piccolo-os.aarch64-RaspberryPi.raw.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Factory_ARM/piccolo-os.aarch64-RaspberryPi.raw.xz)
-*   **Rock64:** [piccolo-os.aarch64-Rock64.raw.xz](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/home_abhishekborar93_piccolo-os_openSUSE_Factory_ARM/piccolo-os.aarch64-Rock64.raw.xz)
+*   **Raspberry Pi (3+/4/5):** [piccolo-os.aarch64-RaspberryPi.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.aarch64-RaspberryPi.raw.xz)
+*   **Rock64:** [piccolo-os.aarch64-Rock64.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.aarch64-Rock64.raw.xz)
 
 Follow the standard **Flash** and **Boot** instructions from Option 2. Ensure your board is connected to Ethernet.
 
@@ -151,9 +151,9 @@ We’re early, scrappy, and community‑powered. PRs, issues, and design discuss
 
 ### Build Infrastructure
 Piccolo OS is built transparently on the Open Build Service (OBS).
-- **RPMs (piccolod, support):** [home:abhishekborar93:piccolo-os](https://build.opensuse.org/project/show/home:abhishekborar93:piccolo-os)
-- **OS Images (ISO/VDI):** [home:abhishekborar93:piccolo-os:images](https://build.opensuse.org/project/show/home:abhishekborar93:piccolo-os:images)
-- **Artifacts/Downloads:** [Repository Browser](https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os:/images/)
+- **RPMs (piccolod, support):** [home:atdexterslab](https://build.opensuse.org/project/show/home:atdexterslab)
+- **OS Images (ISO/VDI):** [home:atdexterslab:piccolo-os:images](https://build.opensuse.org/project/show/home:atdexterslab:piccolo-os:images)
+- **Artifacts/Downloads:** [Repository Browser](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/)
 
 ### Local Development
 ```bash
