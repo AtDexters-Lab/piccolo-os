@@ -1,12 +1,11 @@
 Name:           piccolo-os-support
 Version:        0.2.0
-Release:        7
+Release:        8
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
 URL:            https://github.com/AtDexters-Lab/piccolo-os
-ExclusiveArch:  x86_64 aarch64
+BuildArch:      noarch
 Source0:        piccolo.xml
-Source1:        piccolo-os-support-rpmlintrc
 Source2:        piccolo-os.key
 Source3:        piccolo-health-check.sh
 Source4:        health-checker-piccolo.conf
@@ -65,13 +64,8 @@ install -D -m 644 %{SOURCE2} %{buildroot}%{_sysconfdir}/pki/rpm-gpg/RPM-GPG-KEY-
 # 3. Create Repo File
 install -d -m 755 %{buildroot}%{_sysconfdir}/zypp/repos.d
 
-# Define URLs based on architecture
-%ifarch x86_64
-REPO_URL="https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os/openSUSE_Tumbleweed/"
-%endif
-%ifarch aarch64
-REPO_URL="https://download.opensuse.org/repositories/home:/abhishekborar93:/piccolo-os/openSUSE_Factory_ARM/"
-%endif
+# Define Unified Repo URL (works for both x86_64 and aarch64)
+REPO_URL="https://download.opensuse.org/repositories/home:/atdexterslab/atdexterslab_tumbleweed/"
 
 # Generate the repo file
 # CRITICAL: gpgkey points to the LOCAL file we just installed.
@@ -142,6 +136,13 @@ fi
 %{_prefix}/lib/systemd/system/health-checker.service.d/piccolo.conf
 
 %changelog
+* Mon Dec 15 2025 Piccolo Team <dev@piccolo.local> 0.2.0-8
+- Consolidate repositories into a single unified repo (home:atdexterslab:atdexterslab_tumbleweed).
+- Removed architecture-specific repo URL logic.
+- Removed ExclusiveArch restriction.
+- Switched to BuildArch: noarch.
+- Removed unused rpmlintrc filter (no-binary).
+
 * Mon Dec 15 2025 Piccolo Team <dev@piccolo.local> 0.2.0-7
 - Added health-checker plugin to verify piccolod availability (/api/v1/health/live).
 - Added Requires: health-checker and curl.
