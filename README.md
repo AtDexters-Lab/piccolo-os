@@ -15,7 +15,6 @@ A privacy-first, headless operating system for homelabs — built for tinkerers,
 - Local-first: fully usable on LAN with no cloud dependency.
 - Open by design: Piccolo OS and remote access (Nexus) are open source.
 - Secure by default: device‑terminated TLS, encrypted data, hardened base OS.
-- Frictionless UX: responsive, mobile‑first portal at `http://piccolo.local`.
 
 ## Who It’s For
 - Tinkerers and builders: comfortable with containers; want a stable, boring base.
@@ -53,7 +52,6 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 ## What You Can Do Today
 - Headless operation: access the admin portal at `http://piccolo.local` (Ethernet‑only).
 - One‑click app deployment: Vaultwarden, Gitea, WordPress (v1 catalog).
-- Storage management: add/adopt disks; mount persistently; health surfaced.
 - Encrypted volumes: per‑directory encryption with gated unlock and recovery key support.
 - Updates: transactional OS updates with rollback; app updates and revert.
 - Optional remote access: self‑host Nexus and publish over HTTPS via ACME HTTP‑01 (device‑terminated TLS). Piccolo Network (managed) is optional.
@@ -136,12 +134,6 @@ Follow the standard **Flash** and **Boot** instructions from Option 2. Ensure yo
 - Vaultwarden — lightweight password manager (< 5 minutes to first page).
 - Gitea — lightweight Git service (SQLite default; < 5 minutes).
 - WordPress — personal website/blog (with MariaDB; < 10 minutes).
-
-## Roadmap (Selected)
-- Core OS pre‑beta for self‑hosters (curated apps, storage, remote publish).
-- Acceptance suite aligned to product features (Gherkin + OpenAPI).
-- System apps (federated storage) alpha.
-- Piccolo Network (optional managed remote access and services).
 
 ## Piccolod
 - [piccolod](https://github.com/AtDexters-Lab/piccolod) is the control-plane daemon for Piccolo OS. It exposes the HTTP API, manages runtime supervisors, and serves the minimal UI.
