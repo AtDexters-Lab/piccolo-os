@@ -144,7 +144,7 @@ We’re early, scrappy, and community‑powered. PRs, issues, and design discuss
 ### Build Infrastructure
 Piccolo OS is built transparently on the Open Build Service (OBS).
 - **RPMs (piccolod, support):** [home:atdexterslab](https://build.opensuse.org/project/show/home:atdexterslab)
-- **OS Images (ISO/VDI):** [home:atdexterslab:piccolo-os:images](https://build.opensuse.org/project/show/home:atdexterslab:piccolo-os:images)
+- **OS Images (ISO/VDI):** [home:atdexterslab:piccolo-os/images](https://build.opensuse.org/package/show/home:atdexterslab:piccolo-os/images)
 - **Artifacts/Downloads:** [Repository Browser](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/)
 
 ### Local Development
