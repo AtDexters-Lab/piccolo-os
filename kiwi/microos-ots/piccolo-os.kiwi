@@ -29,8 +29,15 @@
             btrfs_root_is_snapshot="true"
             btrfs_root_is_readonly_snapshot="true"
             btrfs_quota_groups="true"
+            spare_part="5G"
+            spare_part_mountpoint="/piccolo-data"
+            spare_part_fs="btrfs"
+            spare_part_is_last="true"
         >
             <bootloader name="grub2" console="gfxterm" timeout="1" />
+            <oemconfig>
+                <oem-resize>false</oem-resize>
+            </oemconfig>
             <systemdisk>
                 <volume name="home" />
                 <volume name="root" />
@@ -40,9 +47,10 @@
                 <volume name="boot/grub2/x86_64-efi" mountpoint="boot/grub2/x86_64-efi" />
                 <volume name="boot/writable" />
                 <volume name="usr/local" />
+                <volume name="piccolo-core" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
-            <size unit="G">20</size>
+            <size unit="G">25</size>
         </type>
     </preferences>
     <preferences profiles="RaspberryPi">
@@ -63,8 +71,15 @@
             editbootinstall="editbootinstall_rpi.sh"
             btrfs_root_is_readonly_snapshot="true"
             btrfs_quota_groups="false"
+            spare_part="5G"
+            spare_part_mountpoint="/piccolo-data"
+            spare_part_fs="btrfs"
+            spare_part_is_last="true"
         >
             <bootloader name="grub2" console="gfxterm" timeout="1" />
+            <oemconfig>
+                <oem-resize>false</oem-resize>
+            </oemconfig>
             <systemdisk>
                 <volume name="home" />
                 <volume name="root" />
@@ -73,8 +88,10 @@
                 <volume name="boot/grub2/arm64-efi" mountpoint="boot/grub2/arm64-efi" />
                 <volume name="boot/writable" />
                 <volume name="usr/local" />
+                <volume name="piccolo-core" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
+            <size unit="G">25</size>
         </type>
     </preferences>
     <preferences profiles="Rock64">
@@ -96,8 +113,15 @@
             btrfs_root_is_readonly_snapshot="true"
             btrfs_quota_groups="false"
             disk_start_sector="32768"
+            spare_part="5G"
+            spare_part_mountpoint="/piccolo-data"
+            spare_part_fs="btrfs"
+            spare_part_is_last="true"
         >
             <bootloader name="grub2" timeout="1" />
+            <oemconfig>
+                <oem-resize>false</oem-resize>
+            </oemconfig>
             <systemdisk>
                 <volume name="home" />
                 <volume name="root" />
@@ -106,8 +130,10 @@
                 <volume name="boot/grub2/arm64-efi" mountpoint="boot/grub2/arm64-efi" />
                 <volume name="boot/writable" />
                 <volume name="usr/local" />
+                <volume name="piccolo-core" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
+            <size unit="G">25</size>
         </type>
     </preferences>
     <preferences profiles="SelfInstall">
@@ -128,6 +154,10 @@
             btrfs_root_is_snapshot="true"
             btrfs_root_is_readonly_snapshot="true"
             btrfs_quota_groups="true"
+            spare_part="5G"
+            spare_part_mountpoint="/piccolo-data"
+            spare_part_fs="btrfs"
+            spare_part_is_last="true"
         >
             <bootloader name="grub2" console="gfxterm" timeout="1" />
             <systemdisk>
@@ -138,18 +168,22 @@
                 <volume name="srv" />
                 <volume name="boot/grub2/i386-pc" />
                 <volume name="boot/grub2/x86_64-efi" mountpoint="boot/grub2/x86_64-efi" />
+                <volume name="boot/grub2/arm64-efi" mountpoint="boot/grub2/arm64-efi" />
                 <volume name="boot/writable" />
                 <volume name="usr/local" />
+                <volume name="piccolo-core" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
             <oemconfig>
                 <oem-device-filter>/dev/ram</oem-device-filter>
                 <oem-multipath-scan>false</oem-multipath-scan>
+                <oem-resize>false</oem-resize>
             </oemconfig>
             <machine memory="512" guestOS="suse" HWversion="4">
                 <vmdisk id="0" controller="ide" />
                 <vmnic driver="e1000" interface="0" mode="bridged" />
             </machine>
+            <size unit="G">25</size>
         </type>
     </preferences>
 
