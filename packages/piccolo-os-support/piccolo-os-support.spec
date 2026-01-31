@@ -32,6 +32,8 @@ Source4:        health-checker-piccolo.conf
 #      and is referenced in the repo config. No 'rpm --import' needed.
 # ==============================================================================
 
+BuildRequires:  systemd
+BuildRequires:  firewalld
 BuildRequires:  libxml2-tools
 Requires:       piccolod
 Requires:       firewalld
