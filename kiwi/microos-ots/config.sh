@@ -253,6 +253,12 @@ if rpm -q sdbootutil; then
 	[ -e /var/lib/YaST2/reconfig_system ] && systemctl enable sdbootutil-enroll.service
 fi
 
+#======================================
+# Create spare_part mountpoint for KIWI
+#--------------------------------------
+# KIWI requires the spare_part_mountpoint directory to exist before syncing
+mkdir -p /piccolo-data
+
 # Import all GPG keys (Piccolo) from /etc/pki/rpm-gpg
 if [ -d /etc/pki/rpm-gpg ]; then
 	echo "Importing GPG keys..."
