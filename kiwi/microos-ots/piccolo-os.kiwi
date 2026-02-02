@@ -42,6 +42,9 @@
                 <volume name="usr/local" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
+            <oemconfig>
+                <oem-resize>false</oem-resize>
+            </oemconfig>
             <size unit="G">20</size>
         </type>
     </preferences>
@@ -75,6 +78,9 @@
                 <volume name="usr/local" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
+            <oemconfig>
+                <oem-resize>false</oem-resize>
+            </oemconfig>
         </type>
     </preferences>
     <preferences profiles="Rock64">
@@ -108,6 +114,9 @@
                 <volume name="usr/local" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
+            <oemconfig>
+                <oem-resize>false</oem-resize>
+            </oemconfig>
         </type>
     </preferences>
     <preferences profiles="SelfInstall">
@@ -138,6 +147,7 @@
                 <volume name="srv" />
                 <volume name="boot/grub2/i386-pc" />
                 <volume name="boot/grub2/x86_64-efi" mountpoint="boot/grub2/x86_64-efi" />
+                <volume name="boot/grub2/arm64-efi" mountpoint="boot/grub2/arm64-efi" />
                 <volume name="boot/writable" />
                 <volume name="usr/local" />
                 <volume name="var" copy_on_write="false" />
@@ -145,6 +155,7 @@
             <oemconfig>
                 <oem-device-filter>/dev/ram</oem-device-filter>
                 <oem-multipath-scan>false</oem-multipath-scan>
+                <oem-resize>false</oem-resize>
             </oemconfig>
             <machine memory="512" guestOS="suse" HWversion="4">
                 <vmdisk id="0" controller="ide" />
