@@ -46,7 +46,6 @@
             <oemconfig>
                 <oem-resize>false</oem-resize>
             </oemconfig>
-            <size unit="G">20</size>
         </type>
     </preferences>
     <preferences profiles="RaspberryPi">
