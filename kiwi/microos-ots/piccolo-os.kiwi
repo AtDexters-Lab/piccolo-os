@@ -40,6 +40,7 @@
                 <volume name="boot/grub2/x86_64-efi" mountpoint="boot/grub2/x86_64-efi" />
                 <volume name="boot/writable" />
                 <volume name="usr/local" />
+                <volume name="piccolo-core" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
             <oemconfig>
@@ -76,6 +77,7 @@
                 <volume name="boot/grub2/arm64-efi" mountpoint="boot/grub2/arm64-efi" />
                 <volume name="boot/writable" />
                 <volume name="usr/local" />
+                <volume name="piccolo-core" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
             <oemconfig>
@@ -112,6 +114,7 @@
                 <volume name="boot/grub2/arm64-efi" mountpoint="boot/grub2/arm64-efi" />
                 <volume name="boot/writable" />
                 <volume name="usr/local" />
+                <volume name="piccolo-core" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
             <oemconfig>
@@ -150,6 +153,7 @@
                 <volume name="boot/grub2/arm64-efi" mountpoint="boot/grub2/arm64-efi" />
                 <volume name="boot/writable" />
                 <volume name="usr/local" />
+                <volume name="piccolo-core" />
                 <volume name="var" copy_on_write="false" />
             </systemdisk>
             <oemconfig>
