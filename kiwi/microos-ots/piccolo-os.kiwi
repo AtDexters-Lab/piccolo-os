@@ -46,7 +46,11 @@
             <oemconfig>
                 <oem-resize>false</oem-resize>
             </oemconfig>
-            <size unit="G">25</size>
+            <!-- No <size> element: the VDI is kept minimal (~2-3GB) so that
+                 piccolod can partition the remaining space at first boot
+                 (data partition + root expansion). The consumer (dev-vm.sh,
+                 Install to Disk, or target hardware) resizes the disk to the
+                 actual capacity before booting. -->
         </type>
     </preferences>
     <preferences profiles="RaspberryPi">
