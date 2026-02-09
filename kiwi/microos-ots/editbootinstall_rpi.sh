@@ -20,11 +20,10 @@ rmdir ./mnt-pi
 # Change partition label type to MBR
 #------------------------------------------
 #
-# The target system doesn't support GPT, so let's move it to
-# MBR partition layout instead.
-#
-# Also make sure to set the ESP partition to type 0xc so that
-# broken firmware (Rpi) detects it as FAT.
+# The RPi4 bootrom only boots SD cards with MBR partition tables.
+# GPT SD card boot is unreliable (rpi-eeprom#654). Convert GPT→MBR
+# and set the ESP partition to type 0xc (W95 FAT32 LBA) so the
+# firmware detects it as the boot partition.
 #
 # Use tabs, "<<-" strips tabs, but no other whitespace!
 cat > gdisk.tmp <<-'EOF'

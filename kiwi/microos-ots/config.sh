@@ -253,6 +253,12 @@ if rpm -q sdbootutil; then
 	[ -e /var/lib/YaST2/reconfig_system ] && systemctl enable sdbootutil-enroll.service
 fi
 
+#======================================
+# Create /piccolo-data mount point for LUKS data partition
+#--------------------------------------
+mkdir -p /piccolo-data
+chattr +i /piccolo-data
+
 # Import all GPG keys (Piccolo) from /etc/pki/rpm-gpg
 if [ -d /etc/pki/rpm-gpg ]; then
 	echo "Importing GPG keys..."
