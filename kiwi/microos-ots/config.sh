@@ -257,7 +257,6 @@ fi
 # Create /piccolo-data mount point for LUKS data partition
 #--------------------------------------
 mkdir -p /piccolo-data
-chattr +i /piccolo-data
 
 # Import all GPG keys (Piccolo) from /etc/pki/rpm-gpg
 if [ -d /etc/pki/rpm-gpg ]; then
