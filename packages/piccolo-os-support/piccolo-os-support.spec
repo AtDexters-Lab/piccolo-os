@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.2.1
+Version:        0.2.2
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -9,6 +9,9 @@ Source0:        piccolo.xml
 Source2:        piccolo-os.key
 Source3:        piccolo-health-check.sh
 Source4:        health-checker-piccolo.conf
+Source5:        piccolo-logind.conf
+Source6:        piccolo-sleep.conf
+Source7:        piccolo-wifi-powersave.conf
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -41,6 +44,7 @@ Requires:       zypper
 Requires:       health-checker
 Requires:       curl
 Requires(post): systemd
+Requires(preun): systemd
 
 %description
 Piccolo OS support is a lightweight policy package that ensures the Piccolo control
@@ -96,6 +100,15 @@ install -m 755 %{SOURCE3} %{buildroot}%{_libexecdir}/health-checker/piccolod.sh
 install -d -m 755 %{buildroot}%{_prefix}/lib/systemd/system/health-checker.service.d
 install -m 644 %{SOURCE4} %{buildroot}%{_prefix}/lib/systemd/system/health-checker.service.d/piccolo.conf
 
+# 7. Always-on power policy: prevent lid-close suspend, ignore sleep keys
+install -D -m 644 %{SOURCE5} %{buildroot}%{_prefix}/lib/systemd/logind.conf.d/piccolo.conf
+
+# 8. Disable all sleep states at systemd level
+install -D -m 644 %{SOURCE6} %{buildroot}%{_prefix}/lib/systemd/sleep.conf.d/piccolo.conf
+
+# 9. Disable WiFi power saving for reliable LAN connectivity
+install -D -m 644 %{SOURCE7} %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -108,7 +121,12 @@ xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
 # 2. Enable Firewalld Service explicitly
 /usr/bin/systemctl --root=/ --no-reload enable firewalld
 
-# 3. Enforce Firewall Zone
+# 3. Mask sleep/hibernate targets (belt-and-suspenders with sleep.conf drop-in)
+/usr/bin/systemctl --root=/ --no-reload mask \
+    sleep.target suspend.target hibernate.target \
+    hybrid-sleep.target suspend-then-hibernate.target
+
+# 4. Enforce Firewall Zone
 # We use firewall-offline-cmd because this script often runs during image build
 # (chroot) where firewalld daemon is not running.
 if [ -x /usr/bin/firewall-offline-cmd ]; then
@@ -116,6 +134,18 @@ if [ -x /usr/bin/firewall-offline-cmd ]; then
     if [ "$CURRENT_ZONE" != "piccolo" ]; then
         firewall-offline-cmd --set-default-zone=piccolo
     fi
+fi
+
+%preun
+if [ $1 -eq 0 ]; then
+    # Unmask consoles (from %post)
+    /usr/bin/systemctl --root=/ unmask \
+        serial-getty@ttyS0.service serial-getty@ttyS1.service \
+        serial-getty@ttyS2.service getty@tty1.service 2>/dev/null || :
+    # Unmask sleep targets (from %post)
+    /usr/bin/systemctl --root=/ unmask \
+        sleep.target suspend.target hibernate.target \
+        hybrid-sleep.target suspend-then-hibernate.target 2>/dev/null || :
 fi
 
 %files
@@ -134,8 +164,19 @@ fi
 %{_libexecdir}/health-checker/piccolod.sh
 %dir %{_prefix}/lib/systemd/system/health-checker.service.d
 %{_prefix}/lib/systemd/system/health-checker.service.d/piccolo.conf
+%dir %{_prefix}/lib/systemd/logind.conf.d
+%{_prefix}/lib/systemd/logind.conf.d/piccolo.conf
+%dir %{_prefix}/lib/systemd/sleep.conf.d
+%{_prefix}/lib/systemd/sleep.conf.d/piccolo.conf
+%dir %{_prefix}/lib/NetworkManager
+%dir %{_prefix}/lib/NetworkManager/conf.d
+%{_prefix}/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf
 
 %changelog
+* Wed Feb 11 2026 Piccolo Team <dev@piccolo.local> 0.2.2-0
+- Add always-on power policy: ignore lid close, mask sleep/hibernate targets.
+- Disable WiFi power saving for reliable LAN reachability.
+
 * Mon Dec 15 2025 Piccolo Team <dev@piccolo.local> 0.2.0-8
 - Consolidate repositories into a single unified repo (home:atdexterslab:atdexterslab_tumbleweed).
 - Removed architecture-specific repo URL logic.
