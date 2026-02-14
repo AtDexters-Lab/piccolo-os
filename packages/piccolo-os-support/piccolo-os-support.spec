@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.2.2
+Version:        0.2.3
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -12,6 +12,9 @@ Source4:        health-checker-piccolo.conf
 Source5:        piccolo-logind.conf
 Source6:        piccolo-sleep.conf
 Source7:        piccolo-wifi-powersave.conf
+Source8:        piccolo-net-watchdog.sh
+Source9:        piccolo-net-watchdog.service
+Source10:       piccolo-net-watchdog.timer
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -43,6 +46,9 @@ Requires:       firewalld
 Requires:       zypper
 Requires:       health-checker
 Requires:       curl
+Requires:       iputils
+Requires:       iproute2
+Requires:       NetworkManager
 Requires(post): systemd
 Requires(preun): systemd
 
@@ -109,6 +115,12 @@ install -D -m 644 %{SOURCE6} %{buildroot}%{_prefix}/lib/systemd/sleep.conf.d/pic
 # 9. Disable WiFi power saving for reliable LAN connectivity
 install -D -m 644 %{SOURCE7} %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf
 
+# 10. Install network health watchdog
+install -D -m 755 %{SOURCE8} %{buildroot}%{_libexecdir}/piccolo/net-watchdog.sh
+install -D -m 644 %{SOURCE9} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-net-watchdog.service
+install -D -m 644 %{SOURCE10} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-net-watchdog.timer
+install -d -m 755 %{buildroot}/var/lib/piccolo
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -136,6 +148,9 @@ if [ -x /usr/bin/firewall-offline-cmd ]; then
     fi
 fi
 
+# 5. Enable network health watchdog timer
+/usr/bin/systemctl --root=/ --no-reload enable piccolo-net-watchdog.timer
+
 %preun
 if [ $1 -eq 0 ]; then
     # Unmask consoles (from %post)
@@ -146,6 +161,9 @@ if [ $1 -eq 0 ]; then
     /usr/bin/systemctl --root=/ unmask \
         sleep.target suspend.target hibernate.target \
         hybrid-sleep.target suspend-then-hibernate.target 2>/dev/null || :
+    # Disable network watchdog (from %post)
+    /usr/bin/systemctl --root=/ --no-reload disable piccolo-net-watchdog.timer 2>/dev/null || :
+    /usr/bin/systemctl stop piccolo-net-watchdog.timer piccolo-net-watchdog.service 2>/dev/null || :
 fi
 
 %files
@@ -171,8 +189,17 @@ fi
 %dir %{_prefix}/lib/NetworkManager
 %dir %{_prefix}/lib/NetworkManager/conf.d
 %{_prefix}/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf
+%dir %{_libexecdir}/piccolo
+%{_libexecdir}/piccolo/net-watchdog.sh
+%{_prefix}/lib/systemd/system/piccolo-net-watchdog.service
+%{_prefix}/lib/systemd/system/piccolo-net-watchdog.timer
+%dir /var/lib/piccolo
 
 %changelog
+* Sat Feb 14 2026 Piccolo Team <dev@piccolo.local> 0.2.3-0
+- Add network health watchdog: ARP-based gateway detection with interface bounce
+  and reboot escalation for unrecoverable network failures.
+
 * Wed Feb 11 2026 Piccolo Team <dev@piccolo.local> 0.2.2-0
 - Add always-on power policy: ignore lid close, mask sleep/hibernate targets.
 - Disable WiFi power saving for reliable LAN reachability.

@@ -1,0 +1,9 @@
+[Unit]
+Description=Piccolo network health watchdog
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/piccolo/net-watchdog.sh
+TimeoutStartSec=120

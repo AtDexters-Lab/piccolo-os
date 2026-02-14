@@ -1,0 +1,11 @@
+[Unit]
+Description=Piccolo network health watchdog timer
+
+[Timer]
+# 2-minute delay allows DHCP and WiFi association to complete before first check
+OnBootSec=120
+OnUnitInactiveSec=30
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target
