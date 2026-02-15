@@ -1,0 +1,16 @@
+[Unit]
+Description=Piccolo clock epoch restore/persist
+DefaultDependencies=no
+Conflicts=shutdown.target
+Before=sysinit.target chronyd.service systemd-timesyncd.service shutdown.target
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStopSec=10s
+ExecStart=/usr/libexec/piccolo/clock-epoch.sh restore
+ExecStop=/usr/libexec/piccolo/clock-epoch.sh save
+
+[Install]
+WantedBy=sysinit.target

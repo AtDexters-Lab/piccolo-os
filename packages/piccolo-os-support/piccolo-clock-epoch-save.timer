@@ -1,0 +1,12 @@
+[Unit]
+Description=Piccolo clock epoch periodic save timer
+
+[Timer]
+# Persistent=true intentionally NOT used — that's the anti-pattern
+# that caused the original incident (large NTP step firing backlogged timers).
+# Monotonic timers (OnBootSec/OnUnitActiveSec) don't support Persistent anyway.
+OnBootSec=5min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

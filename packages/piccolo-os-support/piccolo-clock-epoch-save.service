@@ -1,0 +1,6 @@
+[Unit]
+Description=Piccolo clock epoch save
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/piccolo/clock-epoch.sh save

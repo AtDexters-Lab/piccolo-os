@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.2.3
+Version:        0.2.4
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -15,6 +15,10 @@ Source7:        piccolo-wifi-powersave.conf
 Source8:        piccolo-net-watchdog.sh
 Source9:        piccolo-net-watchdog.service
 Source10:       piccolo-net-watchdog.timer
+Source11:       piccolo-clock-epoch.sh
+Source12:       piccolo-clock-epoch.service
+Source13:       piccolo-clock-epoch-save.service
+Source14:       piccolo-clock-epoch-save.timer
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -121,6 +125,12 @@ install -D -m 644 %{SOURCE9} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-n
 install -D -m 644 %{SOURCE10} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-net-watchdog.timer
 install -d -m 755 %{buildroot}/var/lib/piccolo
 
+# 11. Install clock epoch service for RTC-less devices
+install -D -m 755 %{SOURCE11} %{buildroot}%{_libexecdir}/piccolo/clock-epoch.sh
+install -D -m 644 %{SOURCE12} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch.service
+install -D -m 644 %{SOURCE13} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.service
+install -D -m 644 %{SOURCE14} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.timer
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -151,6 +161,16 @@ fi
 # 5. Enable network health watchdog timer
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-net-watchdog.timer
 
+# 6. Enable clock epoch service and periodic save timer
+/usr/bin/systemctl --root=/ --no-reload enable piccolo-clock-epoch.service
+/usr/bin/systemctl --root=/ --no-reload enable piccolo-clock-epoch-save.timer
+# Seed epoch file so the first reboot after upgrade is protected.
+# On fresh installs this overwrites the config.sh seed with a current timestamp.
+# On upgrades, this creates the file for the first time (transactional-update
+# chroot has /var bind-mounted and uses the running kernel's NTP-correct clock).
+mkdir -p /var/lib/piccolo
+date +%s > /var/lib/piccolo/clock-epoch 2>/dev/null || :
+
 %preun
 if [ $1 -eq 0 ]; then
     # Unmask consoles (from %post)
@@ -164,6 +184,10 @@ if [ $1 -eq 0 ]; then
     # Disable network watchdog (from %post)
     /usr/bin/systemctl --root=/ --no-reload disable piccolo-net-watchdog.timer 2>/dev/null || :
     /usr/bin/systemctl stop piccolo-net-watchdog.timer piccolo-net-watchdog.service 2>/dev/null || :
+    # Disable clock epoch service and timer (from %post)
+    /usr/bin/systemctl --root=/ --no-reload disable piccolo-clock-epoch.service 2>/dev/null || :
+    /usr/bin/systemctl --root=/ --no-reload disable piccolo-clock-epoch-save.timer 2>/dev/null || :
+    /usr/bin/systemctl stop piccolo-clock-epoch.service piccolo-clock-epoch-save.timer piccolo-clock-epoch-save.service 2>/dev/null || :
 fi
 
 %files
@@ -193,9 +217,17 @@ fi
 %{_libexecdir}/piccolo/net-watchdog.sh
 %{_prefix}/lib/systemd/system/piccolo-net-watchdog.service
 %{_prefix}/lib/systemd/system/piccolo-net-watchdog.timer
+%{_libexecdir}/piccolo/clock-epoch.sh
+%{_prefix}/lib/systemd/system/piccolo-clock-epoch.service
+%{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.service
+%{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.timer
 %dir /var/lib/piccolo
 
 %changelog
+* Sun Feb 15 2026 Piccolo Team <dev@piccolo.local> 0.2.4-0
+- Add clock epoch service: persist/restore system clock for RTC-less devices
+  to prevent large NTP time steps that trigger Persistent=true timers.
+
 * Sat Feb 14 2026 Piccolo Team <dev@piccolo.local> 0.2.3-0
 - Add network health watchdog: ARP-based gateway detection with interface bounce
   and reboot escalation for unrecoverable network failures.

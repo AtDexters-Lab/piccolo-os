@@ -258,6 +258,13 @@ fi
 #--------------------------------------
 mkdir -p /piccolo-data
 
+#======================================
+# Seed clock epoch for RTC-less devices
+#--------------------------------------
+# First boot will restore this as the minimum system time before NTP starts.
+mkdir -p /var/lib/piccolo
+date +%s > /var/lib/piccolo/clock-epoch
+
 # Import all GPG keys (Piccolo) from /etc/pki/rpm-gpg
 if [ -d /etc/pki/rpm-gpg ]; then
 	echo "Importing GPG keys..."
