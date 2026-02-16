@@ -1,0 +1,24 @@
+## Piccolo OS — forbidden packages
+## Managed by piccolo-os-support. Do not edit manually.
+## Additional locks added via 'zypper al' will be lost on package upgrade.
+## To inspect active locks: zypper ll
+
+type: package
+match_type: exact
+case_sensitive: on
+solvable_name: openssh
+
+type: package
+match_type: exact
+case_sensitive: on
+solvable_name: openssh-server
+
+type: package
+match_type: exact
+case_sensitive: on
+solvable_name: openssh-clients
+
+type: package
+match_type: exact
+case_sensitive: on
+solvable_name: rebootmgr

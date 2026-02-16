@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.2.4
+Version:        0.2.5
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -19,6 +19,7 @@ Source11:       piccolo-clock-epoch.sh
 Source12:       piccolo-clock-epoch.service
 Source13:       piccolo-clock-epoch-save.service
 Source14:       piccolo-clock-epoch-save.timer
+Source15:       piccolo-zypp-locks
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -131,9 +132,18 @@ install -D -m 644 %{SOURCE12} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-
 install -D -m 644 %{SOURCE13} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.service
 install -D -m 644 %{SOURCE14} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.timer
 
+# 12. Install zypp package locks to prevent transactional-update from reinstalling removed packages
+install -D -m 644 %{SOURCE15} %{buildroot}%{_sysconfdir}/zypp/locks
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
+
+# Validate zypp locks file has exactly 4 locked packages with expected names
+grep -c 'solvable_name:' %{buildroot}%{_sysconfdir}/zypp/locks | grep -q '^4$'
+for pkg in openssh openssh-server openssh-clients rebootmgr; do
+    grep -q "solvable_name: $pkg$" %{buildroot}%{_sysconfdir}/zypp/locks || exit 1
+done
 
 %post
 # 1. Mask physical/serial consoles to prevent login
@@ -221,9 +231,16 @@ fi
 %{_prefix}/lib/systemd/system/piccolo-clock-epoch.service
 %{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.service
 %{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.timer
+# %config (not noreplace): intentionally overwrite on upgrade to enforce security invariant.
+# Operator-added locks via 'zypper al' will be saved as /etc/zypp/locks.rpmsave.
+%config %{_sysconfdir}/zypp/locks
 %dir /var/lib/piccolo
 
 %changelog
+* Mon Feb 16 2026 Piccolo Team <dev@piccolo.local> 0.2.5-0
+- Add zypp package locks to prevent transactional-update from reinstalling
+  removed packages (openssh, openssh-server, openssh-clients, rebootmgr).
+
 * Sun Feb 15 2026 Piccolo Team <dev@piccolo.local> 0.2.4-0
 - Add clock epoch service: persist/restore system clock for RTC-less devices
   to prevent large NTP time steps that trigger Persistent=true timers.
