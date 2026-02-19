@@ -79,7 +79,7 @@ write_last_action() {
 # ---------------------------------------------------------------------------
 # Precondition checks
 # ---------------------------------------------------------------------------
-for cmd in arping nmcli ping ip flock; do
+for cmd in arping nmcli ping ip flock timeout; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         log "ERROR: ${cmd} not found — cannot perform network health checks"
         exit 1
@@ -118,13 +118,13 @@ fi
 default_route=$(ip -4 route show default 2>/dev/null | head -1)
 if [ -z "$default_route" ]; then
     # No default route — check for recoverable WiFi radio soft-block
-    wifi_radio=$(nmcli radio wifi 2>/dev/null)
+    wifi_radio=$(timeout 5 nmcli radio wifi 2>/dev/null)
     if [ "$wifi_radio" = "disabled" ]; then
         prune_timestamps "$RECOVERIES_FILE" "$BOUNCE_WINDOW"
         bounce_count=$(count_entries "$RECOVERIES_FILE")
         if [ "$bounce_count" -lt "$MAX_BOUNCES" ]; then
             log "no default route and WiFi radio disabled — re-enabling"
-            nmcli radio wifi on
+            timeout 10 nmcli radio wifi on
             date +%s >> "$RECOVERIES_FILE"
         else
             log "CRIT: WiFi radio disabled but bounce limit reached, giving up"
@@ -218,23 +218,26 @@ else
     fi
 
     # Detect interface type
-    IFACE_TYPE=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | grep "^${IFACE}:" | cut -d: -f2)
+    IFACE_TYPE=$(timeout 5 nmcli -t -f DEVICE,TYPE device status 2>/dev/null | grep "^${IFACE}:" | cut -d: -f2)
 
     log "ARP to ${GATEWAY} via ${IFACE} failed (${FAILURE_THRESHOLD}/${FAILURE_THRESHOLD}), bouncing interface (type=${IFACE_TYPE:-unknown})"
 
+    # Record intent BEFORE bounce so escalation works even if we're killed mid-bounce
+    write_last_action "bounce"
+
     if [ "$IFACE_TYPE" = "wifi" ]; then
-        trap 'nmcli radio wifi on 2>/dev/null' EXIT
-        nmcli radio wifi off
+        trap 'timeout 10 nmcli radio wifi on 2>/dev/null' EXIT
+        timeout 10 nmcli radio wifi off
         sleep 2
-        nmcli radio wifi on
+        timeout 10 nmcli radio wifi on
         trap - EXIT
     else
         # Intentional: expand IFACE at trap registration time, not when signalled
         # shellcheck disable=SC2064
-        trap "nmcli device connect '${IFACE}' 2>/dev/null" EXIT
-        nmcli device disconnect "$IFACE" 2>/dev/null
+        trap "timeout 10 nmcli device connect '${IFACE}' 2>/dev/null" EXIT
+        timeout 10 nmcli device disconnect "$IFACE" 2>/dev/null
         sleep 2
-        nmcli device connect "$IFACE" 2>/dev/null
+        timeout 10 nmcli device connect "$IFACE" 2>/dev/null
         trap - EXIT
     fi
 
@@ -246,8 +249,7 @@ else
         log "post-bounce: gateway ${GATEWAY} reachable — recovery successful"
         write_last_action ""
     else
-        log "post-bounce: gateway ${GATEWAY} still unreachable — will escalate if failures persist"
-        write_last_action "bounce"
+        log "post-bounce: gateway ${GATEWAY} still unreachable — will escalate on next cycle"
     fi
 
     write_failures 0
