@@ -10,6 +10,78 @@ A privacy-first, headless operating system for homelabs — built for tinkerers,
 - [Architecture](#system-architecture)
 - [Contribute](#contribute)
 
+## Install and Quick Start
+
+Piccolo OS is built for x86_64 and ARM64. The easiest way to try it is in a Virtual Machine or by flashing it to a USB drive/SD card for bare metal.
+
+> **Tip: Faster Downloads**
+> Browser downloads can be slow for large OS images. We recommend using a download manager like `aria2c` with multiple streams.
+> ```bash
+> # Example: Download with 16 connections
+> aria2c -x 16 <image-url>
+> ```
+
+### Option 1: VirtualBox (Try it now)
+Perfect for testing the portal and "time-to-first-service" experience on your laptop.
+
+1.  **Download:** [piccolo-os.x86_64-VirtualBox.vdi.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.x86_64-VirtualBox.vdi.xz)
+2.  **Extract:** Unzip the file to get the `.vdi` disk image.
+    ```bash
+    unxz piccolo-os.x86_64-VirtualBox.vdi.xz
+    ```
+3.  **Resize Disk (Mandatory):** The VDI images are compact. You **must** resize them to at least 24GB before attaching, otherwise the OS will fail to boot.
+    ```bash
+    # Example: Resize to 24GB (24 * 1024 = 24576 MB)
+    VBoxManage modifymedium disk piccolo-os.x86_64-VirtualBox.vdi --resize 24576
+    ```
+4.  **Create VM:**
+    *   **Type:** Linux / openSUSE (64-bit).
+    *   **Hardware:** 4GB RAM (Rec.), 2 vCPUs.
+    *   **Disk:** "Use an Existing Virtual Hard Disk File" -> Select the extracted `.vdi`.
+5.  **Configure (Critical):**
+    *   **System:** Enable **EFI** (Motherboard -> Enable EFI). *Piccolo OS requires UEFI.*
+    *   **Network:** Set Adapter 1 to **Bridged Adapter** (so it gets a LAN IP and is reachable).
+6.  **Boot:** Start the VM. Within ~60 seconds, access the portal at `http://piccolo.local`.
+
+### Option 2: Hardware (x86_64 & ARM64)
+Runs directly on generic x86_64 (Intel/AMD) and ARM64 hardware (UEFI).
+
+#### Method A: Installer ISO (Recommended for Installation)
+Use this if you want to install Piccolo OS to your computer's internal drive.
+
+**Downloads:**
+*   **x86_64 (Intel/AMD):** [piccolo-os.x86_64-SelfInstall.iso](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/iso/piccolo-os.x86_64-SelfInstall.iso)
+*   **ARM64 (Generic):** [piccolo-os.aarch64-SelfInstall.iso](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/iso/piccolo-os.aarch64-SelfInstall.iso)
+
+1.  **Burn:** Write the ISO to a USB stick using [BalenaEtcher](https://etcher.balena.io/), Rufus, or `dd`.
+2.  **Boot:** Insert the USB drive, boot from it, and follow the on-screen prompts to install to your hard drive.
+
+#### Method B: Raw Image (Live USB or Direct Flash)
+Use this to "Try Now" from a USB stick without touching your internal drive, or to flash directly to a drive.
+
+**Downloads:**
+*   **x86_64 (Intel/AMD):** [piccolo-os.x86_64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.x86_64-SelfInstall.raw.xz)
+*   **ARM64 (Generic):** [piccolo-os.aarch64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.aarch64-SelfInstall.raw.xz)
+
+1.  **Flash:** Write the image to a USB stick (for Live/Try Now) or directly to an SSD (for Install) using [BalenaEtcher](https://etcher.balena.io/) or `dd`.
+    ```bash
+    # Example for x86_64
+    xzcat piccolo-os.x86_64-SelfInstall.raw.xz | sudo dd of=/dev/sdX bs=4M status=progress
+    ```
+2.  **Boot:**
+    *   Insert the drive into your machine.
+    *   Power on. **UEFI Secure Boot is fully supported** and recommended.
+    *   Connect Ethernet.
+3.  **Setup:** Access `http://piccolo.local` from another device on the same LAN.
+
+### Option 3: ARM64 (Raspberry Pi & Rock64)
+*Board-specific optimized images (bootloader/firmware pre-configured).*
+
+*   **Raspberry Pi (3+/4/5):** [piccolo-os.aarch64-RaspberryPi.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.aarch64-RaspberryPi.raw.xz)
+*   **Rock64:** [piccolo-os.aarch64-Rock64.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.aarch64-Rock64.raw.xz)
+
+Follow the **Method B (Raw Image)** instructions from Option 2. Ensure your board is connected to Ethernet.
+
 ## Why Piccolo OS
 - Self-host with confidence: run services 24×7 on your own hardware.
 - Local-first: fully usable on LAN with no cloud dependency.
@@ -61,64 +133,6 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 - Certificates: device issues/renews its own certs via Let’s Encrypt HTTP‑01 over the tunnel.
 - Nexus server TLS: Nexus manages its own cert via ACME TLS‑ALPN‑01; it does not terminate device traffic.
 - SSO continuity: after signing into the portal, apps open without a second login (local proxy ports or remote listener hosts (e.g., listener.user-domain)). Third‑party apps never see the portal cookie; the proxy gates access.
-
-## Install and Quick Start
-
-Piccolo OS is built for x86_64 and ARM64. The easiest way to try it is in a Virtual Machine or by flashing it to a USB drive/SD card for bare metal.
-
-> **Tip: Faster Downloads**
-> Browser downloads can be slow for large OS images. We recommend using a download manager like `aria2c` with multiple streams.
-> ```bash
-> # Example: Download with 16 connections
-> aria2c -x 16 <image-url>
-> ```
-
-### Option 1: VirtualBox (Try it now)
-Perfect for testing the portal and "time-to-first-service" experience on your laptop.
-
-1.  **Download:** [piccolo-os.x86_64-VirtualBox.vdi.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.x86_64-VirtualBox.vdi.xz)
-2.  **Extract:** Unzip the file to get the `.vdi` disk image.
-    ```bash
-    unxz piccolo-os.x86_64-VirtualBox.vdi.xz
-    ```
-3.  **Create VM:**
-    *   **Type:** Linux / openSUSE (64-bit).
-    *   **Hardware:** 4GB RAM (Rec.), 2 vCPUs.
-    *   **Disk:** "Use an Existing Virtual Hard Disk File" -> Select the extracted `.vdi`.
-4.  **Configure (Critical):**
-    *   **System:** Enable **EFI** (Motherboard -> Enable EFI). *Piccolo OS requires UEFI.*
-    *   **Network:** Set Adapter 1 to **Bridged Adapter** (so it gets a LAN IP and is reachable).
-5.  **Boot:** Start the VM. Within ~60 seconds, access the portal at `http://piccolo.local`.
-
-### Option 2: Hardware (x86_64 & ARM64)
-Runs directly on generic x86_64 (Intel/AMD) and ARM64 hardware (UEFI).
-
-> **Note:** This is currently a "Flash-and-Run" image. You flash it directly to your target boot drive (SSD/USB), plug that drive into your machine, and boot. An interactive installer is coming soon.
-
-**Downloads:**
-*   **x86_64 (Intel/AMD):** [piccolo-os.x86_64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.x86_64-SelfInstall.raw.xz)
-*   **ARM64 (Generic):** [piccolo-os.aarch64-SelfInstall.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.aarch64-SelfInstall.raw.xz)
-
-1.  **Flash:** Write the image to your SSD or USB stick using [BalenaEtcher](https://etcher.balena.io/) or `dd`.
-    ```bash
-    # Example for x86_64
-    xzcat piccolo-os.x86_64-SelfInstall.raw.xz | sudo dd of=/dev/sdX bs=4M status=progress
-    ```
-2.  **Boot:**
-    *   Insert the drive into your target machine.
-    *   Power on. **UEFI Secure Boot is fully supported** and recommended.
-    *   Connect Ethernet.
-3.  **Setup:** Access `http://piccolo.local` from another device on the same LAN.
-
-### Option 3: ARM64 (Raspberry Pi & Rock64)
-*Board-specific optimized images (bootloader/firmware pre-configured).*
-
-*   **Raspberry Pi (3+/4/5):** [piccolo-os.aarch64-RaspberryPi.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.aarch64-RaspberryPi.raw.xz)
-*   **Rock64:** [piccolo-os.aarch64-Rock64.raw.xz](https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.aarch64-Rock64.raw.xz)
-
-Follow the standard **Flash** and **Boot** instructions from Option 2. Ensure your board is connected to Ethernet.
-
----
 
 ## Two Ways to Use
 ### Self‑Hosted (Free Forever)
