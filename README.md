@@ -1,4 +1,4 @@
-# Piccolo OS
+# Piccolo OS ![Stage: Alpha](https://img.shields.io/badge/Stage-Alpha-orange)
 
 A privacy-first, headless operating system for homelabs — built for tinkerers, self‑hosters, and anyone reclaiming control of their digital world.
 
