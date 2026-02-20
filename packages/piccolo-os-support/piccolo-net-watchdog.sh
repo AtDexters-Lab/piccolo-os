@@ -120,6 +120,14 @@ if [ -z "$default_route" ]; then
     # No default route — check for recoverable WiFi radio soft-block
     wifi_radio=$(timeout 5 nmcli radio wifi 2>/dev/null)
     if [ "$wifi_radio" = "disabled" ]; then
+        # Only re-enable if WiFi connections are configured — avoids wasting
+        # power on devices where WiFi was never set up.
+        if ! timeout 5 nmcli -t -f TYPE connection show 2>/dev/null | grep -q 802-11-wireless; then
+            log "WiFi radio disabled but no WiFi connections configured — leaving radio off"
+            write_failures 0
+            write_last_action ""
+            exit 0
+        fi
         prune_timestamps "$RECOVERIES_FILE" "$BOUNCE_WINDOW"
         bounce_count=$(count_entries "$RECOVERIES_FILE")
         if [ "$bounce_count" -lt "$MAX_BOUNCES" ]; then
