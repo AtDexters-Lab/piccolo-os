@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.2.5
+Version:        0.2.6
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -54,6 +54,8 @@ Requires:       curl
 Requires:       iputils
 Requires:       iproute2
 Requires:       NetworkManager
+Requires:       shadow
+Requires(post): shadow
 Requires(post): systemd
 Requires(preun): systemd
 
@@ -181,6 +183,38 @@ fi
 mkdir -p /var/lib/piccolo
 date +%s > /var/lib/piccolo/clock-epoch 2>/dev/null || :
 
+# 7. Rootless Podman prerequisites (RFCs 20260206 + 20260220)
+# Create piccolo-apps group for shared imagestore access (per-app isolation).
+groupadd -f -r piccolo-apps
+# Create piccolo-runtime user for rootless Podman execution.
+if ! getent passwd piccolo-runtime > /dev/null 2>&1; then
+    useradd --system --home-dir /home/piccolo-runtime --create-home \
+        --shell /usr/sbin/nologin --groups piccolo-apps piccolo-runtime
+else
+    # Ensure existing user is in piccolo-apps group (upgrade path)
+    usermod --append --groups piccolo-apps piccolo-runtime 2>/dev/null || :
+fi
+# Allocate subordinate UID/GID ranges for rootless user namespaces.
+# Guard: usermod --add-subuids is not idempotent — it appends on every call.
+if ! grep -q '^piccolo-runtime:' /etc/subuid 2>/dev/null || ! grep -q '^piccolo-runtime:' /etc/subgid 2>/dev/null; then
+    usermod --add-subuids 100000-165535 --add-subgids 100000-165535 piccolo-runtime
+fi
+# Enable linger for cgroup delegation (resource limits require this).
+# Cannot use 'loginctl enable-linger' in chroot — use file-based equivalent.
+mkdir -p /var/lib/systemd/linger
+touch /var/lib/systemd/linger/piccolo-runtime
+# Enable user_allow_other in fuse.conf so rootless users can access FUSE mounts
+# (gocryptfs, fuse-overlayfs) created by root with -allow_other.
+if [ -f /etc/fuse.conf ]; then
+    if grep -q '^#[[:space:]]*user_allow_other' /etc/fuse.conf; then
+        sed -i 's/^#[[:space:]]*user_allow_other.*/user_allow_other/' /etc/fuse.conf
+    elif ! grep -q '^user_allow_other' /etc/fuse.conf; then
+        echo "user_allow_other" >> /etc/fuse.conf
+    fi
+else
+    echo "user_allow_other" > /etc/fuse.conf
+fi
+
 %preun
 if [ $1 -eq 0 ]; then
     # Unmask consoles (from %post)
@@ -198,6 +232,15 @@ if [ $1 -eq 0 ]; then
     /usr/bin/systemctl --root=/ --no-reload disable piccolo-clock-epoch.service 2>/dev/null || :
     /usr/bin/systemctl --root=/ --no-reload disable piccolo-clock-epoch-save.timer 2>/dev/null || :
     /usr/bin/systemctl stop piccolo-clock-epoch.service piccolo-clock-epoch-save.timer piccolo-clock-epoch-save.service 2>/dev/null || :
+    # Remove rootless Podman prerequisites (from %post)
+    rm -f /var/lib/systemd/linger/piccolo-runtime
+    sed -i '/^piccolo-runtime:/d' /etc/subuid 2>/dev/null || :
+    sed -i '/^piccolo-runtime:/d' /etc/subgid 2>/dev/null || :
+    # Note: piccolo-runtime user and piccolo-apps group are intentionally NOT
+    # deleted on uninstall. Removing them would orphan ownership on container
+    # storage, volumes, and shared imagestore.
+    # Per-app user entries (pa-*) in subuid/subgid are managed by piccolod
+    # at runtime and cleaned up when apps are uninstalled.
 fi
 
 %files
@@ -237,6 +280,11 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Thu Feb 20 2026 Piccolo Team <dev@piccolo.local> 0.2.6-0
+- Add piccolo-apps group and piccolo-runtime system user for rootless
+  Podman execution. Configure subordinate UID/GID ranges, loginctl
+  linger, and user_allow_other in fuse.conf.
+
 * Mon Feb 16 2026 Piccolo Team <dev@piccolo.local> 0.2.5-0
 - Add zypp package locks to prevent transactional-update from reinstalling
   removed packages (openssh, openssh-server, openssh-clients, rebootmgr).
