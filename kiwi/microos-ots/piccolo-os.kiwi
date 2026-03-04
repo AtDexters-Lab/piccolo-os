@@ -21,6 +21,7 @@
         <type
             image="oem"
             filesystem="btrfs"
+            fsmountoptions="noatime,compress=zstd:1"
             format="vdi"
             firmware="uefi"
             bootpartition="false"
@@ -62,7 +63,7 @@
             image="oem"
             initrd_system="dracut"
             filesystem="btrfs"
-            fsmountoptions="noatime,compress=lzo"
+            fsmountoptions="noatime,compress=zstd:1"
             firmware="efi"
             bootpartition="false"
             devicepersistency="by-uuid"
@@ -98,7 +99,7 @@
             image="oem"
             initrd_system="dracut"
             filesystem="btrfs"
-            fsmountoptions="noatime,compress=lzo"
+            fsmountoptions="noatime,compress=zstd:1"
             firmware="efi"
             bootpartition="false"
             devicepersistency="by-uuid"
@@ -134,6 +135,7 @@
         <type
             image="oem"
             filesystem="btrfs"
+            fsmountoptions="noatime,compress=zstd:1"
             firmware="uefi"
             initrd_system="dracut"
             installiso="true"
