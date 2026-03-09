@@ -257,11 +257,6 @@ if rpm -q sdbootutil; then
 fi
 
 #======================================
-# Create /piccolo-data mount point for LUKS data partition
-#--------------------------------------
-mkdir -p /piccolo-data
-
-#======================================
 # Seed clock epoch for RTC-less devices
 #--------------------------------------
 # First boot will restore this as the minimum system time before NTP starts.
