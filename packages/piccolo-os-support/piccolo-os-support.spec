@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.2.7
+Version:        0.2.8
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -20,6 +20,8 @@ Source12:       piccolo-clock-epoch.service
 Source13:       piccolo-clock-epoch-save.service
 Source14:       piccolo-clock-epoch-save.timer
 Source15:       piccolo-zypp-locks
+Source16:       piccolo-system.conf
+Source17:       piccolo-panic-reboot.conf
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -136,6 +138,12 @@ install -D -m 644 %{SOURCE14} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-
 
 # 12. Install zypp package locks to prevent transactional-update from reinstalling removed packages
 install -D -m 644 %{SOURCE15} %{buildroot}%{_sysconfdir}/zypp/locks
+
+# 13. Hardware watchdog: auto-reboot on kernel/PID-1 freeze (platform-agnostic)
+install -D -m 644 %{SOURCE16} %{buildroot}%{_prefix}/lib/systemd/system.conf.d/piccolo.conf
+
+# 14. Auto-reboot on kernel panic/oops
+install -D -m 644 %{SOURCE17} %{buildroot}%{_prefix}/lib/sysctl.d/90-piccolo-panic-reboot.conf
 
 %check
 # Validate the firewall zone XML
@@ -258,9 +266,19 @@ fi
 # %config (not noreplace): intentionally overwrite on upgrade to enforce security invariant.
 # Operator-added locks via 'zypper al' will be saved as /etc/zypp/locks.rpmsave.
 %config %{_sysconfdir}/zypp/locks
+%dir %{_prefix}/lib/systemd/system.conf.d
+%{_prefix}/lib/systemd/system.conf.d/piccolo.conf
+%{_prefix}/lib/sysctl.d/90-piccolo-panic-reboot.conf
 %dir /var/lib/piccolo
 
 %changelog
+* Tue Mar 10 2026 Piccolo Team <dev@piccolo.local> 0.2.8-0
+- Add hardware watchdog (RuntimeWatchdogSec=30): auto-reboot on kernel freeze
+  via platform-agnostic /dev/watchdog0. Silently ignored on platforms without
+  a hardware watchdog.
+- Add kernel panic auto-reboot (kernel.panic=10, kernel.panic_on_oops=1):
+  reboot 10s after panic instead of halting on a headless appliance.
+
 * Thu Mar 05 2026 Piccolo Team <dev@piccolo.local> 0.2.7-0
 - Remove obsolete piccolo-apps group setup and fuse.conf user_allow_other edits.
 - Keep rootless runtime prerequisites: piccolo-runtime user, subuid/subgid
