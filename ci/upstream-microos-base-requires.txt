@@ -1,0 +1,95 @@
+# Upstream Requires from openSUSE:Factory/patterns-microos/patterns-microos.spec
+# Used by .github/workflows/check-upstream-drift.yml to detect spec changes.
+#
+# Piccolo OS does NOT install the upstream pattern RPMs. Instead, constituent
+# packages are listed explicitly in kiwi/microos-ots/piccolo-os.kiwi. This means
+# deployed devices won't automatically receive new packages added upstream.
+#
+# When the drift check opens an issue for new upstream additions:
+#   1. Evaluate whether the package is relevant for Piccolo (headless, no login).
+#   2. If relevant, add it as Requires in piccolo-os-support.spec — this delivers
+#      it to both new image builds and already-deployed devices via
+#      transactional-update dup.
+#   3. Also add it to the kiwi file and update this baseline.
+#
+# Lines starting with # are comments. Annotations after package names:
+#   EXCLUDED  — intentionally omitted from piccolo-os.kiwi
+#   SKIP      — virtual provide, boolean dep, or installed via another name
+#   PINNED    — installed via kiwi with a version constraint
+
+# Section: microos_base (%package base)
+aaa_base
+bash
+branding-openSUSE  # EXCLUDED - visual branding, headless system
+btrfsmaintenance
+btrfsprogs
+build-key
+busybox
+ca-certificates
+ca-certificates-mozilla
+chrony
+coreutils
+coreutils-systemd
+curl
+dosfstools
+glibc
+glibc-locale-base
+gzip
+health-checker
+health-checker-plugins-MicroOS
+hostname
+iproute2
+iputils
+kdump  # EXCLUDED - crash dumps not analyzed on homelab appliance, uses 256MB+ RAM
+lastlog2  # EXCLUDED - login tracking, no login on headless system
+less
+libnss_usrfiles2
+libtss2-tcti-device0
+MicroOS-release
+microos-tools
+NetworkManager
+NetworkManager-bluetooth  # EXCLUDED - no bluetooth networking use case
+NetworkManager-wifi
+openssh  # EXCLUDED - security: no remote access
+pam
+pam-config
+procps
+rebootmgr  # EXCLUDED - piccolod controls reboots
+rpm
+shadow
+snapper
+sudo  # EXCLUDED - no login, piccolod manages system directly
+sysextmgr
+systemd
+systemd-presets-branding-MicroOS
+terminfo-base
+timezone
+tpm2-0-tss
+tpm2.0-tools
+util-linux
+vim-small
+wtmpdb  # EXCLUDED - login tracking, no login on headless system
+yast2-logs  # EXCLUDED - no YaST installed
+read-only-root-fs  # PINNED - already explicit in kiwi with version constraint
+pattern() = minimal_base  # SKIP - installed as patterns-base-minimal_base
+pattern() = update_test  # SKIP - openSUSE QA canary
+/usr/bin/hostname  # SKIP - virtual, satisfied by hostname package
+/usr/bin/gzip  # SKIP - virtual, satisfied by gzip package
+group(nobody)  # SKIP - virtual, satisfied by shadow
+user(nobody)  # SKIP - virtual, satisfied by shadow
+(grub2-branding-openSUSE if (grub2 or grub2-common))  # EXCLUDED - cosmetic grub theme, headless system
+(grub2-snapper-plugin if (grub2 or grub2-common))  # SKIP - installed explicitly as grub2-snapper-plugin
+
+# Section: microos_base_zypper (%package base-zypper)
+transactional-update
+transactional-update-zypp-config
+zypp-boot-plugin
+zypp-excludedocs  # SKIP - already explicit in kiwi
+zypp-no-multiversion  # SKIP - already explicit in kiwi
+zypp-no-recommends  # SKIP - already explicit in kiwi
+zypper
+zypper-needs-restarting
+
+# Section: microos_defaults (%package defaults)
+audit
+sndiff

@@ -201,16 +201,73 @@
 
     <packages type="image">
         <package name="live-add-yast-repos" />
-        <!-- Apparently zypper (?) doesn't like having multiple patterns with the same name,
-             so avoid using namedCollection at least for basesystem -->
-        <package name="patterns-microos-basesystem" />
-        <package name="patterns-microos-base-zypper" />
+        <!-- Flattened from patterns-microos-basesystem (microos_base pattern).
+             Excluded: openssh, rebootmgr (security hardening),
+                       pattern() = update_test (openSUSE QA canary).
+             Skipped: virtual provides and boolean deps resolved automatically.
+             See ci/upstream-microos-base-requires.txt for full upstream baseline. -->
+        <package name="patterns-base-minimal_base" />
+        <package name="aaa_base" />
+        <package name="bash" />
+        <package name="btrfsprogs" />
+        <package name="btrfsmaintenance" />
+        <package name="build-key" />
+        <package name="busybox" />
+        <package name="ca-certificates" />
+        <package name="ca-certificates-mozilla" />
+        <package name="chrony" />
+        <package name="coreutils" />
+        <package name="coreutils-systemd" />
+        <package name="curl" />
+        <package name="dosfstools" />
+        <package name="glibc" />
+        <package name="glibc-locale-base" />
+        <package name="gzip" />
+        <package name="health-checker" />
+        <package name="health-checker-plugins-MicroOS" />
+        <package name="hostname" />
+        <package name="iproute2" />
+        <package name="iputils" />
+        <package name="less" />
+        <package name="libnss_usrfiles2" />
+        <package name="libtss2-tcti-device0" />
+        <package name="MicroOS-release" />
+        <package name="microos-tools" />
+        <package name="NetworkManager" />
+        <package name="NetworkManager-wifi" />
+        <package name="pam" />
+        <package name="pam-config" />
+        <package name="procps" />
+        <package name="rpm" />
+        <package name="shadow" />
+        <package name="snapper" />
+        <package name="sysextmgr" />
+        <package name="systemd" />
+        <package name="systemd-presets-branding-MicroOS" />
+        <package name="terminfo-base" />
+        <package name="timezone" />
+        <package name="tpm2-0-tss" />
+        <package name="tpm2.0-tools" />
+        <package name="util-linux" />
+        <package name="vim-small" />
+        <!-- Conditional dep from microos_base pattern — not auto-resolved without the pattern -->
+        <package name="grub2-snapper-plugin" />
+
+        <!-- Flattened from patterns-microos-base-zypper (beyond microos_base dep) -->
+        <package name="transactional-update" />
+        <package name="transactional-update-zypp-config" />
+        <package name="zypp-boot-plugin" />
+        <package name="zypper" />
+        <package name="zypper-needs-restarting" />
+
         <!-- Configure zypper for no-recommends, no-multiversion and excludedocs -->
         <package name="zypp-excludedocs" />
         <package name="zypp-no-multiversion" />
         <package name="zypp-no-recommends" />
 
-        <package name="patterns-microos-defaults" />
+        <!-- Flattened from patterns-microos-defaults (beyond microos_base dep) -->
+        <package name="audit" />
+        <package name="sndiff" />
         <!-- TODO: Causes build to fail when container_runtime is added -->
         <package name="patterns-microos-selinux" />
         <package name="kernel-default" />
@@ -260,6 +317,9 @@
         <package name="dtb-rockchip" arch="aarch64" />
     </packages>
 
+    <!-- Defense-in-depth: remove these if any transitive dep pulls them in.
+         Primary protection is the flattened package list above (no pattern requiring
+         openssh/rebootmgr). Runtime protection is via zypp locks in piccolo-os-support. -->
     <packages type="delete">
         <package name="openssh" />
         <package name="openssh-server" />

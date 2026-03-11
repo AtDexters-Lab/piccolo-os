@@ -1,0 +1,103 @@
+name: Check upstream MicroOS pattern drift
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Monday 9am UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch upstream spec
+        run: |
+          curl -fsSL -o /tmp/patterns-microos.spec \
+            'https://api.opensuse.org/public/source/openSUSE:Factory/patterns-microos/patterns-microos.spec'
+
+      - name: Extract upstream Requires
+        run: |
+          spec=/tmp/patterns-microos.spec
+
+          # Normalize known upstream typo (RequireS: -> Requires:)
+          sed -i 's/^RequireS:/Requires:/' "$spec"
+
+          # Sanity check: verify each section heading exists in the spec
+          for heading in '%package base' '%package base-zypper' '%package defaults'; do
+            if ! grep -q "^${heading}$" "$spec"; then
+              echo "::error::Section '${heading}' not found in spec — format may have changed"
+              exit 1
+            fi
+          done
+
+          # Extract Requires from each section
+          sed -n '/^%package base$/,/^%package /{/^Requires:\s/s/^Requires:\s*//p}' "$spec" \
+            | sort > /tmp/upstream_base.txt
+
+          sed -n '/^%package base-zypper$/,/^%package /{/^Requires:\s/s/^Requires:\s*//p}' "$spec" \
+            | grep -v 'pattern() = microos_base' \
+            | sort > /tmp/upstream_base_zypper.txt
+
+          sed -n '/^%package defaults$/,/^%package /{/^Requires:\s/s/^Requires:\s*//p}' "$spec" \
+            | grep -v 'pattern() = microos_base' \
+            | sort > /tmp/upstream_defaults.txt
+
+          # Combine into single sorted file
+          cat /tmp/upstream_base.txt /tmp/upstream_base_zypper.txt /tmp/upstream_defaults.txt \
+            | sort > /tmp/upstream_combined.txt
+
+      - name: Build baseline from repo
+        run: |
+          # Strip comments and annotations, keep only package names, sort
+          grep -v '^\s*#' ci/upstream-microos-base-requires.txt \
+            | grep -v '^\s*$' \
+            | sed 's/\s*#.*//' \
+            | sort > /tmp/baseline_combined.txt
+
+      - name: Compare
+        id: diff
+        run: |
+          if diff -u /tmp/baseline_combined.txt /tmp/upstream_combined.txt > /tmp/drift.diff 2>&1; then
+            echo "No drift detected."
+            echo "drifted=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Upstream drift detected in patterns-microos"
+            cat /tmp/drift.diff
+            echo "drifted=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update issue on drift
+        if: steps.diff.outputs.drifted == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="upstream drift: patterns-microos Requires changed"
+          LABEL="upstream-drift"
+
+          # Ensure label exists
+          gh label create "$LABEL" --description "Upstream spec dependency changed" --color "D93F0B" 2>/dev/null || true
+
+          # Check for existing open issue
+          EXISTING=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')
+
+          DIFF_CONTENT=$(cat /tmp/drift.diff)
+          BODY="The weekly upstream drift check found changes in \`openSUSE:Factory/patterns-microos/patterns-microos.spec\`.
+
+          Review the diff below and update \`ci/upstream-microos-base-requires.txt\` and \`kiwi/microos-ots/piccolo-os.kiwi\` accordingly.
+
+          \`\`\`diff
+          ${DIFF_CONTENT}
+          \`\`\`"
+          # Strip leading whitespace from YAML indentation
+          BODY=$(echo "$BODY" | sed 's/^          //')
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --label "$LABEL" --body "$BODY"
+          fi
