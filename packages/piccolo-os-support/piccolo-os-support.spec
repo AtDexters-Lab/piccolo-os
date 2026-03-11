@@ -1,9 +1,11 @@
 Name:           piccolo-os-support
-Version:        0.2.8
+Version:        0.2.9
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
 URL:            https://github.com/AtDexters-Lab/piccolo-os
+# noarch meta-package; arch-specific Requires (kernel-default, etc.)
+# resolved by OBS per-arch repos at install time.
 BuildArch:      noarch
 Source0:        piccolo.xml
 Source2:        piccolo-os.key
@@ -48,15 +50,83 @@ Source17:       piccolo-panic-reboot.conf
 BuildRequires:  systemd
 BuildRequires:  firewalld
 BuildRequires:  libxml2-tools
+# --- Piccolo policy deps (not from upstream patterns) ---
 Requires:       piccolod
 Requires:       firewalld
-Requires:       zypper
-Requires:       health-checker
+
+# --- Flattened from patterns-microos-basesystem (microos_base) ---
+# See ci/upstream-microos-base-requires.txt for upstream baseline and exclusions.
+Requires:       patterns-base-minimal_base
+Requires:       aaa_base
+Requires:       bash
+Requires:       btrfsmaintenance
+Requires:       btrfsprogs
+Requires:       build-key
+Requires:       busybox
+Requires:       ca-certificates
+Requires:       ca-certificates-mozilla
+Requires:       chrony
+Requires:       coreutils
+Requires:       coreutils-systemd
 Requires:       curl
-Requires:       iputils
+Requires:       dosfstools
+Requires:       glibc
+Requires:       glibc-locale-base
+Requires:       gzip
+Requires:       health-checker
+Requires:       health-checker-plugins-MicroOS
+Requires:       hostname
 Requires:       iproute2
+Requires:       iputils
+Requires:       less
+Requires:       libnss_usrfiles2
+Requires:       libtss2-tcti-device0
+Requires:       MicroOS-release
+Requires:       microos-tools
 Requires:       NetworkManager
+Requires:       NetworkManager-wifi
+Requires:       pam
+Requires:       pam-config
+Requires:       procps
+Requires:       rpm
 Requires:       shadow
+Requires:       snapper
+Requires:       sysextmgr
+Requires:       systemd
+Requires:       systemd-presets-branding-MicroOS
+Requires:       terminfo-base
+Requires:       timezone
+Requires:       tpm2-0-tss
+Requires:       tpm2.0-tools
+Requires:       util-linux
+Requires:       vim-small
+Requires:       grub2-snapper-plugin
+
+# --- Flattened from patterns-microos-base-zypper ---
+Requires:       transactional-update
+Requires:       transactional-update-zypp-config
+Requires:       zypp-boot-plugin
+Requires:       zypper
+Requires:       zypper-needs-restarting
+Requires:       zypp-excludedocs
+Requires:       zypp-no-multiversion
+Requires:       zypp-no-recommends
+
+# --- Flattened from patterns-microos-defaults (remaining deps in image-composition below) ---
+Requires:       audit
+Requires:       sndiff
+
+# --- Piccolo OS image composition (not from upstream patterns) ---
+Requires:       patterns-microos-selinux
+Requires:       kernel-default
+Requires:       device-mapper
+Requires:       cryptsetup
+Requires:       read-only-root-fs >= 1.0+git20250414
+Requires:       patterns-containers-container_runtime
+Requires:       growpart-generator
+Requires:       patterns-base-bootloader
+
+# --- Scriptlet deps ---
 Requires(post): shadow
 Requires(post): systemd
 Requires(preun): systemd
@@ -272,6 +342,11 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Wed Mar 11 2026 Piccolo Team <dev@piccolo.local> 0.2.9-0
+- Move flattened MicroOS pattern packages from kiwi to spec Requires.
+  Pins all packages during transactional-update dup, preventing provider
+  swaps (e.g., systemd-presets-branding-Aeon replacing -MicroOS).
+
 * Tue Mar 10 2026 Piccolo Team <dev@piccolo.local> 0.2.8-0
 - Add hardware watchdog (RuntimeWatchdogSec=30): auto-reboot on kernel freeze
   via platform-agnostic /dev/watchdog0. Silently ignored on platforms without

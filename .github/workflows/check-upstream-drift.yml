@@ -88,7 +88,7 @@ jobs:
           DIFF_CONTENT=$(cat /tmp/drift.diff)
           BODY="The weekly upstream drift check found changes in \`openSUSE:Factory/patterns-microos/patterns-microos.spec\`.
 
-          Review the diff below and update \`ci/upstream-microos-base-requires.txt\` and \`kiwi/microos-ots/piccolo-os.kiwi\` accordingly.
+          Review the diff below and update \`ci/upstream-microos-base-requires.txt\` and \`packages/piccolo-os-support/piccolo-os-support.spec\` accordingly.
 
           \`\`\`diff
           ${DIFF_CONTENT}

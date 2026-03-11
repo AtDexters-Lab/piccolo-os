@@ -2,20 +2,18 @@
 # Used by .github/workflows/check-upstream-drift.yml to detect spec changes.
 #
 # Piccolo OS does NOT install the upstream pattern RPMs. Instead, constituent
-# packages are listed explicitly in kiwi/microos-ots/piccolo-os.kiwi. This means
-# deployed devices won't automatically receive new packages added upstream.
+# packages are listed explicitly in packages/piccolo-os-support/piccolo-os-support.spec.
+# This means deployed devices won't automatically receive new packages added upstream.
 #
 # When the drift check opens an issue for new upstream additions:
 #   1. Evaluate whether the package is relevant for Piccolo (headless, no login).
-#   2. If relevant, add it as Requires in piccolo-os-support.spec — this delivers
-#      it to both new image builds and already-deployed devices via
-#      transactional-update dup.
-#   3. Also add it to the kiwi file and update this baseline.
+#   2. If relevant, add it as Requires in piccolo-os-support.spec and update
+#      this baseline.
 #
 # Lines starting with # are comments. Annotations after package names:
-#   EXCLUDED  — intentionally omitted from piccolo-os.kiwi
+#   EXCLUDED  — intentionally omitted from piccolo-os-support.spec
 #   SKIP      — virtual provide, boolean dep, or installed via another name
-#   PINNED    — installed via kiwi with a version constraint
+#   PINNED    — version constraint in piccolo-os-support.spec
 
 # Section: microos_base (%package base)
 aaa_base
@@ -68,7 +66,7 @@ util-linux
 vim-small
 wtmpdb  # EXCLUDED - login tracking, no login on headless system
 yast2-logs  # EXCLUDED - no YaST installed
-read-only-root-fs  # PINNED - already explicit in kiwi with version constraint
+read-only-root-fs  # PINNED - version constraint in piccolo-os-support.spec
 pattern() = minimal_base  # SKIP - installed as patterns-base-minimal_base
 pattern() = update_test  # SKIP - openSUSE QA canary
 /usr/bin/hostname  # SKIP - virtual, satisfied by hostname package
@@ -82,9 +80,9 @@ user(nobody)  # SKIP - virtual, satisfied by shadow
 transactional-update
 transactional-update-zypp-config
 zypp-boot-plugin
-zypp-excludedocs  # SKIP - already explicit in kiwi
-zypp-no-multiversion  # SKIP - already explicit in kiwi
-zypp-no-recommends  # SKIP - already explicit in kiwi
+zypp-excludedocs
+zypp-no-multiversion
+zypp-no-recommends
 zypper
 zypper-needs-restarting
 
