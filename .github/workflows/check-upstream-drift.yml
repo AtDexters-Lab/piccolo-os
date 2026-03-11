@@ -18,7 +18,7 @@ jobs:
       - name: Fetch upstream spec
         run: |
           curl -fsSL -o /tmp/patterns-microos.spec \
-            'https://api.opensuse.org/public/source/openSUSE:Factory/patterns-microos/patterns-microos.spec'
+            'https://build.opensuse.org/public/source/openSUSE:Factory/patterns-microos/patterns-microos.spec'
 
       - name: Extract upstream Requires
         run: |
