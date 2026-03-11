@@ -317,16 +317,6 @@
         <package name="dtb-rockchip" arch="aarch64" />
     </packages>
 
-    <!-- Defense-in-depth: remove these if any transitive dep pulls them in.
-         Primary protection is the flattened package list above (no pattern requiring
-         openssh/rebootmgr). Runtime protection is via zypp locks in piccolo-os-support. -->
-    <packages type="delete">
-        <package name="openssh" />
-        <package name="openssh-server" />
-        <package name="openssh-clients" />
-        <package name="rebootmgr" />
-    </packages>
-
     <packages type="bootstrap">
         <!-- Avoid that zypper picks the busybox-foo variant for those, that would fail later -->
         <package name="coreutils" />
