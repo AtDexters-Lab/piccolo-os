@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.2.9
+Version:        0.3.0
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -251,7 +251,12 @@ fi
 # 5. Enable network health watchdog timer
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-net-watchdog.timer
 
-# 6. Enable clock epoch service and periodic save timer
+# 6. Explicitly enable health-checker for boot-time rollback.
+# MicroOS preset should enable this, but we make it explicit since
+# this service is a critical safety net.
+/usr/bin/systemctl --root=/ --no-reload enable health-checker.service 2>/dev/null || :
+
+# 7. Enable clock epoch service and periodic save timer
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-clock-epoch.service
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-clock-epoch-save.timer
 # Seed epoch file so the first reboot after upgrade is protected.
@@ -261,7 +266,7 @@ fi
 mkdir -p /var/lib/piccolo
 date +%s > /var/lib/piccolo/clock-epoch 2>/dev/null || :
 
-# 7. Rootless Podman prerequisites (RFC 20260206)
+# 8. Rootless Podman prerequisites (RFC 20260206)
 # Create piccolo-runtime user for rootless Podman execution.
 if ! getent passwd piccolo-runtime > /dev/null 2>&1; then
     useradd --system --home-dir /home/piccolo-runtime --create-home \
@@ -290,6 +295,8 @@ if [ $1 -eq 0 ]; then
     # Disable network watchdog (from %post)
     /usr/bin/systemctl --root=/ --no-reload disable piccolo-net-watchdog.timer 2>/dev/null || :
     /usr/bin/systemctl stop piccolo-net-watchdog.timer piccolo-net-watchdog.service 2>/dev/null || :
+    # Note: health-checker.service is intentionally NOT disabled on uninstall.
+    # MicroOS presets enable it by default; our %post enable is belt-and-suspenders.
     # Disable clock epoch service and timer (from %post)
     /usr/bin/systemctl --root=/ --no-reload disable piccolo-clock-epoch.service 2>/dev/null || :
     /usr/bin/systemctl --root=/ --no-reload disable piccolo-clock-epoch-save.timer 2>/dev/null || :
@@ -342,6 +349,12 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Mon Mar 17 2026 Piccolo Team <dev@piccolo.local> 0.3.0-0
+- Switch health-checker plugin from /health/live to /health/ready endpoint.
+  Enables boot-time rollback on fatal component errors (503 on LevelError).
+- Explicitly enable health-checker.service in %%post as belt-and-suspenders
+  for MicroOS presets.
+
 * Wed Mar 11 2026 Piccolo Team <dev@piccolo.local> 0.2.9-0
 - Move flattened MicroOS pattern packages from kiwi to spec Requires.
   Pins all packages during transactional-update dup, preventing provider

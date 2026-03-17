@@ -1,6 +1,6 @@
 #!/bin/bash
 # Piccolo OS Health Check Plugin
-# Verifies that the piccolod control plane is serving traffic.
+# Verifies that the piccolod control plane is healthy (no fatal component errors).
 #
 # Robustness:
 # 1. We retry for up to 30 seconds to handle startup latency.
@@ -15,7 +15,7 @@ run_checks() {
 
     while [ $attempt -le $max_attempts ]; do
         # Verify piccolod API is responsive
-        if /usr/bin/curl --silent --fail --max-time 2 http://127.0.0.1:80/api/v1/health/live >/dev/null; then
+        if /usr/bin/curl --silent --fail --max-time 2 http://127.0.0.1:80/api/v1/health/ready >/dev/null; then
             echo "piccolod is healthy."
             return 0
         fi
