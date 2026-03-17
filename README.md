@@ -98,7 +98,8 @@ Follow the **Method B (Raw Image)** instructions from Option 2. Ensure your boar
 ## ❓ Why Piccolo OS
 - **Self-host with confidence:** Run services 24×7 on your own hardware.
 - **Local-first:** Fully usable on LAN with no cloud dependency.
-- **Open by design:** Piccolo OS and remote access (Nexus) are open source.
+- **Open by design:** Piccolo OS and remote access (Namek + Nexus) are open source.
+- **Free remote access:** Always free — self‑hosted or managed via Piccolo Network.
 - **Secure by default:** Device‑terminated TLS, encrypted data, hardened base OS.
 
 ### Who It’s For
@@ -109,7 +110,7 @@ Follow the **Method B (Raw Image)** instructions from Option 2. Ensure your boar
 We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just possible, but joyful.
 
 ### Core Principles
-- **Local‑first, cloud‑optional:** Everything works locally; remote access is a plug‑in.
+- **Local‑first, cloud‑optional:** Everything works locally; remote access is an optional plug‑in.
 - **Immutable base:** Built on SUSE MicroOS (read‑only root, transactional updates, rollback).
 - **Container‑native:** Podman + systemd; rootless by default for managed apps.
 - **Device‑terminated TLS:** Certificates and keys live on the device.
@@ -122,7 +123,7 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 ```
 +---------------------------------------------------+
 |          Layer 3: Your Applications               |
-|      (Curated + custom containers)                |
+|       (App Store + custom containers)              |
 +---------------------------------------------------+
 |           Layer 2: System Apps                    |
 | (Platform services: storage, federation, DB, etc.)|
@@ -138,35 +139,35 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 
 ### What You Can Do Today
 - **Headless operation:** Access the admin portal at `http://piccolo.local` (Ethernet‑only).
-- **One‑click app deployment:** Vaultwarden, Gitea, WordPress (v1 catalog).
+- **One‑click app deployment:** Install apps from the open source App Store.
 - **Encrypted volumes:** Per‑directory encryption with gated unlock and recovery key support.
 - **Updates:** Transactional OS updates with rollback; app updates and revert.
-- **Optional remote access:** Self‑host Nexus and publish over HTTPS via ACME HTTP‑01 (device‑terminated TLS). Piccolo Network (managed) is optional.
+- **Remote access:** Self‑host Namek + Nexus or use Piccolo Network. Publish over HTTPS via ACME (device‑terminated TLS).
 
 ### Remote Access Model
-- **Self‑hosted Nexus (first‑class):** Run your own Nexus Proxy Server on a VPS. Device terminates TLS; Nexus stays L4 passthrough.
-- **Certificates:** Device issues/renews its own certs via Let’s Encrypt HTTP‑01 over the tunnel.
-- **Nexus server TLS:** Nexus manages its own cert via ACME TLS‑ALPN‑01; it does not terminate device traffic.
+- **Three‑component architecture:** [Namek Server](https://github.com/AtDexters-Lab/namek-server) (orchestrator) coordinates between [piccolod](https://github.com/AtDexters-Lab/piccolod) (on device) and [Nexus Proxy](https://github.com/AtDexters-Lab/nexus-proxy-server) (edge relay). All three are open source and self‑hostable.
+- **Certificates:** Device issues/renews its own certs via Let’s Encrypt; Namek orchestrates DNS‑01 challenges.
+- **Nexus Proxy TLS:** Nexus manages its own cert via ACME TLS‑ALPN‑01; it does not terminate device traffic.
 - **SSO continuity:** After signing into the portal, apps open without a second login (local proxy ports or remote listener hosts). Third‑party apps never see the portal cookie; the proxy gates access.
 
 ---
 
 ## 🛠 Two Ways to Use
-### 1. Self‑Hosted (Free Forever)
-- Run your own [Nexus Proxy](https://github.com/AtDexters-Lab/nexus-proxy-server).
-- Control every service, every update, every byte.
+### 1. Self‑Hosted
+- Run your own [Namek Server](https://github.com/AtDexters-Lab/namek-server) + [Nexus Proxy](https://github.com/AtDexters-Lab/nexus-proxy-server).
+- Full control over every service, every update, every byte.
 
-### 2. Piccolo Network (Optional Subscription)
-- Managed remote access and services.
-- Federated encrypted storage (planned).
+### 2. Piccolo Network (Managed)
+- Managed remote access — zero setup required.
+- Federated encrypted storage (planned, subscription).
 - Hassle‑free remote updates.
 
 ---
 
-## 📦 Curated Apps (v1)
-- **Vaultwarden:** Lightweight password manager (< 5 minutes to first page).
-- **Gitea:** Lightweight Git service (SQLite default; < 5 minutes).
-- **WordPress:** Personal website/blog (with MariaDB; < 10 minutes).
+## 📦 App Store
+The App Store is an open source repo — any app defined there can be installed on Piccolo OS: [piccolo-store](https://github.com/AtDexters-Lab/piccolo-store).
+
+Current apps include Vaultwarden, WordPress, Immich, Uptime Kuma, Homebox, Code Server, and more.
 
 ## ⚙️ Piccolod
 - [piccolod](https://github.com/AtDexters-Lab/piccolod) is the control-plane daemon for Piccolo OS. It exposes the HTTP API, manages runtime supervisors, and serves the minimal UI.
