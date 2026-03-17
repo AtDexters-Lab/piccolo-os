@@ -142,7 +142,7 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 - **One‑click app deployment:** Install apps from the open source App Store.
 - **Encrypted volumes:** Per‑directory encryption with gated unlock and recovery key support.
 - **Updates:** Transactional OS updates with rollback; app updates and revert.
-- **Remote access:** Self‑host Namek + Nexus or use Piccolo Network. Publish over HTTPS via ACME (device‑terminated TLS).
+- **Remote access:** Publish over HTTPS with device‑terminated TLS. Self‑host Namek + Nexus or use Piccolo Network.
 
 ### Remote Access Model
 - **Three‑component architecture:** [Namek Server](https://github.com/AtDexters-Lab/namek-server) (orchestrator) coordinates between [piccolod](https://github.com/AtDexters-Lab/piccolod) (on device) and [Nexus Proxy](https://github.com/AtDexters-Lab/nexus-proxy-server) (edge relay). All three are open source and self‑hostable.
