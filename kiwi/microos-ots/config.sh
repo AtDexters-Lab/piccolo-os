@@ -159,7 +159,9 @@ consoles=''
 # consoles='console=ttyS0,115200 console=tty0'
 # [[ "$kiwi_profiles" == *"Rock64"* ]] && consoles='console=ttyS2,1500000 console=tty0'
 
-cmdline=('quiet' 'systemd.show_status=yes' ${consoles})
+# Lid workaround: report lid as open at boot so a closed-lid reboot
+# does not trigger ACPI shutdown before logind starts (see piccolo-logind.conf).
+cmdline=('quiet' 'systemd.show_status=yes' 'button.lid_init_state=open' ${consoles})
 rpm -q wicked && cmdline+=('net.ifnames=0')
 
 ignition_platform='metal'
