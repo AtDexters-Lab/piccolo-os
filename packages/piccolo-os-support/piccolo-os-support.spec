@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.0
+Version:        0.3.1
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -24,6 +24,9 @@ Source14:       piccolo-clock-epoch-save.timer
 Source15:       piccolo-zypp-locks
 Source16:       piccolo-system.conf
 Source17:       piccolo-panic-reboot.conf
+Source18:       piccolo-watchdog.conf
+Source19:       piccolo-watchdog-check.sh
+Source20:       piccolo-watchdog-check.service
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -215,6 +218,11 @@ install -D -m 644 %{SOURCE16} %{buildroot}%{_prefix}/lib/systemd/system.conf.d/p
 # 14. Auto-reboot on kernel panic/oops
 install -D -m 644 %{SOURCE17} %{buildroot}%{_prefix}/lib/sysctl.d/90-piccolo-panic-reboot.conf
 
+# 15. Watchdog module selection and boot-time validation
+install -D -m 644 %{SOURCE18} %{buildroot}%{_prefix}/lib/modprobe.d/piccolo-watchdog.conf
+install -D -m 755 %{SOURCE19} %{buildroot}%{_libexecdir}/piccolo/watchdog-check.sh
+install -D -m 644 %{SOURCE20} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -282,6 +290,9 @@ fi
 mkdir -p /var/lib/systemd/linger
 touch /var/lib/systemd/linger/piccolo-runtime
 
+# 9. Enable watchdog driver validation at boot
+/usr/bin/systemctl --root=/ --no-reload enable piccolo-watchdog-check.service
+
 %preun
 if [ $1 -eq 0 ]; then
     # Unmask consoles (from %post)
@@ -301,6 +312,9 @@ if [ $1 -eq 0 ]; then
     /usr/bin/systemctl --root=/ --no-reload disable piccolo-clock-epoch.service 2>/dev/null || :
     /usr/bin/systemctl --root=/ --no-reload disable piccolo-clock-epoch-save.timer 2>/dev/null || :
     /usr/bin/systemctl stop piccolo-clock-epoch.service piccolo-clock-epoch-save.timer piccolo-clock-epoch-save.service 2>/dev/null || :
+    # Disable watchdog check service (from %post)
+    /usr/bin/systemctl --root=/ --no-reload disable piccolo-watchdog-check.service 2>/dev/null || :
+    /usr/bin/systemctl stop piccolo-watchdog-check.service 2>/dev/null || :
     # Remove rootless Podman prerequisites (from %post)
     rm -f /var/lib/systemd/linger/piccolo-runtime
     sed -i '/^piccolo-runtime:/d' /etc/subuid 2>/dev/null || :
@@ -346,9 +360,18 @@ fi
 %dir %{_prefix}/lib/systemd/system.conf.d
 %{_prefix}/lib/systemd/system.conf.d/piccolo.conf
 %{_prefix}/lib/sysctl.d/90-piccolo-panic-reboot.conf
+%{_prefix}/lib/modprobe.d/piccolo-watchdog.conf
+%{_libexecdir}/piccolo/watchdog-check.sh
+%{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
 %dir /var/lib/piccolo
 
 %changelog
+* Sun Mar 22 2026 Piccolo Team <dev@piccolo.local> 0.3.1-0
+- Blacklist intel_oc_wdt and softdog kernel modules to ensure the reliable
+  iTCO_wdt claims /dev/watchdog0 on Intel platforms. No-op on AMD/ARM.
+- Add piccolo-watchdog-check.service: boot-time oneshot that logs which
+  watchdog driver owns watchdog0 for fleet-wide observability.
+
 * Mon Mar 17 2026 Piccolo Team <dev@piccolo.local> 0.3.0-0
 - Switch health-checker plugin from /health/live to /health/ready endpoint.
   Enables boot-time rollback on fatal component errors (503 on LevelError).

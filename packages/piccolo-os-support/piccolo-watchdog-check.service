@@ -1,0 +1,9 @@
+[Unit]
+Description=Piccolo watchdog driver validation
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/piccolo/watchdog-check.sh
+
+[Install]
+WantedBy=multi-user.target
