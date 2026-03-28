@@ -161,6 +161,17 @@ consoles=''
 
 # Lid workaround: report lid as open at boot so a closed-lid reboot
 # does not trigger ACPI shutdown before logind starts (see piccolo-logind.conf).
+#
+# NOTE: Do NOT add reboot=efi here. Investigated 2026-03-28 for an HP Laptop
+# 15q-bu1xx (BIOS F.33) that intermittently powers off instead of rebooting.
+# reboot=efi is unsafe as a blanket default because:
+#   - Pre-T2 MacBooks hang (need reboot=pci instead)
+#   - T2 MacBooks panic in the T2 chip on EFI runtime calls
+#   - If EFI ResetSystem() blocks, the kernel fallback chain never runs
+#     (unlike ACPI reset which is a register write that always returns)
+#   - No major distro uses it as a default
+# The HP issue is an intermittent firmware bug (worked on retry); the correct
+# fix for per-device reboot quirks is an upstream kernel DMI quirk table entry.
 cmdline=('quiet' 'systemd.show_status=yes' 'button.lid_init_state=open' ${consoles})
 rpm -q wicked && cmdline+=('net.ifnames=0')
 
