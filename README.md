@@ -95,6 +95,14 @@ Use this to **"Try Now"** from a USB stick without touching your internal drive,
 
 Follow the **Method B (Raw Image)** instructions from Option 2. Ensure your board is connected to Ethernet.
 
+### Troubleshooting: Can't reach piccolo.local?
+
+mDNS (`.local` resolution) doesn't work on every network. If the address doesn't resolve:
+
+1. **Find the IP directly:** Check your router's DHCP lease list for a device named `piccolo` and use the IP (e.g., `http://192.168.1.42`).
+2. **From your LAN:** `arp -a` or `ping piccolo.local` from another device on the same network.
+3. **VirtualBox users:** Make sure the network adapter is set to **Bridged Adapter**, not NAT — this is the most common cause.
+
 ---
 
 ## Why Piccolo OS
