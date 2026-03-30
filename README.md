@@ -1,24 +1,26 @@
-# Piccolo OS ![Stage: Alpha](https://img.shields.io/badge/Stage-Alpha-orange)
+# Piccolo OS ![Stage: Alpha](https://img.shields.io/badge/Stage-Alpha-orange) ![GitHub last commit](https://img.shields.io/github/last-commit/AtDexters-Lab/piccolo-os)
 
-A privacy-first, headless operating system for homelabs — built for tinkerers, self‑hosters, and anyone reclaiming control of their digital world.
+A privacy-first, headless operating system for homelabs — self‑host services on your own hardware with one‑click app deployment and encrypted remote access.
 
-> **Note:** Piccolo OS is in early development. This repo captures our vision, architecture, and current progress. Follow along, contribute, or roll up your sleeves and build with us.
-
----
-
-## 📖 Table of Contents
-- [Install and Quick Start](#-install-and-quick-start)
-- [Why Piccolo OS](#-why-piccolo-os)
-- [Architecture](#-system-architecture)
-- [Contribute](#-contribute)
+> Piccolo OS is in alpha. Install, portal, app deployment, encrypted volumes, and remote access work today. Expect rough edges — [file issues](https://github.com/AtDexters-Lab/piccolo-os/issues) and we'll fix them.
 
 ---
 
-## 🚀 Install and Quick Start
+## Table of Contents
+- [Install and Quick Start](#install-and-quick-start)
+- [Why Piccolo OS](#why-piccolo-os)
+- [System Architecture](#system-architecture)
+- [Deployment Options](#deployment-options)
+- [The Piccolo Ecosystem](#the-piccolo-ecosystem)
+- [Contribute](#contribute)
+
+---
+
+## Install and Quick Start
 
 Piccolo OS is built for **x86_64** and **ARM64**. The easiest way to try it is in a Virtual Machine or by flashing it to a USB drive/SD card for bare metal.
 
-> **💡 Tip: Faster Downloads**
+> **Tip: Faster Downloads**
 > Browser downloads can be slow for large OS images. We recommend using a download manager like `aria2c` with multiple streams.
 > ```bash
 > # Example: Download with 16 connections
@@ -95,31 +97,16 @@ Follow the **Method B (Raw Image)** instructions from Option 2. Ensure your boar
 
 ---
 
-## ❓ Why Piccolo OS
-- **Self-host with confidence:** Run services 24×7 on your own hardware.
+## Why Piccolo OS
+- **Self-host with confidence:** If you can flash a USB drive, you can run a home server.
 - **Local-first:** Fully usable on LAN with no cloud dependency.
 - **Open by design:** Piccolo OS and remote access (Namek + Nexus) are open source.
 - **Free remote access:** Always free — self‑hosted or managed via Piccolo Network.
 - **Secure by default:** Device‑terminated TLS, encrypted data, hardened base OS.
 
-### Who It’s For
-- **Tinkerers and builders:** Comfortable with containers; want a stable, boring base.
-- **Privacy‑first users:** Prefer surveillance‑free tech and true data ownership.
-
-### Vision
-We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just possible, but joyful.
-
-### Core Principles
-- **Local‑first, cloud‑optional:** Everything works locally; remote access is an optional plug‑in.
-- **Immutable base:** Built on SUSE MicroOS (read‑only root, transactional updates, rollback).
-- **Container‑native:** Podman + systemd; rootless by default for managed apps.
-- **Device‑terminated TLS:** Certificates and keys live on the device.
-- **Strong data protection:** Per‑directory encryption (gocryptfs‑style), password‑derived keys, optional TPM assist, and a recovery key.
-- **Open source:** Code and specs are open; contributions welcome.
-
 ---
 
-## 🏗 System Architecture
+## System Architecture
 ```
 +---------------------------------------------------+
 |          Layer 3: Your Applications               |
@@ -137,9 +124,15 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 +---------------------------------------------------+
 ```
 
+### Design Principles
+- **Immutable base:** Built on SUSE MicroOS (read‑only root, transactional updates, rollback).
+- **Container‑native:** Podman + systemd; rootless by default for managed apps.
+- **Device‑terminated TLS:** Certificates and keys live on the device.
+- **Strong data protection:** Per‑directory encryption (gocryptfs‑style), password‑derived keys, optional TPM assist, and a recovery key.
+
 ### What You Can Do Today
 - **Headless operation:** Access the admin portal at `http://piccolo.local` (Ethernet‑only).
-- **One‑click app deployment:** Install apps from the open source App Store.
+- **One‑click app deployment:** Vaultwarden, Immich, Uptime Kuma, WordPress, and more from the open source App Store.
 - **Encrypted volumes:** Per‑directory encryption with gated unlock and recovery key support.
 - **Updates:** Transactional OS updates with rollback; app updates and revert.
 - **Remote access:** Publish over HTTPS with device‑terminated TLS. Self‑host Namek + Nexus or use Piccolo Network.
@@ -152,29 +145,35 @@ We believe in a user‑owned internet. Piccolo OS makes self‑hosting not just 
 
 ---
 
-## 🛠 Two Ways to Use
+## Deployment Options
+
+Remote access is always free — self‑hosted or managed.
+
 ### 1. Self‑Hosted
-- Run your own [Namek Server](https://github.com/AtDexters-Lab/namek-server) + [Nexus Proxy](https://github.com/AtDexters-Lab/nexus-proxy-server).
-- Full control over every service, every update, every byte.
+Run your own [Namek Server](https://github.com/AtDexters-Lab/namek-server) + [Nexus Proxy](https://github.com/AtDexters-Lab/nexus-proxy-server). Full control over every service, every update, every byte.
 
 ### 2. Piccolo Network (Managed)
 - Managed remote access — zero setup required.
 - Federated encrypted storage (planned, subscription).
-- Hassle‑free remote updates.
+- Remote updates (planned).
 
 ---
 
-## 📦 App Store
-The App Store is an open source repo — any app defined there can be installed on Piccolo OS: [piccolo-store](https://github.com/AtDexters-Lab/piccolo-store).
+## The Piccolo Ecosystem
 
-Current apps include Vaultwarden, WordPress, Immich, Uptime Kuma, Homebox, Code Server, and more.
-
-## ⚙️ Piccolod
-- [piccolod](https://github.com/AtDexters-Lab/piccolod) is the control-plane daemon for Piccolo OS. It exposes the HTTP API, manages runtime supervisors, and serves the minimal UI.
+| Component | Role |
+|-----------|------|
+| **[piccolo-os](https://github.com/AtDexters-Lab/piccolo-os)** | **OS images, install guides, and project hub (this repo)** |
+| [piccolod](https://github.com/AtDexters-Lab/piccolod) | On‑device daemon — portal, app management, encryption |
+| [namek-server](https://github.com/AtDexters-Lab/namek-server) | Orchestrator — device auth, DNS, certificates |
+| [nexus-proxy-server](https://github.com/AtDexters-Lab/nexus-proxy-server) | Edge relay — remote access with device‑terminated TLS |
+| [piccolo-store](https://github.com/AtDexters-Lab/piccolo-store) | App catalog — manifests for installable apps |
 
 ---
 
-## 🤝 Contribute
+## Contribute
+
+Piccolo OS exists to make self‑hosting practical on hardware you own.
 We’re early, scrappy, and community‑powered. PRs, issues, and design discussions are welcome.
 
 ### Build Infrastructure
@@ -190,9 +189,12 @@ cd piccolo-os
 # See kiwi/ directory for image definitions and packages/ for RPM specs.
 ```
 
-### Join the conversation
-- 💬 [GitHub Discussions](https://github.com/AtDexters-Lab/piccolo-os/discussions)
-- 🔗 [Follow on LinkedIn](https://www.linkedin.com/company/piccolo25/)
+### Join the Conversation
+- [GitHub Issues](https://github.com/AtDexters-Lab/piccolo-os/issues)
+- [GitHub Discussions](https://github.com/AtDexters-Lab/piccolo-os/discussions)
+- [Follow on LinkedIn](https://www.linkedin.com/company/piccolo25/)
 
-## 📜 License
+---
+
+## License
 Piccolo OS is free and open source under the [AGPL‑3.0](./LICENSE).
