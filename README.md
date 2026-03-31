@@ -9,6 +9,7 @@ A privacy-first, headless operating system for homelabs — self‑host services
 ## Table of Contents
 - [Install and Quick Start](#install-and-quick-start)
 - [Why Piccolo OS](#why-piccolo-os)
+- [See It in Action](#see-it-in-action)
 - [System Architecture](#system-architecture)
 - [Deployment Options](#deployment-options)
 - [The Piccolo Ecosystem](#the-piccolo-ecosystem)
@@ -114,6 +115,46 @@ mDNS (`.local` resolution) doesn't work on every network. If the address doesn't
 
 ---
 
+## See It in Action
+
+**First boot** — open `http://piccolo.local` and start setup
+![Setup start](docs/screenshots/01-setup-start.jpg)
+
+<details>
+<summary><strong>Full setup walkthrough</strong> — 3 more steps, takes about a minute (click to expand)</summary>
+<br>
+
+**Claim your address** — pick a `piccolospace.com` subdomain for remote access
+![Choose hostname](docs/screenshots/02-choose-remote-hostname.jpg)
+
+**Encrypt your data** — set an encryption password for all stored data
+![Encryption setup](docs/screenshots/03-encryption-pwd-setup.jpg)
+
+**Create a passkey** — sign in remotely without typing your encryption password (phone, laptop, or security key)
+![Passkey setup](docs/screenshots/04-remote-passkey-setup.jpg)
+
+</details>
+
+**Your portal** — browse apps, access remotely, and manage settings from one place
+![Welcome screen](docs/screenshots/05-welcome.jpg)
+
+**App Store** — browse by category, install with one click
+![App Store](docs/screenshots/06-app-store.jpg)
+
+**Install an app** — one form, one click
+![App installer](docs/screenshots/07-app-installer.jpg)
+
+**All your apps, one interface** — Homebox and Immich running side by side in the portal
+![Apps in portal](docs/screenshots/08-apps-open-in-iframes.jpg)
+
+**App management** — live logs, controls, and updates for every running app
+![App management](docs/screenshots/09-app-management.jpg)
+
+**Remote access** — the same portal over HTTPS at your `piccolospace.com` address, with terminal and system settings
+![Remote access](docs/screenshots/10-remote-access.jpg)
+
+---
+
 ## System Architecture
 ```
 +---------------------------------------------------+
@@ -140,7 +181,7 @@ mDNS (`.local` resolution) doesn't work on every network. If the address doesn't
 
 ### What You Can Do Today
 - **Headless operation:** Access the admin portal at `http://piccolo.local` (Ethernet‑only).
-- **One‑click app deployment:** Vaultwarden, Immich, Uptime Kuma, WordPress, and more from the open source App Store.
+- **One‑click app deployment:** Vaultwarden, Immich, Uptime Kuma, WordPress, Homebox, Code Server, and more from the open source App Store.
 - **Encrypted volumes:** Per‑directory encryption with gated unlock and recovery key support.
 - **Updates:** Transactional OS updates with rollback; app updates and revert.
 - **Remote access:** Publish over HTTPS with device‑terminated TLS. Self‑host Namek + Nexus or use Piccolo Network.
