@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.1
+Version:        0.3.2
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -14,9 +14,6 @@ Source4:        health-checker-piccolo.conf
 Source5:        piccolo-logind.conf
 Source6:        piccolo-sleep.conf
 Source7:        piccolo-wifi-powersave.conf
-Source8:        piccolo-net-watchdog.sh
-Source9:        piccolo-net-watchdog.service
-Source10:       piccolo-net-watchdog.timer
 Source11:       piccolo-clock-epoch.sh
 Source12:       piccolo-clock-epoch.service
 Source13:       piccolo-clock-epoch-save.service
@@ -54,7 +51,9 @@ BuildRequires:  systemd
 BuildRequires:  firewalld
 BuildRequires:  libxml2-tools
 # --- Piccolo policy deps (not from upstream patterns) ---
-Requires:       piccolod
+# net-watchdog moved into piccolod's connectivity state machine in this version.
+# Require the build that contains the replacement to avoid a watchdog gap.
+Requires:       piccolod >= 0.8.0
 Requires:       firewalld
 
 # --- Flattened from patterns-microos-basesystem (microos_base) ---
@@ -197,10 +196,7 @@ install -D -m 644 %{SOURCE6} %{buildroot}%{_prefix}/lib/systemd/sleep.conf.d/pic
 # 9. Disable WiFi power saving for reliable LAN connectivity
 install -D -m 644 %{SOURCE7} %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf
 
-# 10. Install network health watchdog
-install -D -m 755 %{SOURCE8} %{buildroot}%{_libexecdir}/piccolo/net-watchdog.sh
-install -D -m 644 %{SOURCE9} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-net-watchdog.service
-install -D -m 644 %{SOURCE10} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-net-watchdog.timer
+# 10. Persistent state directory (used by clock-epoch, piccolod watchdog)
 install -d -m 755 %{buildroot}/var/lib/piccolo
 
 # 11. Install clock epoch service for RTC-less devices
@@ -256,8 +252,18 @@ if [ -x /usr/bin/firewall-offline-cmd ]; then
     fi
 fi
 
-# 5. Enable network health watchdog timer
-/usr/bin/systemctl --root=/ --no-reload enable piccolo-net-watchdog.timer
+# 5. Clean up removed net-watchdog on upgrade (files removed in 0.3.2).
+#    disable (--root=/) is authoritative and works in chroot/transactional-update.
+#    stop is best-effort — only takes effect on a live (non-chroot) system.
+if [ $1 -ge 2 ]; then
+    /usr/bin/systemctl --root=/ --no-reload disable piccolo-net-watchdog.timer 2>/dev/null || :
+    /usr/bin/systemctl stop piccolo-net-watchdog.timer piccolo-net-watchdog.service 2>/dev/null || :
+    # Note: /var/lib/piccolo/net-watchdog-reboots is intentionally NOT deleted here.
+    # On MicroOS, /var is shared with the still-running old snapshot until reboot.
+    # Clearing the reboot counter while the old watchdog timer runs could allow
+    # an extra reboot during a network failure loop. The file is harmless and tiny;
+    # piccolod cleans it up on first run.
+fi
 
 # 6. Explicitly enable health-checker for boot-time rollback.
 # MicroOS preset should enable this, but we make it explicit since
@@ -303,9 +309,6 @@ if [ $1 -eq 0 ]; then
     /usr/bin/systemctl --root=/ unmask \
         sleep.target suspend.target hibernate.target \
         hybrid-sleep.target suspend-then-hibernate.target 2>/dev/null || :
-    # Disable network watchdog (from %post)
-    /usr/bin/systemctl --root=/ --no-reload disable piccolo-net-watchdog.timer 2>/dev/null || :
-    /usr/bin/systemctl stop piccolo-net-watchdog.timer piccolo-net-watchdog.service 2>/dev/null || :
     # Note: health-checker.service is intentionally NOT disabled on uninstall.
     # MicroOS presets enable it by default; our %post enable is belt-and-suspenders.
     # Disable clock epoch service and timer (from %post)
@@ -347,9 +350,6 @@ fi
 %dir %{_prefix}/lib/NetworkManager/conf.d
 %{_prefix}/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf
 %dir %{_libexecdir}/piccolo
-%{_libexecdir}/piccolo/net-watchdog.sh
-%{_prefix}/lib/systemd/system/piccolo-net-watchdog.service
-%{_prefix}/lib/systemd/system/piccolo-net-watchdog.timer
 %{_libexecdir}/piccolo/clock-epoch.sh
 %{_prefix}/lib/systemd/system/piccolo-clock-epoch.service
 %{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.service
@@ -366,6 +366,11 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Tue Mar 31 2026 Piccolo Team <dev@piccolo.local> 0.3.2-0
+- Remove piccolo-net-watchdog (script, service, timer). Network health
+  monitoring migrates into piccolod's connectivity state machine for
+  unified coordination with WiFi/AP mode transitions.
+
 * Sun Mar 22 2026 Piccolo Team <dev@piccolo.local> 0.3.1-0
 - Blacklist intel_oc_wdt and softdog kernel modules to ensure the reliable
   iTCO_wdt claims /dev/watchdog0 on Intel platforms. No-op on AMD/ARM.
