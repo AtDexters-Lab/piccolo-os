@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.2
+Version:        0.3.3
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -187,7 +187,7 @@ install -m 755 %{SOURCE3} %{buildroot}%{_libexecdir}/health-checker/piccolod.sh
 install -d -m 755 %{buildroot}%{_prefix}/lib/systemd/system/health-checker.service.d
 install -m 644 %{SOURCE4} %{buildroot}%{_prefix}/lib/systemd/system/health-checker.service.d/piccolo.conf
 
-# 7. Always-on power policy: prevent lid-close suspend, ignore sleep keys
+# 7. Always-on power policy: ignore lid close, power key, and sleep keys
 install -D -m 644 %{SOURCE5} %{buildroot}%{_prefix}/lib/systemd/logind.conf.d/piccolo.conf
 
 # 8. Disable all sleep states at systemd level
@@ -366,6 +366,10 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Wed Jun 03 2026 Piccolo Team <dev@piccolo.local> 0.3.3-0
+- Ignore short power-key presses so accidental button taps do not power off
+  Piccolo appliances.
+
 * Tue Mar 31 2026 Piccolo Team <dev@piccolo.local> 0.3.2-0
 - Remove piccolo-net-watchdog (script, service, timer). Network health
   monitoring migrates into piccolod's connectivity state machine for
