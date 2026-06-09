@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.4
+Version:        0.3.5
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -51,9 +51,10 @@ BuildRequires:  systemd
 BuildRequires:  firewalld
 BuildRequires:  libxml2-tools
 # --- Piccolo policy deps (not from upstream patterns) ---
-# net-watchdog moved into piccolod's connectivity state machine in this version.
-# Require the build that contains the replacement to avoid a watchdog gap.
-Requires:       piccolod >= 0.8.0
+# piccolod is the local control plane and health-check target. Keep this
+# unversioned: its package version follows piccolod releases, not
+# piccolo-os-support policy-package versions.
+Requires:       piccolod
 Requires:       firewalld
 
 # --- Flattened from patterns-microos-basesystem (microos_base) ---
@@ -425,6 +426,10 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Tue Jun 09 2026 Piccolo Team <dev@piccolo.local> 0.3.5-0
+- Restore unversioned piccolod dependency; piccolod has its own release stream.
+- Correct 0.3.0 changelog weekday.
+
 * Tue Jun 09 2026 Piccolo Team <dev@piccolo.local> 0.3.4-0
 - Add guarded reboot=cold kernel command-line migration for x86 devices,
   covering both sdbootutil and GRUB installs.
@@ -444,7 +449,7 @@ fi
 - Add piccolo-watchdog-check.service: boot-time oneshot that logs which
   watchdog driver owns watchdog0 for fleet-wide observability.
 
-* Mon Mar 17 2026 Piccolo Team <dev@piccolo.local> 0.3.0-0
+* Tue Mar 17 2026 Piccolo Team <dev@piccolo.local> 0.3.0-0
 - Switch health-checker plugin from /health/live to /health/ready endpoint.
   Enables boot-time rollback on fatal component errors (503 on LevelError).
 - Explicitly enable health-checker.service in %%post as belt-and-suspenders
