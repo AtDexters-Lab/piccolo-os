@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.3
+Version:        0.3.4
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -299,6 +299,65 @@ touch /var/lib/systemd/linger/piccolo-runtime
 # 9. Enable watchdog driver validation at boot
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-watchdog-check.service
 
+# 10. Prefer cold reboot semantics on x86 appliances.
+# Reboots are rare for Piccolo OS devices; reliability matters more than the
+# speed difference between warm and cold-style firmware restart paths.
+piccolo_regenerate_sdboot_entries() {
+    case "$(uname -m)" in
+        x86_64) sdboot_arch=x64 ;;
+        i?86) sdboot_arch=ia32 ;;
+        *) sdboot_arch= ;;
+    esac
+
+    if [ -n "${sdboot_arch:-}" ] && [ -d /boot/efi ]; then
+        export hostonly_l=no
+        /usr/bin/sdbootutil -v --arch "$sdboot_arch" --esp-path /boot/efi --entry-token=auto add-all-kernels || \
+            echo "piccolo-os-support: WARNING failed to regenerate boot entries after adding reboot=cold" >&2
+    else
+        echo "piccolo-os-support: WARNING reboot=cold is configured but sdbootutil or /boot/efi is unavailable" >&2
+    fi
+}
+
+piccolo_regenerate_grub_config() {
+    if [ -x /usr/sbin/grub2-mkconfig ] && [ -d /boot/grub2 ]; then
+        /usr/sbin/grub2-mkconfig -o /boot/grub2/grub.cfg || \
+            echo "piccolo-os-support: WARNING failed to regenerate GRUB config after adding reboot=cold" >&2
+    elif [ -x /usr/sbin/update-bootloader ]; then
+        /usr/sbin/update-bootloader --reinit || \
+            echo "piccolo-os-support: WARNING failed to reinitialize bootloader after adding reboot=cold" >&2
+    else
+        echo "piccolo-os-support: WARNING reboot=cold is configured but no GRUB regeneration command is available" >&2
+    fi
+}
+
+case "$(uname -m)" in
+    x86_64|i?86)
+        if [ -x /usr/bin/sdbootutil ] && [ -e /etc/kernel/cmdline ]; then
+            if grep -Eq '(^|[[:space:]])reboot=cold($|[[:space:]])' /etc/kernel/cmdline; then
+                piccolo_regenerate_sdboot_entries
+            elif grep -Eq '(^|[[:space:]])reboot=' /etc/kernel/cmdline; then
+                echo "piccolo-os-support: leaving existing reboot= kernel option unchanged" >&2
+            else
+                sed -i 's/$/ reboot=cold/' /etc/kernel/cmdline
+                piccolo_regenerate_sdboot_entries
+            fi
+        elif [ -e /etc/default/grub ]; then
+            if grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT=.*reboot=cold' /etc/default/grub; then
+                piccolo_regenerate_grub_config
+            elif grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT=.*reboot=' /etc/default/grub; then
+                echo "piccolo-os-support: leaving existing reboot= kernel option unchanged" >&2
+            elif grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT=".*"$' /etc/default/grub; then
+                sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/ s/"$/ reboot=cold"/' /etc/default/grub
+                piccolo_regenerate_grub_config
+            else
+                echo "piccolo-os-support: WARNING could not update GRUB_CMDLINE_LINUX_DEFAULT format" >&2
+            fi
+        else
+            echo "piccolo-os-support: no supported kernel command-line source found; skipping reboot=cold default" >&2
+        fi
+        ;;
+esac
+
 %preun
 if [ $1 -eq 0 ]; then
     # Unmask consoles (from %post)
@@ -366,6 +425,10 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Tue Jun 09 2026 Piccolo Team <dev@piccolo.local> 0.3.4-0
+- Add guarded reboot=cold kernel command-line migration for x86 devices,
+  covering both sdbootutil and GRUB installs.
+
 * Wed Jun 03 2026 Piccolo Team <dev@piccolo.local> 0.3.3-0
 - Ignore short power-key presses so accidental button taps do not power off
   Piccolo appliances.

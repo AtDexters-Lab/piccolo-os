@@ -162,6 +162,9 @@ consoles=''
 # Lid workaround: report lid as open at boot so a closed-lid reboot
 # does not trigger ACPI shutdown before logind starts (see piccolo-logind.conf).
 #
+# Reboot reliability: prefer the x86 cold restart path. Piccolo OS reboots are
+# rare enough that avoiding warm-reboot firmware state is worth the speed trade.
+#
 # NOTE: Do NOT add reboot=efi here. Investigated 2026-03-28 for an HP Laptop
 # 15q-bu1xx (BIOS F.33) that intermittently powers off instead of rebooting.
 # reboot=efi is unsafe as a blanket default because:
@@ -173,6 +176,9 @@ consoles=''
 # The HP issue is an intermittent firmware bug (worked on retry); the correct
 # fix for per-device reboot quirks is an upstream kernel DMI quirk table entry.
 cmdline=('quiet' 'systemd.show_status=yes' 'button.lid_init_state=open' ${consoles})
+case "$(uname -m)" in
+	x86_64|i?86) cmdline+=('reboot=cold') ;;
+esac
 rpm -q wicked && cmdline+=('net.ifnames=0')
 
 ignition_platform='metal'
