@@ -67,6 +67,7 @@ fi
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
 policy_script="$repo_root/packages/piccolo-os-support/piccolo-snapper-policy.sh"
+firewalld_policy_script="$repo_root/packages/piccolo-os-support/piccolo-firewalld-policy.sh"
 
 checks=0
 failures=0
@@ -370,6 +371,19 @@ check_snapper_policy() {
     fi
 }
 
+check_firewalld_policy() {
+    local firewalld_config
+    firewalld_config=$(root_path etc/firewalld/firewalld.conf)
+
+    if [ ! -x "$firewalld_policy_script" ]; then
+        fail "missing executable policy helper: $firewalld_policy_script"
+    elif "$firewalld_policy_script" check "$firewalld_config"; then
+        ok "firewalld default-zone policy"
+    else
+        fail "firewalld default-zone policy failed for $firewalld_config"
+    fi
+}
+
 check_boot_profile() {
     local ignition_platform=
 
@@ -450,6 +464,8 @@ check_support_package_static_files() {
     require_same_file usr/lib/systemd/system.conf.d/piccolo.conf packages/piccolo-os-support/piccolo-system.conf "systemd watchdog policy"
     require_same_file usr/lib/sysctl.d/90-piccolo-panic-reboot.conf packages/piccolo-os-support/piccolo-panic-reboot.conf "kernel panic reboot policy"
     require_same_file usr/lib/modprobe.d/piccolo-watchdog.conf packages/piccolo-os-support/piccolo-watchdog.conf "watchdog module policy"
+    require_same_file usr/libexec/piccolo/firewalld-policy.sh packages/piccolo-os-support/piccolo-firewalld-policy.sh "installed firewalld policy helper"
+    require_executable usr/libexec/piccolo/firewalld-policy.sh "installed firewalld policy helper"
     require_same_file usr/libexec/piccolo/snapper-policy.sh packages/piccolo-os-support/piccolo-snapper-policy.sh "installed Snapper policy helper"
     require_executable usr/libexec/piccolo/snapper-policy.sh "installed Snapper policy helper"
     require_same_file usr/libexec/piccolo/watchdog-check.sh packages/piccolo-os-support/piccolo-watchdog-check.sh "watchdog validation helper"
@@ -458,7 +474,7 @@ check_support_package_static_files() {
 }
 
 check_support_package_post_effects() {
-    require_regex etc/firewalld/firewalld.conf '^DefaultZone=piccolo$' "firewalld default zone"
+    check_firewalld_policy
     require_enabled_unit firewalld.service multi-user.target
     require_unit_link health-checker.service boot-complete.target.requires "health-checker.service required by boot-complete.target"
     require_unit_link health-checker.service default.target.wants "health-checker.service wanted by default.target"

@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.6
+Version:        0.3.7
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -25,6 +25,7 @@ Source18:       piccolo-watchdog.conf
 Source19:       piccolo-watchdog-check.sh
 Source20:       piccolo-watchdog-check.service
 Source21:       piccolo-snapper-policy.sh
+Source22:       piccolo-firewalld-policy.sh
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -225,6 +226,9 @@ install -D -m 644 %{SOURCE20} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-
 # 16. Snapper retention policy for appliance-sized root filesystems
 install -D -m 755 %{SOURCE21} %{buildroot}%{_libexecdir}/piccolo/snapper-policy.sh
 
+# 17. Firewalld default-zone policy for appliance firewall posture
+install -D -m 755 %{SOURCE22} %{buildroot}%{_libexecdir}/piccolo/firewalld-policy.sh
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -254,6 +258,26 @@ EOF
 PICCOLO_SNAPPER_SKIP_SYSCONFIG=1 %{buildroot}%{_libexecdir}/piccolo/snapper-policy.sh apply "$SNAPPER_TEST_CONFIG"
 PICCOLO_SNAPPER_SKIP_SYSCONFIG=1 %{buildroot}%{_libexecdir}/piccolo/snapper-policy.sh check "$SNAPPER_TEST_CONFIG"
 
+# Validate the firewalld default-zone helper.
+FIREWALLD_TEST_CONFIG=$(mktemp)
+FIREWALLD_TEST_DIR=$(mktemp -d)
+FIREWALLD_NEW_CONFIG="$FIREWALLD_TEST_DIR/firewalld/firewalld.conf"
+trap 'rm -f "$SNAPPER_TEST_CONFIG" "$FIREWALLD_TEST_CONFIG"; rm -rf "$FIREWALLD_TEST_DIR"' EXIT
+cat > "$FIREWALLD_TEST_CONFIG" <<'EOF'
+DefaultZone=public
+CleanupOnExit=yes
+EOF
+FIREWALLD_TEST_PARENT=$(dirname "$FIREWALLD_TEST_CONFIG")
+FIREWALLD_TEST_PARENT_MODE=$(stat -c %a "$FIREWALLD_TEST_PARENT")
+%{buildroot}%{_libexecdir}/piccolo/firewalld-policy.sh apply "$FIREWALLD_TEST_CONFIG"
+%{buildroot}%{_libexecdir}/piccolo/firewalld-policy.sh check "$FIREWALLD_TEST_CONFIG"
+test "$(stat -c %a "$FIREWALLD_TEST_PARENT")" = "$FIREWALLD_TEST_PARENT_MODE"
+grep -q '^CleanupOnExit=yes$' "$FIREWALLD_TEST_CONFIG"
+%{buildroot}%{_libexecdir}/piccolo/firewalld-policy.sh apply "$FIREWALLD_NEW_CONFIG"
+%{buildroot}%{_libexecdir}/piccolo/firewalld-policy.sh check "$FIREWALLD_NEW_CONFIG"
+test "$(stat -c %a "$(dirname "$FIREWALLD_NEW_CONFIG")")" = "750"
+test "$(stat -c %a "$FIREWALLD_NEW_CONFIG")" = "644"
+
 %post
 # 1. Mask physical/serial consoles to prevent login
 # Use --root=/ --no-reload to ensure this works in chroot/image-build environments
@@ -268,14 +292,9 @@ PICCOLO_SNAPPER_SKIP_SYSCONFIG=1 %{buildroot}%{_libexecdir}/piccolo/snapper-poli
     hybrid-sleep.target suspend-then-hibernate.target
 
 # 4. Enforce Firewall Zone
-# We use firewall-offline-cmd because this script often runs during image build
-# (chroot) where firewalld daemon is not running.
-if [ -x /usr/bin/firewall-offline-cmd ]; then
-    CURRENT_ZONE=$(firewall-offline-cmd --get-default-zone)
-    if [ "$CURRENT_ZONE" != "piccolo" ]; then
-        firewall-offline-cmd --set-default-zone=piccolo
-    fi
-fi
+# /etc/firewalld/firewalld.conf is mutable appliance state, so package upgrades
+# must migrate existing systems in addition to the KIWI image seed.
+/usr/libexec/piccolo/firewalld-policy.sh apply /etc/firewalld/firewalld.conf
 
 # 5. Enforce Snapper retention policy on fresh installs and upgrades.
 # /etc/snapper/configs/root is mutable appliance state, so package upgrades
@@ -450,12 +469,16 @@ fi
 %{_prefix}/lib/systemd/system.conf.d/piccolo.conf
 %{_prefix}/lib/sysctl.d/90-piccolo-panic-reboot.conf
 %{_prefix}/lib/modprobe.d/piccolo-watchdog.conf
+%{_libexecdir}/piccolo/firewalld-policy.sh
 %{_libexecdir}/piccolo/snapper-policy.sh
 %{_libexecdir}/piccolo/watchdog-check.sh
 %{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
 %dir /var/lib/piccolo
 
 %changelog
+* Mon Jun 22 2026 Piccolo Team <dev@piccolo.local> 0.3.7-0
+- Enforce firewalld default zone directly in image builds and upgrades.
+
 * Mon Jun 22 2026 Piccolo Team <dev@piccolo.local> 0.3.6-0
 - Enforce appliance Snapper retention policy in image builds and upgrades.
 
