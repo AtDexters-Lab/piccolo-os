@@ -52,12 +52,14 @@ Source22:       piccolo-firewalld-policy.sh
 BuildRequires:  systemd
 BuildRequires:  firewalld
 BuildRequires:  libxml2-tools
+BuildRequires:  snapper
 # --- Piccolo policy deps (not from upstream patterns) ---
 # piccolod is the local control plane and health-check target. Keep this
 # unversioned: its package version follows piccolod releases, not
 # piccolo-os-support policy-package versions.
 Requires:       piccolod
 Requires:       firewalld
+Requires(post): snapper
 
 # --- Flattened from patterns-microos-basesystem (microos_base) ---
 # See ci/upstream-microos-base-requires.txt for upstream baseline and exclusions.
@@ -478,6 +480,7 @@ fi
 %changelog
 * Mon Jun 22 2026 Piccolo Team <dev@piccolo.local> 0.3.7-0
 - Enforce firewalld default zone directly in image builds and upgrades.
+- Declare Snapper as a build and scriptlet dependency for policy migration.
 
 * Mon Jun 22 2026 Piccolo Team <dev@piccolo.local> 0.3.6-0
 - Enforce appliance Snapper retention policy in image builds and upgrades.
