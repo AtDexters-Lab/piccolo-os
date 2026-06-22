@@ -71,10 +71,7 @@ if [ -x /usr/bin/snapper ]; then
 		|| cp /usr/share/snapper/config-templates/default /etc/snapper/configs/root
 	baseUpdateSysConfig /etc/sysconfig/snapper SNAPPER_CONFIGS root
 
-	# Adjust parameters
-	sed -i'' 's/^TIMELINE_CREATE=.*$/TIMELINE_CREATE="no"/g' /etc/snapper/configs/root
-	sed -i'' 's/^NUMBER_LIMIT=.*$/NUMBER_LIMIT="2-10"/g' /etc/snapper/configs/root
-	sed -i'' 's/^NUMBER_LIMIT_IMPORTANT=.*$/NUMBER_LIMIT_IMPORTANT="4-10"/g' /etc/snapper/configs/root
+	/usr/libexec/piccolo/snapper-policy.sh apply /etc/snapper/configs/root
 else
 	# Avoid boo#1237466 from reoccuring
 	echo "snapper not installed?"

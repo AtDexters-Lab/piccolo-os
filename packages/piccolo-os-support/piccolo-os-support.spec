@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.5
+Version:        0.3.6
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -24,6 +24,7 @@ Source17:       piccolo-panic-reboot.conf
 Source18:       piccolo-watchdog.conf
 Source19:       piccolo-watchdog-check.sh
 Source20:       piccolo-watchdog-check.service
+Source21:       piccolo-snapper-policy.sh
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -132,6 +133,7 @@ Requires:       patterns-base-bootloader
 # --- Scriptlet deps ---
 Requires(post): shadow
 Requires(post): systemd
+Requires(post): bash
 Requires(preun): systemd
 
 %description
@@ -220,6 +222,9 @@ install -D -m 644 %{SOURCE18} %{buildroot}%{_prefix}/lib/modprobe.d/piccolo-watc
 install -D -m 755 %{SOURCE19} %{buildroot}%{_libexecdir}/piccolo/watchdog-check.sh
 install -D -m 644 %{SOURCE20} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
 
+# 16. Snapper retention policy for appliance-sized root filesystems
+install -D -m 755 %{SOURCE21} %{buildroot}%{_libexecdir}/piccolo/snapper-policy.sh
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -229,6 +234,25 @@ grep -c 'solvable_name:' %{buildroot}%{_sysconfdir}/zypp/locks | grep -q '^4$'
 for pkg in openssh openssh-server openssh-clients rebootmgr; do
     grep -q "solvable_name: $pkg$" %{buildroot}%{_sysconfdir}/zypp/locks || exit 1
 done
+
+# Validate the Snapper appliance policy helper.
+SNAPPER_TEST_CONFIG=$(mktemp)
+trap 'rm -f "$SNAPPER_TEST_CONFIG"' EXIT
+cat > "$SNAPPER_TEST_CONFIG" <<'EOF'
+NUMBER_CLEANUP="no"
+NUMBER_LIMIT="50"
+NUMBER_LIMIT_IMPORTANT="10"
+TIMELINE_CREATE="yes"
+TIMELINE_CLEANUP="yes"
+TIMELINE_LIMIT_HOURLY="10"
+TIMELINE_LIMIT_DAILY="10"
+TIMELINE_LIMIT_MONTHLY="10"
+TIMELINE_LIMIT_YEARLY="10"
+SPACE_LIMIT="0.5"
+FREE_LIMIT="0.2"
+EOF
+PICCOLO_SNAPPER_SKIP_SYSCONFIG=1 %{buildroot}%{_libexecdir}/piccolo/snapper-policy.sh apply "$SNAPPER_TEST_CONFIG"
+PICCOLO_SNAPPER_SKIP_SYSCONFIG=1 %{buildroot}%{_libexecdir}/piccolo/snapper-policy.sh check "$SNAPPER_TEST_CONFIG"
 
 %post
 # 1. Mask physical/serial consoles to prevent login
@@ -253,7 +277,12 @@ if [ -x /usr/bin/firewall-offline-cmd ]; then
     fi
 fi
 
-# 5. Clean up removed net-watchdog on upgrade (files removed in 0.3.2).
+# 5. Enforce Snapper retention policy on fresh installs and upgrades.
+# /etc/snapper/configs/root is mutable appliance state, so package upgrades
+# must migrate existing systems in addition to the KIWI image seed.
+/usr/libexec/piccolo/snapper-policy.sh apply /etc/snapper/configs/root
+
+# 6. Clean up removed net-watchdog on upgrade (files removed in 0.3.2).
 #    disable (--root=/) is authoritative and works in chroot/transactional-update.
 #    stop is best-effort — only takes effect on a live (non-chroot) system.
 if [ $1 -ge 2 ]; then
@@ -266,12 +295,12 @@ if [ $1 -ge 2 ]; then
     # piccolod cleans it up on first run.
 fi
 
-# 6. Explicitly enable health-checker for boot-time rollback.
+# 7. Explicitly enable health-checker for boot-time rollback.
 # MicroOS preset should enable this, but we make it explicit since
 # this service is a critical safety net.
 /usr/bin/systemctl --root=/ --no-reload enable health-checker.service 2>/dev/null || :
 
-# 7. Enable clock epoch service and periodic save timer
+# 8. Enable clock epoch service and periodic save timer
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-clock-epoch.service
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-clock-epoch-save.timer
 # Seed epoch file so the first reboot after upgrade is protected.
@@ -281,7 +310,7 @@ fi
 mkdir -p /var/lib/piccolo
 date +%s > /var/lib/piccolo/clock-epoch 2>/dev/null || :
 
-# 8. Rootless Podman prerequisites (RFC 20260206)
+# 9. Rootless Podman prerequisites (RFC 20260206)
 # Create piccolo-runtime user for rootless Podman execution.
 if ! getent passwd piccolo-runtime > /dev/null 2>&1; then
     useradd --system --home-dir /home/piccolo-runtime --create-home \
@@ -297,10 +326,10 @@ fi
 mkdir -p /var/lib/systemd/linger
 touch /var/lib/systemd/linger/piccolo-runtime
 
-# 9. Enable watchdog driver validation at boot
+# 10. Enable watchdog driver validation at boot
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-watchdog-check.service
 
-# 10. Prefer cold reboot semantics on x86 appliances.
+# 11. Prefer cold reboot semantics on x86 appliances.
 # Reboots are rare for Piccolo OS devices; reliability matters more than the
 # speed difference between warm and cold-style firmware restart paths.
 piccolo_regenerate_sdboot_entries() {
@@ -421,11 +450,15 @@ fi
 %{_prefix}/lib/systemd/system.conf.d/piccolo.conf
 %{_prefix}/lib/sysctl.d/90-piccolo-panic-reboot.conf
 %{_prefix}/lib/modprobe.d/piccolo-watchdog.conf
+%{_libexecdir}/piccolo/snapper-policy.sh
 %{_libexecdir}/piccolo/watchdog-check.sh
 %{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
 %dir /var/lib/piccolo
 
 %changelog
+* Mon Jun 22 2026 Piccolo Team <dev@piccolo.local> 0.3.6-0
+- Enforce appliance Snapper retention policy in image builds and upgrades.
+
 * Tue Jun 09 2026 Piccolo Team <dev@piccolo.local> 0.3.5-0
 - Restore unversioned piccolod dependency; piccolod has its own release stream.
 - Correct 0.3.0 changelog weekday.
