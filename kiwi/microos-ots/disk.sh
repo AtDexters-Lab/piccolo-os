@@ -3,6 +3,10 @@ set -euxo pipefail
 
 /usr/libexec/setup-etc-subvol
 
+if [ -x /usr/libexec/piccolo/snapper-policy.sh ]; then
+	/usr/libexec/piccolo/snapper-policy.sh apply /etc/snapper/configs/root
+fi
+
 echo "####### BOOTLOADER INSTALL (disk.sh)"
 
 if [ -x /usr/bin/sdbootutil ]; then

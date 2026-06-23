@@ -196,6 +196,18 @@ require_assignment() {
     fi
 }
 
+run_privileged_read() {
+    if [ "${PICCOLO_VALIDATE_PRIVILEGED_READ:-0}" = "1" ] && [ "$(id -u)" -ne 0 ]; then
+        if ! command -v sudo >/dev/null 2>&1; then
+            echo "validate-image-policy: sudo is required for privileged read checks" >&2
+            return 127
+        fi
+        sudo "$@"
+    else
+        "$@"
+    fi
+}
+
 require_optional_assignment() {
     local rel=$1
     local key=$2
@@ -377,7 +389,7 @@ check_firewalld_policy() {
 
     if [ ! -x "$firewalld_policy_script" ]; then
         fail "missing executable policy helper: $firewalld_policy_script"
-    elif "$firewalld_policy_script" check "$firewalld_config"; then
+    elif run_privileged_read "$firewalld_policy_script" check "$firewalld_config"; then
         ok "firewalld default-zone policy"
     else
         fail "firewalld default-zone policy failed for $firewalld_config"

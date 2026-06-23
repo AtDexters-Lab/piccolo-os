@@ -18,7 +18,7 @@ Examples:
     https://download.opensuse.org/repositories/home:/atdexterslab:/piccolo-os/home_atdexterslab_atdexterslab_tumbleweed/piccolo-os.x86_64-VirtualBox.vdi.xz
 
 The script needs mount privileges. If run as a normal user, it uses sudo for
-mount/umount only.
+mount/umount and permission-restricted read-only policy checks.
 EOF
 }
 
@@ -232,4 +232,4 @@ if [ -d "$mount_dir/var" ]; then
     mounted_paths+=("$mount_dir/var")
 fi
 
-"$inner_validator" --profile "$profile" --arch "$arch" "$mount_dir"
+PICCOLO_VALIDATE_PRIVILEGED_READ=1 "$inner_validator" --profile "$profile" --arch "$arch" "$mount_dir"
