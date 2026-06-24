@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.7
+Version:        0.3.8
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -26,6 +26,7 @@ Source19:       piccolo-watchdog-check.sh
 Source20:       piccolo-watchdog-check.service
 Source21:       piccolo-snapper-policy.sh
 Source22:       piccolo-firewalld-policy.sh
+Source23:       piccolo-bootstrap-dns.conf
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -202,33 +203,36 @@ install -D -m 644 %{SOURCE6} %{buildroot}%{_prefix}/lib/systemd/sleep.conf.d/pic
 # 9. Disable WiFi power saving for reliable LAN connectivity
 install -D -m 644 %{SOURCE7} %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf
 
-# 10. Persistent state directory (used by clock-epoch, piccolod watchdog)
+# 10. Keep host DNS independent from router-provided LAN DNS.
+install -D -m 644 %{SOURCE23} %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf
+
+# 11. Persistent state directory (used by clock-epoch, piccolod watchdog)
 install -d -m 755 %{buildroot}/var/lib/piccolo
 
-# 11. Install clock epoch service for RTC-less devices
+# 12. Install clock epoch service for RTC-less devices
 install -D -m 755 %{SOURCE11} %{buildroot}%{_libexecdir}/piccolo/clock-epoch.sh
 install -D -m 644 %{SOURCE12} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch.service
 install -D -m 644 %{SOURCE13} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.service
 install -D -m 644 %{SOURCE14} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.timer
 
-# 12. Install zypp package locks to prevent transactional-update from reinstalling removed packages
+# 13. Install zypp package locks to prevent transactional-update from reinstalling removed packages
 install -D -m 644 %{SOURCE15} %{buildroot}%{_sysconfdir}/zypp/locks
 
-# 13. Hardware watchdog: auto-reboot on kernel/PID-1 freeze (platform-agnostic)
+# 14. Hardware watchdog: auto-reboot on kernel/PID-1 freeze (platform-agnostic)
 install -D -m 644 %{SOURCE16} %{buildroot}%{_prefix}/lib/systemd/system.conf.d/piccolo.conf
 
-# 14. Auto-reboot on kernel panic/oops
+# 15. Auto-reboot on kernel panic/oops
 install -D -m 644 %{SOURCE17} %{buildroot}%{_prefix}/lib/sysctl.d/90-piccolo-panic-reboot.conf
 
-# 15. Watchdog module selection and boot-time validation
+# 16. Watchdog module selection and boot-time validation
 install -D -m 644 %{SOURCE18} %{buildroot}%{_prefix}/lib/modprobe.d/piccolo-watchdog.conf
 install -D -m 755 %{SOURCE19} %{buildroot}%{_libexecdir}/piccolo/watchdog-check.sh
 install -D -m 644 %{SOURCE20} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
 
-# 16. Snapper retention policy for appliance-sized root filesystems
+# 17. Snapper retention policy for appliance-sized root filesystems
 install -D -m 755 %{SOURCE21} %{buildroot}%{_libexecdir}/piccolo/snapper-policy.sh
 
-# 17. Firewalld default-zone policy for appliance firewall posture
+# 18. Firewalld default-zone policy for appliance firewall posture
 install -D -m 755 %{SOURCE22} %{buildroot}%{_libexecdir}/piccolo/firewalld-policy.sh
 
 %check
@@ -240,6 +244,10 @@ grep -c 'solvable_name:' %{buildroot}%{_sysconfdir}/zypp/locks | grep -q '^4$'
 for pkg in openssh openssh-server openssh-clients rebootmgr; do
     grep -q "solvable_name: $pkg$" %{buildroot}%{_sysconfdir}/zypp/locks || exit 1
 done
+
+# Validate bootstrap DNS policy keeps the host resolver independent from LAN DNS.
+grep -q '^\[global-dns-domain-\*\]$' %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf
+grep -q '^servers=1\.1\.1\.1;9\.9\.9\.9;$' %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf
 
 # Validate the Snapper appliance policy helper.
 SNAPPER_TEST_CONFIG=$(mktemp)
@@ -459,6 +467,7 @@ fi
 %dir %{_prefix}/lib/NetworkManager
 %dir %{_prefix}/lib/NetworkManager/conf.d
 %{_prefix}/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf
+%{_prefix}/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf
 %dir %{_libexecdir}/piccolo
 %{_libexecdir}/piccolo/clock-epoch.sh
 %{_prefix}/lib/systemd/system/piccolo-clock-epoch.service
@@ -478,6 +487,10 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Wed Jun 24 2026 Piccolo Team <dev@piccolo.local> 0.3.8-0
+- Add host bootstrap DNS policy so Piccolo can recover when LAN DNS points at
+  an app-hosted resolver that is not ready yet.
+
 * Mon Jun 22 2026 Piccolo Team <dev@piccolo.local> 0.3.7-0
 - Enforce firewalld default zone directly in image builds and upgrades.
 - Declare Snapper as a build and scriptlet dependency for policy migration.
