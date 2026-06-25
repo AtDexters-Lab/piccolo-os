@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.9
+Version:        0.3.10
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -504,6 +504,10 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Thu Jun 25 2026 Piccolo Team <dev@piccolo.local> 0.3.10-0
+- Log piccolod readiness status, curl failures, and bounded response bodies
+  during boot health checks so rollback causes are diagnosable.
+
 * Thu Jun 25 2026 Piccolo Team <dev@piccolo.local> 0.3.9-0
 - Enforce static host resolver file for bootstrap DNS instead of relying on
   NetworkManager global DNS, which still left DHCP DNS in resolv.conf.
