@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.8
+Version:        0.3.9
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -27,6 +27,7 @@ Source20:       piccolo-watchdog-check.service
 Source21:       piccolo-snapper-policy.sh
 Source22:       piccolo-firewalld-policy.sh
 Source23:       piccolo-bootstrap-dns.conf
+Source24:       piccolo-bootstrap-dns.sh
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -209,30 +210,33 @@ install -D -m 644 %{SOURCE23} %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/p
 # 11. Persistent state directory (used by clock-epoch, piccolod watchdog)
 install -d -m 755 %{buildroot}/var/lib/piccolo
 
-# 12. Install clock epoch service for RTC-less devices
+# 12. Host bootstrap DNS helper
+install -D -m 755 %{SOURCE24} %{buildroot}%{_libexecdir}/piccolo/bootstrap-dns.sh
+
+# 13. Install clock epoch service for RTC-less devices
 install -D -m 755 %{SOURCE11} %{buildroot}%{_libexecdir}/piccolo/clock-epoch.sh
 install -D -m 644 %{SOURCE12} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch.service
 install -D -m 644 %{SOURCE13} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.service
 install -D -m 644 %{SOURCE14} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.timer
 
-# 13. Install zypp package locks to prevent transactional-update from reinstalling removed packages
+# 14. Install zypp package locks to prevent transactional-update from reinstalling removed packages
 install -D -m 644 %{SOURCE15} %{buildroot}%{_sysconfdir}/zypp/locks
 
-# 14. Hardware watchdog: auto-reboot on kernel/PID-1 freeze (platform-agnostic)
+# 15. Hardware watchdog: auto-reboot on kernel/PID-1 freeze (platform-agnostic)
 install -D -m 644 %{SOURCE16} %{buildroot}%{_prefix}/lib/systemd/system.conf.d/piccolo.conf
 
-# 15. Auto-reboot on kernel panic/oops
+# 16. Auto-reboot on kernel panic/oops
 install -D -m 644 %{SOURCE17} %{buildroot}%{_prefix}/lib/sysctl.d/90-piccolo-panic-reboot.conf
 
-# 16. Watchdog module selection and boot-time validation
+# 17. Watchdog module selection and boot-time validation
 install -D -m 644 %{SOURCE18} %{buildroot}%{_prefix}/lib/modprobe.d/piccolo-watchdog.conf
 install -D -m 755 %{SOURCE19} %{buildroot}%{_libexecdir}/piccolo/watchdog-check.sh
 install -D -m 644 %{SOURCE20} %{buildroot}%{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
 
-# 17. Snapper retention policy for appliance-sized root filesystems
+# 18. Snapper retention policy for appliance-sized root filesystems
 install -D -m 755 %{SOURCE21} %{buildroot}%{_libexecdir}/piccolo/snapper-policy.sh
 
-# 18. Firewalld default-zone policy for appliance firewall posture
+# 19. Firewalld default-zone policy for appliance firewall posture
 install -D -m 755 %{SOURCE22} %{buildroot}%{_libexecdir}/piccolo/firewalld-policy.sh
 
 %check
@@ -246,12 +250,18 @@ for pkg in openssh openssh-server openssh-clients rebootmgr; do
 done
 
 # Validate bootstrap DNS policy keeps the host resolver independent from LAN DNS.
-grep -q '^\[global-dns-domain-\*\]$' %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf
-grep -q '^servers=1\.1\.1\.1;9\.9\.9\.9;$' %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf
+grep -q '^\[main\]$' %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf
+grep -q '^dns=none$' %{buildroot}%{_prefix}/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf
+BOOTSTRAP_DNS_TEST=$(mktemp)
+trap 'rm -f "$BOOTSTRAP_DNS_TEST"' EXIT
+%{buildroot}%{_libexecdir}/piccolo/bootstrap-dns.sh apply "$BOOTSTRAP_DNS_TEST"
+%{buildroot}%{_libexecdir}/piccolo/bootstrap-dns.sh check "$BOOTSTRAP_DNS_TEST"
+printf '%s\n' 'nameserver 192.168.0.201' >> "$BOOTSTRAP_DNS_TEST"
+! %{buildroot}%{_libexecdir}/piccolo/bootstrap-dns.sh check "$BOOTSTRAP_DNS_TEST"
 
 # Validate the Snapper appliance policy helper.
 SNAPPER_TEST_CONFIG=$(mktemp)
-trap 'rm -f "$SNAPPER_TEST_CONFIG"' EXIT
+trap 'rm -f "$BOOTSTRAP_DNS_TEST" "$SNAPPER_TEST_CONFIG"' EXIT
 cat > "$SNAPPER_TEST_CONFIG" <<'EOF'
 NUMBER_CLEANUP="no"
 NUMBER_LIMIT="50"
@@ -272,7 +282,7 @@ PICCOLO_SNAPPER_SKIP_SYSCONFIG=1 %{buildroot}%{_libexecdir}/piccolo/snapper-poli
 FIREWALLD_TEST_CONFIG=$(mktemp)
 FIREWALLD_TEST_DIR=$(mktemp -d)
 FIREWALLD_NEW_CONFIG="$FIREWALLD_TEST_DIR/firewalld/firewalld.conf"
-trap 'rm -f "$SNAPPER_TEST_CONFIG" "$FIREWALLD_TEST_CONFIG"; rm -rf "$FIREWALLD_TEST_DIR"' EXIT
+trap 'rm -f "$BOOTSTRAP_DNS_TEST" "$SNAPPER_TEST_CONFIG" "$FIREWALLD_TEST_CONFIG"; rm -rf "$FIREWALLD_TEST_DIR"' EXIT
 cat > "$FIREWALLD_TEST_CONFIG" <<'EOF'
 DefaultZone=public
 CleanupOnExit=yes
@@ -311,7 +321,13 @@ test "$(stat -c %a "$FIREWALLD_NEW_CONFIG")" = "644"
 # must migrate existing systems in addition to the KIWI image seed.
 /usr/libexec/piccolo/snapper-policy.sh apply /etc/snapper/configs/root
 
-# 6. Clean up removed net-watchdog on upgrade (files removed in 0.3.2).
+# 6. Enforce host bootstrap DNS on fresh installs and upgrades.
+# Piccolo may itself provide LAN DNS through an app, so the host resolver must
+# not depend on DHCP/router DNS that can point back at Piccolo during boot.
+# KIWI fresh images are re-seeded in disk.sh after KIWI removes resolv.conf.
+/usr/libexec/piccolo/bootstrap-dns.sh apply /etc/resolv.conf
+
+# 7. Clean up removed net-watchdog on upgrade (files removed in 0.3.2).
 #    disable (--root=/) is authoritative and works in chroot/transactional-update.
 #    stop is best-effort — only takes effect on a live (non-chroot) system.
 if [ $1 -ge 2 ]; then
@@ -324,12 +340,12 @@ if [ $1 -ge 2 ]; then
     # piccolod cleans it up on first run.
 fi
 
-# 7. Explicitly enable health-checker for boot-time rollback.
+# 8. Explicitly enable health-checker for boot-time rollback.
 # MicroOS preset should enable this, but we make it explicit since
 # this service is a critical safety net.
 /usr/bin/systemctl --root=/ --no-reload enable health-checker.service 2>/dev/null || :
 
-# 8. Enable clock epoch service and periodic save timer
+# 9. Enable clock epoch service and periodic save timer
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-clock-epoch.service
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-clock-epoch-save.timer
 # Seed epoch file so the first reboot after upgrade is protected.
@@ -339,7 +355,7 @@ fi
 mkdir -p /var/lib/piccolo
 date +%s > /var/lib/piccolo/clock-epoch 2>/dev/null || :
 
-# 9. Rootless Podman prerequisites (RFC 20260206)
+# 10. Rootless Podman prerequisites (RFC 20260206)
 # Create piccolo-runtime user for rootless Podman execution.
 if ! getent passwd piccolo-runtime > /dev/null 2>&1; then
     useradd --system --home-dir /home/piccolo-runtime --create-home \
@@ -355,10 +371,10 @@ fi
 mkdir -p /var/lib/systemd/linger
 touch /var/lib/systemd/linger/piccolo-runtime
 
-# 10. Enable watchdog driver validation at boot
+# 11. Enable watchdog driver validation at boot
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-watchdog-check.service
 
-# 11. Prefer cold reboot semantics on x86 appliances.
+# 12. Prefer cold reboot semantics on x86 appliances.
 # Reboots are rare for Piccolo OS devices; reliability matters more than the
 # speed difference between warm and cold-style firmware restart paths.
 piccolo_regenerate_sdboot_entries() {
@@ -469,6 +485,7 @@ fi
 %{_prefix}/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf
 %{_prefix}/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf
 %dir %{_libexecdir}/piccolo
+%{_libexecdir}/piccolo/bootstrap-dns.sh
 %{_libexecdir}/piccolo/clock-epoch.sh
 %{_prefix}/lib/systemd/system/piccolo-clock-epoch.service
 %{_prefix}/lib/systemd/system/piccolo-clock-epoch-save.service
@@ -487,6 +504,10 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Thu Jun 25 2026 Piccolo Team <dev@piccolo.local> 0.3.9-0
+- Enforce static host resolver file for bootstrap DNS instead of relying on
+  NetworkManager global DNS, which still left DHCP DNS in resolv.conf.
+
 * Wed Jun 24 2026 Piccolo Team <dev@piccolo.local> 0.3.8-0
 - Add host bootstrap DNS policy so Piccolo can recover when LAN DNS points at
   an app-hosted resolver that is not ready yet.

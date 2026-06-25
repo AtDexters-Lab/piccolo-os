@@ -244,6 +244,26 @@ require_same_file() {
     fi
 }
 
+require_bootstrap_resolv_conf() {
+    local path
+    local expected
+    path=$(root_path etc/resolv.conf)
+    expected='# Managed by piccolo-os-support bootstrap DNS policy.
+nameserver 1.1.1.1
+nameserver 9.9.9.9'
+
+    if [ ! -f "$path" ]; then
+        fail "bootstrap DNS resolver file missing at $path"
+        return
+    fi
+
+    if printf '%s\n' "$expected" | cmp -s "$path" -; then
+        ok "bootstrap DNS resolver file is exact"
+    else
+        fail "bootstrap DNS resolver file at $path has unexpected contents"
+    fi
+}
+
 require_enabled_unit() {
     local unit=$1
     local target=$2
@@ -468,8 +488,11 @@ check_support_package_static_files() {
     require_same_file usr/lib/systemd/sleep.conf.d/piccolo.conf packages/piccolo-os-support/piccolo-sleep.conf "sleep appliance policy"
     require_same_file usr/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf packages/piccolo-os-support/piccolo-wifi-powersave.conf "NetworkManager WiFi powersave policy"
     require_same_file usr/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf packages/piccolo-os-support/piccolo-bootstrap-dns.conf "NetworkManager bootstrap DNS policy"
-    require_regex usr/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf '^\[global-dns-domain-\*\]$' "NetworkManager bootstrap DNS wildcard domain"
-    require_regex usr/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf '^servers=1\.1\.1\.1;9\.9\.9\.9;$' "NetworkManager bootstrap DNS resolvers"
+    require_regex usr/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf '^\[main\]$' "NetworkManager bootstrap DNS main section"
+    require_regex usr/lib/NetworkManager/conf.d/piccolo-bootstrap-dns.conf '^dns=none$' "NetworkManager does not manage resolv.conf"
+    require_same_file usr/libexec/piccolo/bootstrap-dns.sh packages/piccolo-os-support/piccolo-bootstrap-dns.sh "bootstrap DNS helper"
+    require_executable usr/libexec/piccolo/bootstrap-dns.sh "bootstrap DNS helper"
+    require_bootstrap_resolv_conf
     require_same_file usr/libexec/piccolo/clock-epoch.sh packages/piccolo-os-support/piccolo-clock-epoch.sh "clock epoch helper"
     require_executable usr/libexec/piccolo/clock-epoch.sh "clock epoch helper"
     require_same_file usr/lib/systemd/system/piccolo-clock-epoch.service packages/piccolo-os-support/piccolo-clock-epoch.service "clock epoch service"

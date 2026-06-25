@@ -7,6 +7,12 @@ if [ -x /usr/libexec/piccolo/snapper-policy.sh ]; then
 	/usr/libexec/piccolo/snapper-policy.sh apply /etc/snapper/configs/root
 fi
 
+if [ -x /usr/libexec/piccolo/bootstrap-dns.sh ]; then
+	# KIWI removes /etc/resolv.conf before disk image creation; seed it after
+	# /etc has been moved into its final writable subvolume.
+	/usr/libexec/piccolo/bootstrap-dns.sh apply /etc/resolv.conf
+fi
+
 echo "####### BOOTLOADER INSTALL (disk.sh)"
 
 if [ -x /usr/bin/sdbootutil ]; then
