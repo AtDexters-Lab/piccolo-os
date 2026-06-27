@@ -475,6 +475,7 @@ check_config_sh_canaries() {
 check_support_package_static_files() {
     require_file usr/bin/piccolod "piccolod binary"
     require_same_file usr/lib/firewalld/zones/piccolo.xml packages/piccolo-os-support/piccolo.xml "firewalld piccolo zone"
+    require_regex usr/lib/firewalld/zones/piccolo.xml '<zone target="%%REJECT%%">' "firewalld rejects unmatched traffic"
     require_file etc/pki/rpm-gpg/RPM-GPG-KEY-piccolo-os "Piccolo OS rpm signing key"
     require_regex etc/zypp/repos.d/piccolo-os.repo '^enabled=1$' "Piccolo repo enabled"
     require_regex etc/zypp/repos.d/piccolo-os.repo '^repo_gpgcheck=1$' "Piccolo repo metadata gpg check"
