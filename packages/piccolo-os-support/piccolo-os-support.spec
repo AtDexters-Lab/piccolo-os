@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.11
+Version:        0.3.12
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -243,6 +243,10 @@ install -D -m 755 %{SOURCE22} %{buildroot}%{_libexecdir}/piccolo/firewalld-polic
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
 grep -q '<zone target="%%%%REJECT%%%%">' %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
+grep -q '<rule family="ipv4" priority="32767">' %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
+grep -q '<rule family="ipv6" priority="32767">' %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
+test "$(grep -c '<port protocol="tcp" port="1-65535"/>' %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml)" = "2"
+test "$(grep -c '<reject type="tcp-reset"/>' %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml)" = "2"
 
 # Validate zypp locks file has exactly 4 locked packages with expected names
 grep -c 'solvable_name:' %{buildroot}%{_sysconfdir}/zypp/locks | grep -q '^4$'
@@ -505,6 +509,10 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Sat Jun 27 2026 Piccolo Team <dev@piccolo.local> 0.3.12-0
+- Add late IPv4 and IPv6 TCP reset fallback rules so closed Piccolo-zone TCP
+  ports fail deterministically after app and platform allow rules.
+
 * Sat Jun 27 2026 Piccolo Team <dev@piccolo.local> 0.3.11-0
 - Reject unmatched firewalld traffic so denied LAN clients fail fast instead of
   waiting for silent DROP timeouts.

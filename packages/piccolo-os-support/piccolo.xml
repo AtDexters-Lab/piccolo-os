@@ -58,4 +58,14 @@
     <port protocol="tcp" port="35000-45000"/>
     <accept/>
   </rule>
+
+  <!-- Fail closed TCP services fast; keep this after allow rules so app port claims win. -->
+  <rule family="ipv4" priority="32767">
+    <port protocol="tcp" port="1-65535"/>
+    <reject type="tcp-reset"/>
+  </rule>
+  <rule family="ipv6" priority="32767">
+    <port protocol="tcp" port="1-65535"/>
+    <reject type="tcp-reset"/>
+  </rule>
 </zone>
