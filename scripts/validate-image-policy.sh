@@ -154,6 +154,22 @@ require_regex() {
     fi
 }
 
+require_absent_regex() {
+    local rel=$1
+    local regex=$2
+    local desc=$3
+    local path
+    path=$(root_path "$rel")
+
+    if [ ! -f "$path" ]; then
+        fail "$desc missing at $path"
+    elif grep -Eq "$regex" "$path"; then
+        fail "$desc found forbidden content in $path"
+    else
+        ok "$desc"
+    fi
+}
+
 require_assignment() {
     local rel=$1
     local key=$2
@@ -488,7 +504,13 @@ check_support_package_static_files() {
     require_assignment etc/transactional-update.conf REBOOT_METHOD none "transactional-update reboot policy"
     require_same_file usr/libexec/health-checker/piccolod.sh packages/piccolo-os-support/piccolo-health-check.sh "health-checker Piccolo plugin"
     require_executable usr/libexec/health-checker/piccolod.sh "health-checker Piccolo plugin"
-    require_same_file usr/lib/systemd/system/health-checker.service.d/piccolo.conf packages/piccolo-os-support/health-checker-piccolo.conf "health-checker ordering drop-in"
+    require_absent_regex usr/libexec/health-checker/piccolod.sh 'systemctl[[:space:]]+stop[[:space:]]+piccolod([.]service)?' "health-checker plugin keeps piccolod running during recovery"
+    require_same_file usr/lib/systemd/system/health-checker.service.d/piccolo.conf packages/piccolo-os-support/health-checker-piccolo.conf "health-checker recovery drop-in"
+    require_assignment usr/lib/systemd/system/health-checker.service.d/piccolo.conf FailureAction reboot "health-checker manager-owned failure action"
+    require_assignment usr/lib/systemd/system/health-checker.service.d/piccolo.conf TimeoutStartSec 5min "health-checker bounded start deadline"
+    require_assignment usr/lib/systemd/system/health-checker.service Type oneshot "upstream health-checker oneshot service"
+    require_assignment usr/lib/systemd/system/reboot.target JobTimeoutSec 30min "systemd reboot transaction deadline"
+    require_assignment usr/lib/systemd/system/reboot.target JobTimeoutAction reboot-force "systemd forced reboot fallback"
     require_same_file usr/lib/systemd/logind.conf.d/piccolo.conf packages/piccolo-os-support/piccolo-logind.conf "logind appliance policy"
     require_same_file usr/lib/systemd/sleep.conf.d/piccolo.conf packages/piccolo-os-support/piccolo-sleep.conf "sleep appliance policy"
     require_same_file usr/lib/NetworkManager/conf.d/piccolo-wifi-powersave.conf packages/piccolo-os-support/piccolo-wifi-powersave.conf "NetworkManager WiFi powersave policy"

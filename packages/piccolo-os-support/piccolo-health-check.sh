@@ -48,10 +48,9 @@ run_checks() {
 }
 
 stop_services() {
-    # If the check fails, health-checker calls this to stop the service
-    # before potentially triggering a rollback.
-    echo "Stopping piccolod service due to failed health check..."
-    /usr/bin/systemctl stop piccolod.service
+    # Recovery is owned by health-checker and PID 1. Keep the appliance control
+    # plane available until one of them completes the selected recovery action.
+    echo "Leaving piccolod running while health-checker recovers..."
 }
 
 case "$1" in

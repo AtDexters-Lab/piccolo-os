@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.12
+Version:        0.3.13
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -303,6 +303,15 @@ grep -q '^CleanupOnExit=yes$' "$FIREWALLD_TEST_CONFIG"
 test "$(stat -c %a "$(dirname "$FIREWALLD_NEW_CONFIG")")" = "750"
 test "$(stat -c %a "$FIREWALLD_NEW_CONFIG")" = "644"
 
+# Validate bounded boot-health recovery policy.
+HEALTH_PLUGIN=%{buildroot}%{_libexecdir}/health-checker/piccolod.sh
+HEALTH_DROPIN=%{buildroot}%{_prefix}/lib/systemd/system/health-checker.service.d/piccolo.conf
+bash -n "$HEALTH_PLUGIN"
+"$HEALTH_PLUGIN" stop
+! grep -Eq 'systemctl[[:space:]]+stop[[:space:]]+piccolod([.]service)?' "$HEALTH_PLUGIN"
+grep -Eq '^[[:space:]]*FailureAction[[:space:]]*=[[:space:]]*reboot[[:space:]]*$' "$HEALTH_DROPIN"
+grep -Eq '^[[:space:]]*TimeoutStartSec[[:space:]]*=[[:space:]]*5min[[:space:]]*$' "$HEALTH_DROPIN"
+
 %post
 # 1. Mask physical/serial consoles to prevent login
 # Use --root=/ --no-reload to ensure this works in chroot/image-build environments
@@ -509,6 +518,10 @@ fi
 %dir /var/lib/piccolo
 
 %changelog
+* Thu Jul 16 2026 Piccolo Team <dev@piccolo.local> 0.3.13-0
+- Keep piccolod running when boot health fails and make PID 1 own bounded
+  reboot recovery from failed or timed-out health-checker execution.
+
 * Sat Jun 27 2026 Piccolo Team <dev@piccolo.local> 0.3.12-0
 - Add late IPv4 and IPv6 TCP reset fallback rules so closed Piccolo-zone TCP
   ports fail deterministically after app and platform allow rules.
