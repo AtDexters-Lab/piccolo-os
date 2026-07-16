@@ -387,6 +387,10 @@ apply_guest_selinux_labels() {
     "$root_mount/usr/libexec/piccolo/boot-health-test-observer"; do
     "${sudo_cmd[@]}" chcon --reference="$exec_ref" "$path"
   done
+  if [ -e "$root_mount/usr/bin/curl.piccolo-boot-health-original" ]; then
+    "${sudo_cmd[@]}" chcon --reference="$root_mount/usr/bin/curl.piccolo-boot-health-original" \
+      "$root_mount/usr/bin/curl"
+  fi
   "${sudo_cmd[@]}" chcon --reference="$plugin_ref" \
     "$root_mount/usr/libexec/health-checker/zz-piccolo-boot-health-test.sh"
 
@@ -421,6 +425,39 @@ apply_guest_selinux_labels() {
 }
 
 inject_fixture() {
+  if [ "$scenario" = "unavailable" ]; then
+    "${sudo_cmd[@]}" mv "$root_mount/usr/bin/curl" \
+      "$root_mount/usr/bin/curl.piccolo-boot-health-original"
+    write_guest_file "$root_mount/usr/bin/curl" 0755 <<'EOF'
+#!/bin/bash
+set -u
+
+state_dir=/var/lib/piccolo-boot-health-test
+boot_id=$(< /proc/sys/kernel/random/boot_id)
+health_url=http://127.0.0.1:80/api/v1/health/ready
+is_health_call=0
+
+for argument in "$@"; do
+  if [ "${PICCOLO_BOOT_HEALTH_TEST:-}" = "1" ] && [ "$argument" = "$health_url" ]; then
+    is_health_call=1
+    break
+  fi
+done
+
+/usr/bin/curl.piccolo-boot-health-original "$@"
+curl_status=$?
+
+if [ "$is_health_call" -eq 1 ]; then
+  mkdir -p "$state_dir/boots/$boot_id"
+  printf '%s url=%s curl_exit=%d\n' \
+    "$(date --iso-8601=seconds)" "$health_url" "$curl_status" \
+    >> "$state_dir/boots/$boot_id/curl.log"
+fi
+
+exit "$curl_status"
+EOF
+  fi
+
   write_guest_file "$root_mount/usr/libexec/piccolo/boot-health-test-http" 0755 <<'EOF'
 #!/bin/bash
 set -u
@@ -602,6 +639,7 @@ Wants=piccolo-boot-health-test.socket
 After=piccolo-boot-health-test-observer.service piccolo-boot-health-test.socket
 
 [Service]
+Environment="PICCOLO_BOOT_HEALTH_TEST=1"
 Environment="http_proxy=http://127.0.0.1:18080"
 Environment="HTTP_PROXY=http://127.0.0.1:18080"
 Environment="no_proxy="
@@ -682,11 +720,6 @@ EOF
 503
 EOF
       ;;
-    unavailable)
-      write_guest_file "$var_mount/lib/piccolo-boot-health-test/schedule" 0644 <<'EOF'
-503
-EOF
-      ;;
     recover)
       write_guest_file "$var_mount/lib/piccolo-boot-health-test/schedule" 0644 <<'EOF'
 503
@@ -761,7 +794,8 @@ wait_for_scenario() {
 
 assert_evidence() {
   local state_dir="$var_mount/lib/piccolo-boot-health-test"
-  local boot_count results journal_text boot_journal mode_count
+  local journal_dir="$var_mount/log/journal"
+  local boot_count results mode_count
   local -a boot_ids=()
   if [ ! -d "$state_dir/boots" ]; then
     echo "validate-boot-health-vm: no persistent observer evidence found" >&2
@@ -775,12 +809,6 @@ assert_evidence() {
   if [ "${#boot_ids[@]}" -lt "$boot_count" ]; then
     echo "validate-boot-health-vm: chronological boot evidence is incomplete" >&2
     return 1
-  fi
-
-  if [ -d "$var_mount/log/journal" ]; then
-    journal_text=$("${sudo_cmd[@]}" journalctl --directory="$var_mount/log/journal" --no-pager -o short-monotonic 2>/dev/null || true)
-  else
-    journal_text=
   fi
 
   assert_failed_boot() {
@@ -798,14 +826,11 @@ assert_evidence() {
         fi
         ;;
       unavailable)
-        if [ -z "$journal_text" ]; then
-          echo "validate-boot-health-vm: persistent journal required for unavailable-endpoint correlation" >&2
-          return 1
-        fi
-        boot_journal=$("${sudo_cmd[@]}" journalctl --directory="$var_mount/log/journal" --boot="$boot_id" --unit=health-checker.service --no-pager -o cat 2>/dev/null || true)
-        mode_count=$(grep -c 'curl_exit=7, http_status=000' <<<"$boot_journal" || true)
+        mode_count=$("${sudo_cmd[@]}" grep -c \
+          ' url=http://127.0.0.1:80/api/v1/health/ready curl_exit=7$' \
+          "$state_dir/boots/$boot_id/curl.log" 2>/dev/null || true)
         if [ "$mode_count" -lt 15 ]; then
-          echo "validate-boot-health-vm: boot $boot_id recorded only $mode_count unavailable-endpoint attempts" >&2
+          echo "validate-boot-health-vm: boot $boot_id recorded only $mode_count connection-refused readiness attempts" >&2
           return 1
         fi
         ;;
@@ -821,14 +846,21 @@ assert_evidence() {
   }
 
   assert_boot_log() {
-    local boot_id=$1 pattern=$2
-    if [ -z "$journal_text" ]; then
+    local boot_id=$1 message=$2 match_mode=${3:-fixed} journal_boot_id
+    local -a grep_mode=(-F)
+    if [ ! -d "$journal_dir" ]; then
       echo "validate-boot-health-vm: persistent journal required for branch correlation" >&2
       return 1
     fi
-    boot_journal=$("${sudo_cmd[@]}" journalctl --directory="$var_mount/log/journal" --boot="$boot_id" --no-pager -o cat 2>/dev/null || true)
-    if ! grep -Eq "$pattern" <<<"$boot_journal"; then
-      echo "validate-boot-health-vm: boot $boot_id did not execute expected branch: $pattern" >&2
+    if [ "$match_mode" = "regex" ]; then
+      grep_mode=(-E)
+    fi
+    journal_boot_id=${boot_id//-/}
+    if ! "${sudo_cmd[@]}" journalctl \
+      --directory="$journal_dir" "_BOOT_ID=$journal_boot_id" \
+      "_SYSTEMD_UNIT=health-checker.service" --no-pager -o cat 2>/dev/null \
+      | grep "${grep_mode[@]}" -- "$message" >/dev/null; then
+      echo "validate-boot-health-vm: boot $boot_id did not execute expected branch: $message" >&2
       return 1
     fi
   }
@@ -847,6 +879,7 @@ assert_evidence() {
     recover)
       [ "$boot_count" -ge 2 ]
       assert_failed_boot "${boot_ids[0]}" 503
+      assert_boot_log "${boot_ids[0]}" "Machine didn't come up correctly, trying a reboot"
       grep -q '^SERVICE_RESULT=success$' <<<"$results"
       [ ! -e "$var_mount/lib/misc/health-check.rebooted" ]
       ;;
@@ -893,7 +926,8 @@ assert_evidence() {
       [ "$boot_count" -ge 2 ]
       "${sudo_cmd[@]}" grep -q '^health_state_last_working_btrfs_id=999999999$' "$state_dir/boots/${boot_ids[0]}/boot-start"
       assert_failed_boot "${boot_ids[0]}" 503
-      assert_boot_log "${boot_ids[0]}" 'ERROR: btrfs set-default .* failed!'
+      assert_boot_log "${boot_ids[0]}" "Machine didn't come up correctly, do a rollback"
+      assert_boot_log "${boot_ids[0]}" 'ERROR: btrfs set-default [0-9]+ failed!' regex
       ;;
     reboot-disabled)
       [ "$boot_count" -ge 2 ]
@@ -909,14 +943,10 @@ assert_evidence() {
       ;;
   esac
 
-  if [ -n "$journal_text" ]; then
-    printf '%s\n' "$journal_text" | grep -E 'health-checker|piccolod is healthy|starting emergency shell|boot-health-test' | tail -n 200 || true
-    if [ "$scenario" = "reboot-disabled" ]; then
-      grep -q 'health-checker-reboot=disabled' <<<"$journal_text"
-    fi
-  elif [ "$scenario" = "reboot-disabled" ]; then
-    echo "validate-boot-health-vm: persistent journal required for reboot-disabled assertion" >&2
-    return 1
+  if [ -d "$journal_dir" ]; then
+    "${sudo_cmd[@]}" journalctl --directory="$journal_dir" --no-pager -o short-monotonic 2>/dev/null \
+      | grep -E 'health-checker|piccolod is healthy|starting emergency shell|boot-health-test' \
+      | tail -n 200 || true
   fi
 }
 

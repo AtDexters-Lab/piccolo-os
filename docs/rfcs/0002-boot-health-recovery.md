@@ -1,6 +1,6 @@
 # RFC: Bounded Boot-Health Recovery for Piccolo Appliances
 
-Status: Draft — scope amended; Phase 1 review converged
+Status: Implemented and validated — RFC-to-code closure completed 2026-07-16
 
 ## Scope
 
