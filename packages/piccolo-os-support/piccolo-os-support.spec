@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.13
+Version:        0.3.14
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -28,6 +28,7 @@ Source21:       piccolo-snapper-policy.sh
 Source22:       piccolo-firewalld-policy.sh
 Source23:       piccolo-bootstrap-dns.conf
 Source24:       piccolo-bootstrap-dns.sh
+Source25:       piccolo-user-session-oom.conf
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -56,10 +57,9 @@ BuildRequires:  firewalld
 BuildRequires:  libxml2-tools
 BuildRequires:  snapper
 # --- Piccolo policy deps (not from upstream patterns) ---
-# piccolod is the local control plane and health-check target. Keep this
-# unversioned: its package version follows piccolod releases, not
-# piccolo-os-support policy-package versions.
-Requires:       piccolod
+# The session policy and piccolod's rootless command wrapper ship as one
+# coordinated hierarchy. Refuse an image that contains only the OS half.
+Requires:       piccolod >= 0.2.39
 Requires:       firewalld
 Requires(post): snapper
 
@@ -239,6 +239,10 @@ install -D -m 755 %{SOURCE21} %{buildroot}%{_libexecdir}/piccolo/snapper-policy.
 # 19. Firewalld default-zone policy for appliance firewall posture
 install -D -m 755 %{SOURCE22} %{buildroot}%{_libexecdir}/piccolo/firewalld-policy.sh
 
+# 20. Keep user managers more recoverable than workloads while leaving the
+# piccolod control plane at the stronger -500 protection in piccolod.service.
+install -D -m 644 %{SOURCE25} %{buildroot}%{_prefix}/lib/systemd/system/user@.service.d/90-piccolo-oom.conf
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -311,6 +315,11 @@ bash -n "$HEALTH_PLUGIN"
 ! grep -Eq 'systemctl[[:space:]]+stop[[:space:]]+piccolod([.]service)?' "$HEALTH_PLUGIN"
 grep -Eq '^[[:space:]]*FailureAction[[:space:]]*=[[:space:]]*reboot[[:space:]]*$' "$HEALTH_DROPIN"
 grep -Eq '^[[:space:]]*TimeoutStartSec[[:space:]]*=[[:space:]]*5min[[:space:]]*$' "$HEALTH_DROPIN"
+
+# Validate the three-level OOM hierarchy's user-manager policy.
+USER_OOM_DROPIN=%{buildroot}%{_prefix}/lib/systemd/system/user@.service.d/90-piccolo-oom.conf
+grep -Eq '^\[Service\]$' "$USER_OOM_DROPIN"
+grep -Eq '^[[:space:]]*OOMScoreAdjust[[:space:]]*=[[:space:]]*-250[[:space:]]*$' "$USER_OOM_DROPIN"
 
 %post
 # 1. Mask physical/serial consoles to prevent login
@@ -515,9 +524,16 @@ fi
 %{_libexecdir}/piccolo/snapper-policy.sh
 %{_libexecdir}/piccolo/watchdog-check.sh
 %{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
+%dir %{_prefix}/lib/systemd/system/user@.service.d
+%{_prefix}/lib/systemd/system/user@.service.d/90-piccolo-oom.conf
 %dir /var/lib/piccolo
 
 %changelog
+* Sat Jul 18 2026 Piccolo Team <dev@piccolo.local> 0.3.14-0
+- Protect user managers at OOMScoreAdjust=-250 so piccolod can recover app
+  sessions after workload pressure without equating them to the control plane.
+- Require the coordinated piccolod release that neutralizes rootless helpers.
+
 * Thu Jul 16 2026 Piccolo Team <dev@piccolo.local> 0.3.13-0
 - Keep piccolod running when boot health fails and make PID 1 own bounded
   reboot recovery from failed or timed-out health-checker execution.

@@ -4,7 +4,7 @@ set -uo pipefail
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  scripts/validate-image-policy.sh [--profile PROFILE] [--arch ARCH] [MOUNTED_ROOT]
+  scripts/validate-image-policy.sh [--profile PROFILE] [--arch ARCH] [--strict-artifact] [MOUNTED_ROOT]
 
 Validate high-signal Piccolo OS image policy in a mounted final image root.
 The script only reads files from MOUNTED_ROOT; it does not boot, chroot, mount,
@@ -18,6 +18,7 @@ EOF
 
 profile=common
 arch=common
+strict_artifact=0
 mounted_root=/
 
 while [ "$#" -gt 0 ]; do
@@ -38,6 +39,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --arch=*)
             arch=${1#--arch=}
+            shift
+            ;;
+        --strict-artifact|--strict-rpm)
+            strict_artifact=1
             shift
             ;;
         -h|--help)
@@ -97,6 +102,58 @@ fail() {
 warn() {
     warnings=$((warnings + 1))
     printf 'warn: %s\n' "$*" >&2
+}
+
+artifact_proof_unavailable() {
+    if [ "$strict_artifact" -eq 1 ]; then
+        fail "$*"
+    else
+        warn "$*"
+    fi
+}
+
+require_effective_systemd_assignment() {
+    local unit=$1
+    local key=$2
+    local expected=$3
+    local desc=$4
+    local merged
+    local actual
+
+    if ! command -v systemd-analyze >/dev/null 2>&1; then
+        artifact_proof_unavailable "$desc cannot be proven: systemd-analyze is unavailable on the validator host"
+        return
+    fi
+    if ! merged=$(run_privileged_read systemd-analyze --root="$mounted_root" cat-config "systemd/system/$unit" 2>&1); then
+        artifact_proof_unavailable "$desc cannot be proven from merged configuration: $merged"
+        return
+    fi
+    actual=$(printf '%s\n' "$merged" | awk -F= -v key="$key" '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*\[/ {
+            section = $0
+            gsub(/^[[:space:]]*\[|\][[:space:]]*$/, "", section)
+            next
+        }
+        section == "Service" {
+            name = $1
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+            if (name == key) {
+                value = $0
+                sub(/^[^=]*=/, "", value)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+                actual = value
+            }
+        }
+        END { print actual }
+    ')
+    if [ "$actual" = "$expected" ]; then
+        ok "$desc"
+    elif [ -n "$actual" ]; then
+        fail "$desc expected effective $key=$expected for $unit, found $actual"
+    else
+        fail "$desc expected effective $key=$expected for $unit, found <missing>"
+    fi
 }
 
 require_file() {
@@ -383,7 +440,7 @@ check_rpm_package_installed() {
     local output
 
     if ! command -v rpm >/dev/null 2>&1; then
-        warn "rpm not available on validator host; skipping rpmdb check for $package"
+        artifact_proof_unavailable "rpm not available on validator host; cannot check installed package $package"
         return
     fi
 
@@ -395,7 +452,7 @@ check_rpm_package_installed() {
     fi
 
     if [ -z "$dbpath" ]; then
-        warn "no rpm database found under $mounted_root; skipping rpmdb check for $package"
+        artifact_proof_unavailable "no rpm database found under $mounted_root; cannot check installed package $package"
         return
     fi
 
@@ -403,6 +460,36 @@ check_rpm_package_installed() {
         ok "rpm package installed: $output"
     else
         fail "rpm package $package is not installed according to rpmdb: $output"
+    fi
+}
+
+check_rpm_package_min_version() {
+    local package=$1
+    local minimum=$2
+    local dbpath=
+    local actual
+
+    if ! command -v rpm >/dev/null 2>&1; then
+        artifact_proof_unavailable "rpm not available on validator host; cannot check version for $package"
+        return
+    fi
+    if [ -d "$(root_path usr/lib/sysimage/rpm)" ]; then
+        dbpath=/usr/lib/sysimage/rpm
+    elif [ -d "$(root_path var/lib/rpm)" ]; then
+        dbpath=/var/lib/rpm
+    fi
+    if [ -z "$dbpath" ]; then
+        artifact_proof_unavailable "no rpm database found under $mounted_root; cannot check version for $package"
+        return
+    fi
+    if ! actual=$(rpm --root "$mounted_root" --dbpath "$dbpath" -q --qf '%{VERSION}\n' "$package" 2>&1); then
+        fail "rpm package $package version unavailable: $actual"
+        return
+    fi
+    if [ "$actual" = "$minimum" ] || [ "$(printf '%s\n%s\n' "$minimum" "$actual" | sort -V | head -n 1)" = "$minimum" ]; then
+        ok "rpm package $package version $actual satisfies >= $minimum"
+    else
+        fail "rpm package $package version $actual is older than required $minimum"
     fi
 }
 
@@ -490,6 +577,13 @@ check_config_sh_canaries() {
 
 check_support_package_static_files() {
     require_file usr/bin/piccolod "piccolod binary"
+    require_executable usr/bin/choom "choom rootless OOM reset helper"
+    require_executable usr/sbin/runuser "runuser user-bus probe helper"
+    require_same_file usr/lib/systemd/system/user@.service.d/90-piccolo-oom.conf packages/piccolo-os-support/piccolo-user-session-oom.conf "user manager OOM policy"
+    require_assignment usr/lib/systemd/system/user@.service.d/90-piccolo-oom.conf OOMScoreAdjust -250 "user manager OOM protection"
+    require_assignment usr/lib/systemd/system/piccolod.service OOMScoreAdjust -500 "piccolod control-plane OOM protection"
+    require_effective_systemd_assignment user@.service OOMScoreAdjust -250 "effective user manager OOM protection"
+    require_effective_systemd_assignment piccolod.service OOMScoreAdjust -500 "effective piccolod control-plane OOM protection"
     require_same_file usr/lib/firewalld/zones/piccolo.xml packages/piccolo-os-support/piccolo.xml "firewalld piccolo zone"
     require_regex usr/lib/firewalld/zones/piccolo.xml '<zone target="%%REJECT%%">' "firewalld rejects unmatched traffic"
     require_regex usr/lib/firewalld/zones/piccolo.xml '<rule family="ipv4" priority="32767">' "firewalld IPv4 TCP reset fallback"
@@ -579,6 +673,9 @@ case "$arch" in
 esac
 
 check_rpm_package_installed piccolo-os-support
+check_rpm_package_min_version piccolo-os-support 0.3.14
+check_rpm_package_installed piccolod
+check_rpm_package_min_version piccolod 0.2.39
 check_snapper_policy
 check_config_sh_canaries
 check_support_package_static_files

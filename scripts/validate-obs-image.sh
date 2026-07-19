@@ -232,4 +232,4 @@ if [ -d "$mount_dir/var" ]; then
     mounted_paths+=("$mount_dir/var")
 fi
 
-PICCOLO_VALIDATE_PRIVILEGED_READ=1 "$inner_validator" --profile "$profile" --arch "$arch" "$mount_dir"
+PICCOLO_VALIDATE_PRIVILEGED_READ=1 "$inner_validator" --profile "$profile" --arch "$arch" --strict-artifact "$mount_dir"
