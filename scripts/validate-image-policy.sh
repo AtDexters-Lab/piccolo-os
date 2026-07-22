@@ -117,6 +117,8 @@ require_effective_systemd_assignment() {
     local key=$2
     local expected=$3
     local desc=$4
+    local expected_section=${5:-Service}
+    local allow_missing=${6:-0}
     local merged
     local actual
 
@@ -128,14 +130,14 @@ require_effective_systemd_assignment() {
         artifact_proof_unavailable "$desc cannot be proven from merged configuration: $merged"
         return
     fi
-    actual=$(printf '%s\n' "$merged" | awk -F= -v key="$key" '
+    actual=$(printf '%s\n' "$merged" | awk -F= -v key="$key" -v expected_section="$expected_section" '
         /^[[:space:]]*#/ { next }
         /^[[:space:]]*\[/ {
             section = $0
             gsub(/^[[:space:]]*\[|\][[:space:]]*$/, "", section)
             next
         }
-        section == "Service" {
+        section == expected_section {
             name = $1
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
             if (name == key) {
@@ -147,7 +149,7 @@ require_effective_systemd_assignment() {
         }
         END { print actual }
     ')
-    if [ "$actual" = "$expected" ]; then
+    if [ "$actual" = "$expected" ] || { [ "$allow_missing" -eq 1 ] && [ -z "$actual" ]; }; then
         ok "$desc"
     elif [ -n "$actual" ]; then
         fail "$desc expected effective $key=$expected for $unit, found $actual"
@@ -582,8 +584,46 @@ check_support_package_static_files() {
     require_same_file usr/lib/systemd/system/user@.service.d/90-piccolo-oom.conf packages/piccolo-os-support/piccolo-user-session-oom.conf "user manager OOM policy"
     require_assignment usr/lib/systemd/system/user@.service.d/90-piccolo-oom.conf OOMScoreAdjust -250 "user manager OOM protection"
     require_assignment usr/lib/systemd/system/piccolod.service OOMScoreAdjust -500 "piccolod control-plane OOM protection"
+    require_assignment usr/lib/systemd/system/piccolod.service StartLimitIntervalSec 900 "piccolod bounded start interval"
+    require_assignment usr/lib/systemd/system/piccolod.service StartLimitBurst 3 "piccolod bounded start burst"
+    require_assignment usr/lib/systemd/system/piccolod.service OnFailure piccolod-start-limit-recovery.service "piccolod start-limit recovery handoff"
+    require_absent_regex usr/lib/systemd/system/piccolod.service '^[[:space:]]*StartLimitAction=' "piccolod leaves start-limit action to the recovery companion"
+    require_assignment usr/lib/systemd/system/piccolod.service ExecStopPost '/usr/bin/piccolod --record-service-exit' "piccolod unexpected-exit recorder"
+    require_assignment usr/lib/systemd/system/piccolod.service Restart always "piccolod access-plane restart policy"
+    require_assignment usr/lib/systemd/system/piccolod.service RestartSec 5 "piccolod bounded restart delay"
+    require_assignment usr/lib/systemd/system/piccolod.service TasksMax 15% "piccolod finite task budget"
+    require_assignment usr/lib/systemd/system/piccolod.service WatchdogSec 60 "piccolod service watchdog"
+    require_assignment usr/lib/systemd/system/piccolod.service KillMode control-group "piccolod helper cgroup cleanup"
     require_effective_systemd_assignment user@.service OOMScoreAdjust -250 "effective user manager OOM protection"
     require_effective_systemd_assignment piccolod.service OOMScoreAdjust -500 "effective piccolod control-plane OOM protection"
+    require_effective_systemd_assignment piccolod.service StartLimitIntervalSec 900 "effective piccolod bounded start interval" Unit
+    require_effective_systemd_assignment piccolod.service StartLimitBurst 3 "effective piccolod bounded start burst" Unit
+    require_effective_systemd_assignment piccolod.service OnFailure piccolod-start-limit-recovery.service "effective piccolod start-limit recovery handoff" Unit
+    require_effective_systemd_assignment piccolod.service StartLimitAction none "effective piccolod leaves start-limit action to the recovery companion" Unit 1
+    require_effective_systemd_assignment piccolod.service ExecStopPost '/usr/bin/piccolod --record-service-exit' "effective piccolod unexpected-exit recorder"
+    require_effective_systemd_assignment piccolod.service Restart always "effective piccolod access-plane restart policy"
+    require_effective_systemd_assignment piccolod.service RestartSec 5 "effective piccolod bounded restart delay"
+    require_effective_systemd_assignment piccolod.service TasksMax 15% "effective piccolod finite task budget"
+    require_effective_systemd_assignment piccolod.service WatchdogSec 60 "effective piccolod service watchdog"
+    require_effective_systemd_assignment piccolod.service KillMode control-group "effective piccolod helper cgroup cleanup"
+    require_file usr/lib/systemd/system/piccolod-start-limit-recovery.service "piccolod start-limit recovery unit"
+    require_executable usr/libexec/piccolod-start-limit-recovery "piccolod start-limit recovery helper"
+    require_assignment usr/lib/systemd/system/piccolod-start-limit-recovery.service ConditionPathExists /usr/lib/systemd/system/health-checker.service "piccolod recovery requires boot health"
+    require_assignment usr/lib/systemd/system/piccolod-start-limit-recovery.service After health-checker.service "piccolod recovery waits for boot health"
+    require_assignment usr/lib/systemd/system/piccolod-start-limit-recovery.service FailureAction reboot "piccolod recovery failure fallback"
+    require_assignment usr/lib/systemd/system/piccolod-start-limit-recovery.service Type oneshot "piccolod recovery execution type"
+    require_assignment usr/lib/systemd/system/piccolod-start-limit-recovery.service ExecStart /usr/libexec/piccolod-start-limit-recovery "piccolod recovery helper command"
+    require_assignment usr/lib/systemd/system/piccolod-start-limit-recovery.service TimeoutStartSec '5min 15s' "piccolod recovery deadline"
+    require_effective_systemd_assignment piccolod-start-limit-recovery.service ConditionPathExists /usr/lib/systemd/system/health-checker.service "effective piccolod recovery boot-health condition" Unit
+    require_effective_systemd_assignment piccolod-start-limit-recovery.service After health-checker.service "effective piccolod recovery boot-health ordering" Unit
+    require_effective_systemd_assignment piccolod-start-limit-recovery.service FailureAction reboot "effective piccolod recovery failure fallback" Unit
+    require_effective_systemd_assignment piccolod-start-limit-recovery.service Type oneshot "effective piccolod recovery execution type"
+    require_effective_systemd_assignment piccolod-start-limit-recovery.service ExecStart /usr/libexec/piccolod-start-limit-recovery "effective piccolod recovery helper command"
+    require_effective_systemd_assignment piccolod-start-limit-recovery.service TimeoutStartSec '5min 15s' "effective piccolod recovery deadline"
+    require_regex usr/libexec/piccolod-start-limit-recovery 'MONITOR_UNIT.*piccolod[.]service' "piccolod recovery scopes systemd failure dispatch"
+    require_regex usr/libexec/piccolod-start-limit-recovery 'MONITOR_SERVICE_RESULT' "piccolod recovery requires a service result"
+    require_regex usr/libexec/piccolod-start-limit-recovery 'ActiveState.*InvocationID.*Result' "piccolod recovery reads one boot-health snapshot"
+    require_regex usr/libexec/piccolod-start-limit-recovery 'systemctl_bin.*--no-block reboot' "piccolod recovery requests a normal reboot"
     require_same_file usr/lib/firewalld/zones/piccolo.xml packages/piccolo-os-support/piccolo.xml "firewalld piccolo zone"
     require_regex usr/lib/firewalld/zones/piccolo.xml '<zone target="%%REJECT%%">' "firewalld rejects unmatched traffic"
     require_regex usr/lib/firewalld/zones/piccolo.xml '<rule family="ipv4" priority="32767">' "firewalld IPv4 TCP reset fallback"
@@ -675,7 +715,7 @@ esac
 check_rpm_package_installed piccolo-os-support
 check_rpm_package_min_version piccolo-os-support 0.3.14
 check_rpm_package_installed piccolod
-check_rpm_package_min_version piccolod 0.2.39
+check_rpm_package_min_version piccolod 0.2.40
 check_snapper_policy
 check_config_sh_canaries
 check_support_package_static_files
