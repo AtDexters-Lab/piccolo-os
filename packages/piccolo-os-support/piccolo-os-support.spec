@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.14
+Version:        0.3.15
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -29,6 +29,7 @@ Source22:       piccolo-firewalld-policy.sh
 Source23:       piccolo-bootstrap-dns.conf
 Source24:       piccolo-bootstrap-dns.sh
 Source25:       piccolo-user-session-oom.conf
+Source26:       piccolo-build-key-import.conf
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -61,6 +62,9 @@ BuildRequires:  snapper
 # coordinated hierarchy. Refuse an image that contains only the OS half.
 Requires:       piccolod >= 0.2.39
 Requires:       firewalld
+# The timer drop-in below extends units and an importer owned by this exact
+# package; the virtual build-key baseline alone does not guarantee that API.
+Requires:       openSUSE-build-key
 Requires(post): snapper
 
 # --- Flattened from patterns-microos-basesystem (microos_base) ---
@@ -243,6 +247,10 @@ install -D -m 755 %{SOURCE22} %{buildroot}%{_libexecdir}/piccolo/firewalld-polic
 # piccolod control plane at the stronger -500 protection in piccolod.service.
 install -D -m 644 %{SOURCE25} %{buildroot}%{_prefix}/lib/systemd/system/user@.service.d/90-piccolo-oom.conf
 
+# 21. Seed the upstream build-key import timer on appliances where the import
+# service has never run. The upstream helper disables the timer after success.
+install -D -m 644 %{SOURCE26} %{buildroot}%{_prefix}/lib/systemd/system/openSUSE-build-key-import.timer.d/piccolo.conf
+
 %check
 # Validate the firewall zone XML
 xmllint --noout %{buildroot}%{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -320,6 +328,11 @@ grep -Eq '^[[:space:]]*TimeoutStartSec[[:space:]]*=[[:space:]]*5min[[:space:]]*$
 USER_OOM_DROPIN=%{buildroot}%{_prefix}/lib/systemd/system/user@.service.d/90-piccolo-oom.conf
 grep -Eq '^\[Service\]$' "$USER_OOM_DROPIN"
 grep -Eq '^[[:space:]]*OOMScoreAdjust[[:space:]]*=[[:space:]]*-250[[:space:]]*$' "$USER_OOM_DROPIN"
+
+# Validate the first build-key import timer activation.
+BUILD_KEY_IMPORT_DROPIN=%{buildroot}%{_prefix}/lib/systemd/system/openSUSE-build-key-import.timer.d/piccolo.conf
+grep -Eq '^\[Timer\]$' "$BUILD_KEY_IMPORT_DROPIN"
+grep -Eq '^[[:space:]]*OnActiveSec[[:space:]]*=[[:space:]]*5min[[:space:]]*$' "$BUILD_KEY_IMPORT_DROPIN"
 
 %post
 # 1. Mask physical/serial consoles to prevent login
@@ -526,9 +539,15 @@ fi
 %{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
 %dir %{_prefix}/lib/systemd/system/user@.service.d
 %{_prefix}/lib/systemd/system/user@.service.d/90-piccolo-oom.conf
+%dir %{_prefix}/lib/systemd/system/openSUSE-build-key-import.timer.d
+%{_prefix}/lib/systemd/system/openSUSE-build-key-import.timer.d/piccolo.conf
 %dir /var/lib/piccolo
 
 %changelog
+* Thu Jul 23 2026 Piccolo Team <dev@piccolo.local> 0.3.15-0
+- Seed the upstream openSUSE build-key import timer so refreshed distribution
+  signing keys reach the RPM database on appliances after package updates.
+
 * Sat Jul 18 2026 Piccolo Team <dev@piccolo.local> 0.3.14-0
 - Protect user managers at OOMScoreAdjust=-250 so piccolod can recover app
   sessions after workload pressure without equating them to the control plane.

@@ -521,6 +521,11 @@ check_firewalld_policy() {
     fi
 }
 
+check_build_key_import_seed() {
+    require_file var/lib/openSUSE-build-key/imported "pending build-key import marker"
+    require_enabled_unit openSUSE-build-key-import.timer timers.target
+}
+
 check_boot_profile() {
     local ignition_platform=
 
@@ -583,6 +588,16 @@ check_support_package_static_files() {
     require_executable usr/sbin/runuser "runuser user-bus probe helper"
     require_same_file usr/lib/systemd/system/user@.service.d/90-piccolo-oom.conf packages/piccolo-os-support/piccolo-user-session-oom.conf "user manager OOM policy"
     require_assignment usr/lib/systemd/system/user@.service.d/90-piccolo-oom.conf OOMScoreAdjust -250 "user manager OOM protection"
+    require_same_file usr/lib/systemd/system/openSUSE-build-key-import.timer.d/piccolo.conf packages/piccolo-os-support/piccolo-build-key-import.conf "build-key import timer seed"
+    require_assignment usr/lib/systemd/system/openSUSE-build-key-import.timer.d/piccolo.conf OnActiveSec 5min "build-key first import activation"
+    require_file usr/lib/systemd/system/openSUSE-build-key-import.timer "upstream build-key import timer"
+    require_assignment usr/lib/systemd/system/openSUSE-build-key-import.timer OnUnitActiveSec 5min "upstream build-key import retry interval"
+    require_file usr/lib/systemd/system/openSUSE-build-key-import.service "upstream build-key import service"
+    require_assignment usr/lib/systemd/system/openSUSE-build-key-import.service Type oneshot "upstream build-key import service type"
+    require_assignment usr/lib/systemd/system/openSUSE-build-key-import.service ExecStart /usr/sbin/import-openSUSE-build-key "upstream build-key importer command"
+    require_executable usr/sbin/import-openSUSE-build-key "upstream build-key importer"
+    require_effective_systemd_assignment openSUSE-build-key-import.timer OnActiveSec 5min "effective build-key first import activation" Timer
+    require_effective_systemd_assignment openSUSE-build-key-import.timer OnUnitActiveSec 5min "effective build-key import retry interval" Timer
     require_assignment usr/lib/systemd/system/piccolod.service OOMScoreAdjust -500 "piccolod control-plane OOM protection"
     require_assignment usr/lib/systemd/system/piccolod.service StartLimitIntervalSec 900 "piccolod bounded start interval"
     require_assignment usr/lib/systemd/system/piccolod.service StartLimitBurst 3 "piccolod bounded start burst"
@@ -674,6 +689,7 @@ check_support_package_static_files() {
 
 check_support_package_post_effects() {
     check_firewalld_policy
+    check_build_key_import_seed
     require_enabled_unit firewalld.service multi-user.target
     require_unit_link health-checker.service boot-complete.target.requires "health-checker.service required by boot-complete.target"
     require_unit_link health-checker.service default.target.wants "health-checker.service wanted by default.target"
@@ -713,7 +729,7 @@ case "$arch" in
 esac
 
 check_rpm_package_installed piccolo-os-support
-check_rpm_package_min_version piccolo-os-support 0.3.14
+check_rpm_package_min_version piccolo-os-support 0.3.15
 check_rpm_package_installed piccolod
 check_rpm_package_min_version piccolod 0.2.40
 check_snapper_policy
