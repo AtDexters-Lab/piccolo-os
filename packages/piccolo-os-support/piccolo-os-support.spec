@@ -1,5 +1,5 @@
 Name:           piccolo-os-support
-Version:        0.3.15
+Version:        0.3.16
 Release:        0
 Summary:        Piccolo OS policy/meta package
 License:        AGPL-3.0-or-later
@@ -29,7 +29,7 @@ Source22:       piccolo-firewalld-policy.sh
 Source23:       piccolo-bootstrap-dns.conf
 Source24:       piccolo-bootstrap-dns.sh
 Source25:       piccolo-user-session-oom.conf
-Source26:       piccolo-build-key-import.conf
+Source26:       piccolo-build-key-reconcile.sh
 
 # ==============================================================================
 # KEY ROTATION SOP (STANDARD OPERATING PROCEDURE)
@@ -37,20 +37,22 @@ Source26:       piccolo-build-key-import.conf
 # CRITICAL: This package is the "Key of Keys". If the GPG key expires before
 # users have the new one, the fleet is bricked (updates will fail validation).
 #
-# STRATEGY: Rotate & Overlap (File-Based Trust)
-# 1. 3 months before expiry (Current Key Expires: 2028-01-23):
-#    - Generate/Extend key in OBS.
-#    - Download new key to 'piccolo-os.key.new'.
-#    - Add it as Source3.
+# STRATEGY: Renew In Place or Rotate & Overlap (File-Based Trust)
+# 1. 3 months before expiry (Current Key Expires: 2028-02-23), a
+#    same-fingerprint extension replaces Source2 in place and ships signed by
+#    the current key. Do not ship both certificate versions.
+# 2. For a new-fingerprint rotation:
+#    - Download it as 'piccolo-os.key.new' and add the next unused Source number.
 #    - Update %%install to ship BOTH keys to /etc/pki/rpm-gpg/.
 #    - Update %%install to list BOTH keys in the .repo file:
 #      gpgkey=file:///etc/pki/rpm-gpg/KEY-OLD
 #             file:///etc/pki/rpm-gpg/KEY-NEW
 #    - Ship this update signed by the OLD key.
-# 2. Once fleet has updated:
+#    - The Tukit plugin imports both package-shipped keys into the snapshot RPMDB.
+# 3. Once fleet has updated:
 #    - Switch OBS to sign metadata with the NEW key.
-#    - Zypper will automatically trust the new key because the file exists locally
-#      and is referenced in the repo config. No 'rpm --import' needed.
+#    - In a later cleanup release, remove the OLD file/repo reference and
+#      explicitly delete its exact retired gpg-pubkey RPMDB entry.
 # ==============================================================================
 
 BuildRequires:  systemd
@@ -62,9 +64,10 @@ BuildRequires:  snapper
 # coordinated hierarchy. Refuse an image that contains only the OS half.
 Requires:       piccolod >= 0.2.39
 Requires:       firewalld
-# The timer drop-in below extends units and an importer owned by this exact
-# package; the virtual build-key baseline alone does not guarantee that API.
+# The transactional reconciler reads key files owned by this exact package.
+# The virtual build-key baseline alone does not guarantee that file API.
 Requires:       openSUSE-build-key
+Requires:       gpg2
 Requires(post): snapper
 
 # --- Flattened from patterns-microos-basesystem (microos_base) ---
@@ -116,7 +119,9 @@ Requires:       vim-small
 Requires:       grub2-snapper-plugin
 
 # --- Flattened from patterns-microos-base-zypper ---
-Requires:       transactional-update
+# Tukit 5.1 made plugin failures transaction-fatal. Key reconciliation must
+# never be a best-effort hook.
+Requires:       transactional-update >= 5.1
 Requires:       transactional-update-zypp-config
 Requires:       zypp-boot-plugin
 Requires:       zypper
@@ -247,9 +252,9 @@ install -D -m 755 %{SOURCE22} %{buildroot}%{_libexecdir}/piccolo/firewalld-polic
 # piccolod control plane at the stronger -500 protection in piccolod.service.
 install -D -m 644 %{SOURCE25} %{buildroot}%{_prefix}/lib/systemd/system/user@.service.d/90-piccolo-oom.conf
 
-# 21. Seed the upstream build-key import timer on appliances where the import
-# service has never run. The upstream helper disables the timer after success.
-install -D -m 644 %{SOURCE26} %{buildroot}%{_prefix}/lib/systemd/system/openSUSE-build-key-import.timer.d/piccolo.conf
+# 21. Reconcile package-shipped signing-key certificates inside Tukit's writable
+# snapshot before and after transactional commands.
+install -D -m 755 %{SOURCE26} %{buildroot}%{_prefix}/lib/tukit/plugins/50-piccolo-build-key-reconcile
 
 %check
 # Validate the firewall zone XML
@@ -329,10 +334,13 @@ USER_OOM_DROPIN=%{buildroot}%{_prefix}/lib/systemd/system/user@.service.d/90-pic
 grep -Eq '^\[Service\]$' "$USER_OOM_DROPIN"
 grep -Eq '^[[:space:]]*OOMScoreAdjust[[:space:]]*=[[:space:]]*-250[[:space:]]*$' "$USER_OOM_DROPIN"
 
-# Validate the first build-key import timer activation.
-BUILD_KEY_IMPORT_DROPIN=%{buildroot}%{_prefix}/lib/systemd/system/openSUSE-build-key-import.timer.d/piccolo.conf
-grep -Eq '^\[Timer\]$' "$BUILD_KEY_IMPORT_DROPIN"
-grep -Eq '^[[:space:]]*OnActiveSec[[:space:]]*=[[:space:]]*5min[[:space:]]*$' "$BUILD_KEY_IMPORT_DROPIN"
+# Validate the transactional build-key reconciler and its supported Tukit stages.
+BUILD_KEY_RECONCILER=%{buildroot}%{_prefix}/lib/tukit/plugins/50-piccolo-build-key-reconcile
+bash -n "$BUILD_KEY_RECONCILER"
+"$BUILD_KEY_RECONCILER" init-pre
+grep -q 'init-post|resume-post|execute-post|callExt-post' "$BUILD_KEY_RECONCILER"
+grep -q '/run/piccolo-build-key-reconcile.bypass' "$BUILD_KEY_RECONCILER"
+cmp -s %{SOURCE2} %{buildroot}%{_sysconfdir}/pki/rpm-gpg/RPM-GPG-KEY-piccolo-os
 
 %post
 # 1. Mask physical/serial consoles to prevent login
@@ -363,7 +371,11 @@ grep -Eq '^[[:space:]]*OnActiveSec[[:space:]]*=[[:space:]]*5min[[:space:]]*$' "$
 # KIWI fresh images are re-seeded in disk.sh after KIWI removes resolv.conf.
 /usr/libexec/piccolo/bootstrap-dns.sh apply /etc/resolv.conf
 
-# 7. Clean up removed net-watchdog on upgrade (files removed in 0.3.2).
+# 7. The upstream live-root importer cannot write MicroOS's read-only RPM
+# database. Tukit's snapshot plugin above owns this responsibility instead.
+/usr/bin/systemctl --root=/ --no-reload mask openSUSE-build-key-import.timer
+
+# 8. Clean up removed net-watchdog on upgrade (files removed in 0.3.2).
 #    disable (--root=/) is authoritative and works in chroot/transactional-update.
 #    stop is best-effort — only takes effect on a live (non-chroot) system.
 if [ $1 -ge 2 ]; then
@@ -376,12 +388,12 @@ if [ $1 -ge 2 ]; then
     # piccolod cleans it up on first run.
 fi
 
-# 8. Explicitly enable health-checker for boot-time rollback.
+# 9. Explicitly enable health-checker for boot-time rollback.
 # MicroOS preset should enable this, but we make it explicit since
 # this service is a critical safety net.
 /usr/bin/systemctl --root=/ --no-reload enable health-checker.service 2>/dev/null || :
 
-# 9. Enable clock epoch service and periodic save timer
+# 10. Enable clock epoch service and periodic save timer
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-clock-epoch.service
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-clock-epoch-save.timer
 # Seed epoch file so the first reboot after upgrade is protected.
@@ -391,7 +403,7 @@ fi
 mkdir -p /var/lib/piccolo
 date +%s > /var/lib/piccolo/clock-epoch 2>/dev/null || :
 
-# 10. Rootless Podman prerequisites (RFC 20260206)
+# 11. Rootless Podman prerequisites (RFC 20260206)
 # Create piccolo-runtime user for rootless Podman execution.
 if ! getent passwd piccolo-runtime > /dev/null 2>&1; then
     useradd --system --home-dir /home/piccolo-runtime --create-home \
@@ -407,10 +419,10 @@ fi
 mkdir -p /var/lib/systemd/linger
 touch /var/lib/systemd/linger/piccolo-runtime
 
-# 11. Enable watchdog driver validation at boot
+# 12. Enable watchdog driver validation at boot
 /usr/bin/systemctl --root=/ --no-reload enable piccolo-watchdog-check.service
 
-# 12. Prefer cold reboot semantics on x86 appliances.
+# 13. Prefer cold reboot semantics on x86 appliances.
 # Reboots are rare for Piccolo OS devices; reliability matters more than the
 # speed difference between warm and cold-style firmware restart paths.
 piccolo_regenerate_sdboot_entries() {
@@ -479,6 +491,9 @@ if [ $1 -eq 0 ]; then
     /usr/bin/systemctl --root=/ unmask \
         sleep.target suspend.target hibernate.target \
         hybrid-sleep.target suspend-then-hibernate.target 2>/dev/null || :
+    # Restore the upstream build-key timer policy when Piccolo's transactional
+    # reconciler is removed.
+    /usr/bin/systemctl --root=/ unmask openSUSE-build-key-import.timer 2>/dev/null || :
     # Note: health-checker.service is intentionally NOT disabled on uninstall.
     # MicroOS presets enable it by default; our %post enable is belt-and-suspenders.
     # Disable clock epoch service and timer (from %post)
@@ -500,7 +515,9 @@ fi
 # Own the specific key file
 %dir %{_sysconfdir}/pki
 %dir %{_sysconfdir}/pki/rpm-gpg
-%config(noreplace) %{_sysconfdir}/pki/rpm-gpg/RPM-GPG-KEY-piccolo-os
+# Key certificates are appliance policy, not operator configuration. Package
+# updates must replace an older certificate instead of leaving it as .rpmnew.
+%config %{_sysconfdir}/pki/rpm-gpg/RPM-GPG-KEY-piccolo-os
 %dir %{_prefix}/lib/firewalld
 %dir %{_prefix}/lib/firewalld/zones
 %{_prefix}/lib/firewalld/zones/piccolo.xml
@@ -539,11 +556,15 @@ fi
 %{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
 %dir %{_prefix}/lib/systemd/system/user@.service.d
 %{_prefix}/lib/systemd/system/user@.service.d/90-piccolo-oom.conf
-%dir %{_prefix}/lib/systemd/system/openSUSE-build-key-import.timer.d
-%{_prefix}/lib/systemd/system/openSUSE-build-key-import.timer.d/piccolo.conf
+%{_prefix}/lib/tukit/plugins/50-piccolo-build-key-reconcile
 %dir /var/lib/piccolo
 
 %changelog
+* Thu Jul 23 2026 Piccolo Team <dev@piccolo.local> 0.3.16-0
+- Reconcile package-shipped openSUSE and Piccolo key certificates inside
+  writable transactional snapshots.
+- Mask the ineffective live-root key-import timer.
+
 * Thu Jul 23 2026 Piccolo Team <dev@piccolo.local> 0.3.15-0
 - Seed the upstream openSUSE build-key import timer so refreshed distribution
   signing keys reach the RPM database on appliances after package updates.

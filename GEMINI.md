@@ -67,8 +67,12 @@ The OS is designed as a locked-down appliance:
 
 Since there is no automated CI yet, every change requires manual validation:
 1.  **Build:** Run the build script. Ensure no RPM install errors (especially in `%post`).
-2.  **Boot:** Start the VM.
-3.  **Verify:**
+2.  **Signing-key lifecycle:** Run the Tumbleweed snapshot regression:
+    ```bash
+    ./scripts/validate-build-key-reconcile.sh
+    ```
+3.  **Boot:** Start the VM.
+4.  **Verify:**
     - **Console:** Is it quiet (no logs/login prompt)?
     - **Reachability:** Is `http://piccolo.local` reachable?
     - **Security:** Scan with `nmap` to verify firewall policy:
@@ -80,7 +84,6 @@ Since there is no automated CI yet, every change requires manual validation:
 ## 7. Critical Maintenance
 
 - **GPG Key Expiry:**
-    - The repository signing key (`packages/piccolo-os-support/piccolo-os.key`) expires on **2028-01-23**.
+    - The repository signing key (`packages/piccolo-os-support/piccolo-os.key`) expires on **2028-02-23**.
     - **Action:** If the current date is within 3 months of this date, YOU MUST initiate the "Rotate & Overlap" SOP defined in `piccolo-os-support.spec`.
     - **Check:** Periodically verify with `gpg --show-keys packages/piccolo-os-support/piccolo-os.key`.
-
