@@ -556,6 +556,8 @@ fi
 %{_prefix}/lib/systemd/system/piccolo-watchdog-check.service
 %dir %{_prefix}/lib/systemd/system/user@.service.d
 %{_prefix}/lib/systemd/system/user@.service.d/90-piccolo-oom.conf
+%dir %{_prefix}/lib/tukit
+%dir %{_prefix}/lib/tukit/plugins
 %{_prefix}/lib/tukit/plugins/50-piccolo-build-key-reconcile
 %dir /var/lib/piccolo
 
