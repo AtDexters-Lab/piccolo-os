@@ -609,7 +609,7 @@ check_support_package_static_files() {
     require_assignment usr/lib/systemd/system/piccolod.service RestartSec 5 "piccolod bounded restart delay"
     require_assignment usr/lib/systemd/system/piccolod.service TasksMax 15% "piccolod finite task budget"
     require_assignment usr/lib/systemd/system/piccolod.service WatchdogSec 60 "piccolod service watchdog"
-    require_assignment usr/lib/systemd/system/piccolod.service KillMode control-group "piccolod helper cgroup cleanup"
+    require_assignment usr/lib/systemd/system/piccolod.service KillMode mixed "piccolod graceful-main/final-cgroup cleanup"
     require_effective_systemd_assignment user@.service OOMScoreAdjust -250 "effective user manager OOM protection"
     require_effective_systemd_assignment piccolod.service OOMScoreAdjust -500 "effective piccolod control-plane OOM protection"
     require_effective_systemd_assignment piccolod.service StartLimitIntervalSec 900 "effective piccolod bounded start interval" Unit
@@ -621,7 +621,7 @@ check_support_package_static_files() {
     require_effective_systemd_assignment piccolod.service RestartSec 5 "effective piccolod bounded restart delay"
     require_effective_systemd_assignment piccolod.service TasksMax 15% "effective piccolod finite task budget"
     require_effective_systemd_assignment piccolod.service WatchdogSec 60 "effective piccolod service watchdog"
-    require_effective_systemd_assignment piccolod.service KillMode control-group "effective piccolod helper cgroup cleanup"
+    require_effective_systemd_assignment piccolod.service KillMode mixed "effective piccolod graceful-main/final-cgroup cleanup"
     require_file usr/lib/systemd/system/piccolod-start-limit-recovery.service "piccolod start-limit recovery unit"
     require_executable usr/libexec/piccolod-start-limit-recovery "piccolod start-limit recovery helper"
     require_assignment usr/lib/systemd/system/piccolod-start-limit-recovery.service ConditionPathExists /usr/lib/systemd/system/health-checker.service "piccolod recovery requires boot health"
